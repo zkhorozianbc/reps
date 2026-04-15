@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 from reps.llm.base import LLMInterface
 from reps.llm.openrouter import OpenRouterLLM
 from reps.llm.anthropic import AnthropicLLM
-from openevolve.config import LLMModelConfig
+from reps.config import LLMModelConfig
 
 logger = logging.getLogger(__name__)
 
