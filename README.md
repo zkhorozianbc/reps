@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/python-3.12-blue" alt="Python 3.12">
 </p>
 
-REPS extends [OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve) with self-improving meta-cognition for evolutionary code search. Instead of blindly sampling LLM mutations, the controller reflects on what's working, diversifies search strategies, and steers compute toward productive directions.
+REPS extends [OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve) with adaptive meta-cognition for evolutionary code search. Between iterations, the controller reflects on which mutations worked, rebalances search strategies, and steers compute based on distance to known targets.
 
 ## Result: Circle Packing n=26
 
@@ -20,7 +20,7 @@ REPS extends [OpenEvolve](https://github.com/algorithmicsuperintelligence/openev
 | FICO Xpress Solver | 2.6359155 | — | — |
 | **REPS** | **2.6359831** | **100** | **claude-sonnet-4.6** |
 
-Verified against [DeepMind's official validator](https://colab.research.google.com/github/google-deepmind/alphaevolve_repository_of_problems/blob/main/experiments/packing_circles_max_sum_of_radii/packing_circle_max_sum_of_radii.ipynb) (`verify_circles`). Full precision: **2.6359830849173465**.
+Verified against [DeepMind's official validator](https://colab.research.google.com/github/google-deepmind/alphaevolve_repository_of_problems/blob/main/experiments/packing_circles_max_sum_of_radii/packing_circle_max_sum_of_radii.ipynb). Full precision: **2.6359830849173465**.
 
 ![REPS Circle Packing](experiment/results/circle_sonnet_reps/packing.png)
 
