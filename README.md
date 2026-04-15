@@ -74,7 +74,7 @@ REPS modules run in the controller process at batch boundaries. Workers are stat
 ## Setup
 
 ```bash
-cd openevolve_src
+cd openevolve
 uv venv .venv --python 3.12
 uv pip install -e ".[dev]"
 ```
@@ -91,7 +91,7 @@ uv run python openevolve-run.py \
   --iterations 100
 
 # REPS
-cd openevolve_src
+cd openevolve
 uv run python openevolve-run.py \
   examples/circle_packing/initial_program.py \
   examples/circle_packing/evaluator.py \
@@ -111,7 +111,7 @@ All configs are in `experiment/configs/`. The baseline and REPS configs are iden
 ## Tests
 
 ```bash
-cd openevolve_src
+cd openevolve
 uv run python -m pytest tests/ --ignore=tests/integration
 # 350 passed
 ```

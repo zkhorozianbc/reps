@@ -6,7 +6,7 @@
 # Requirements:
 #   - OPENROUTER_API_KEY set in environment
 #   - openevolve_clean/ = unmodified git clone
-#   - openevolve_src/   = REPS-modified clone
+#   - openevolve/       = REPS-modified clone
 #
 # Usage: bash experiment/run_experiment.sh
 
@@ -14,7 +14,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CLEAN="$ROOT/openevolve_clean"
-REPS="$ROOT/openevolve_src"
+REPS="$ROOT/openevolve"
 CONFIGS="$ROOT/experiment/configs"
 RESULTS="$ROOT/experiment/results"
 

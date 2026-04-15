@@ -3,9 +3,9 @@
 __pycache__/
 *.pyc
 openevolve_clean/
-openevolve_src/.venv/
-openevolve_src/results/
-uv.lock
+openevolve/.venv/
+openevolve/results/
+openevolve/openevolve_output/
 *.egg-info/
 
 # Experiment results — keep configs and best programs, skip logs/checkpoints
