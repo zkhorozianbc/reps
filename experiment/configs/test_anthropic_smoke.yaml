@@ -1,0 +1,62 @@
+# Smoke test: 3 iterations, Anthropic provider, circle packing n=26
+harness: reps
+provider: anthropic
+max_iterations: 3
+log_level: INFO
+random_seed: 42
+
+llm:
+  primary_model: "anthropic/claude-sonnet-4-6"
+  primary_model_weight: 1.0
+  api_key: "${ANTHROPIC_API_KEY}"
+  temperature: 0.7
+  max_tokens: 8192
+  timeout: 120
+
+prompt:
+  system_message: |
+    You are an expert at circle packing. Improve the construct_packing function
+    to maximize the sum of radii for 26 circles in a unit square [0,1]x[0,1].
+    The function must return (centers, radii, sum_radii) where centers is (26,2)
+    and radii is (26,).
+  num_top_programs: 2
+
+database:
+  population_size: 20
+  num_islands: 2
+
+evaluator:
+  timeout: 60
+  parallel_evaluations: 1
+
+diff_based_evolution: false
+
+reps:
+  enabled: true
+  batch_size: 3
+
+  reflection:
+    enabled: false
+
+  revisitation:
+    enabled: false
+
+  workers:
+    types: ["exploiter", "explorer"]
+    initial_allocation:
+      exploiter: 0.7
+      explorer: 0.3
+
+  convergence:
+    enabled: true
+    window_size: 5
+
+  contracts:
+    enabled: false
+
+  sota:
+    enabled: true
+    target_score: 2.635
+
+  annotations:
+    enabled: false
