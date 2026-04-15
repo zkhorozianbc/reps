@@ -4,12 +4,15 @@ Entry point for running experiments with either the REPS harness or vanilla Open
 
 Usage:
     reps-run <initial_program> <evaluator> --config <config.yaml> [--output <dir>] [--iterations N]
+
+Output directories are auto-versioned: <output>/run_001, run_002, etc.
 """
 import argparse
 import asyncio
 import logging
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from reps.config import Config, load_config
@@ -18,6 +21,23 @@ from reps.config import Config, load_config
 def load_experiment_config(config_path: str) -> Config:
     """Load experiment config from YAML."""
     return Config.from_yaml(config_path)
+
+
+def _next_run_dir(base: str) -> str:
+    """Create a versioned run directory: base/run_001, run_002, etc."""
+    base_path = Path(base)
+    base_path.mkdir(parents=True, exist_ok=True)
+
+    existing = sorted(base_path.glob("run_*"))
+    if existing:
+        last_num = max(int(d.name.split("_")[1]) for d in existing if d.name.split("_")[1].isdigit())
+        next_num = last_num + 1
+    else:
+        next_num = 1
+
+    run_dir = base_path / f"run_{next_num:03d}"
+    run_dir.mkdir()
+    return str(run_dir)
 
 
 async def run_reps(config: Config, initial_program: str, evaluator: str, output_dir: str):
@@ -47,7 +67,7 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
     # Evaluate the seed program so it enters the database with real metrics
     from reps.evaluator import Evaluator
     seed_evaluator = Evaluator(config.evaluator, evaluator)
-    seed_metrics = asyncio.run(seed_evaluator.evaluate_program(initial_code, "initial"))
+    seed_metrics = await seed_evaluator.evaluate_program(initial_code, "initial")
     logger.info(f"Seed program metrics: {seed_metrics}")
     if not seed_metrics or seed_metrics.get("combined_score", 0) == 0:
         logger.warning("Seed program scored 0 — check that it runs correctly with the evaluator")
@@ -104,7 +124,7 @@ def main():
     parser.add_argument("initial_program", help="Path to initial program")
     parser.add_argument("evaluator", help="Path to evaluator script")
     parser.add_argument("--config", required=True, help="Path to YAML config")
-    parser.add_argument("--output", default="reps_output", help="Output directory")
+    parser.add_argument("--output", default="reps_output", help="Output base directory")
     parser.add_argument("--iterations", type=int, default=None, help="Override max_iterations")
     args = parser.parse_args()
 
@@ -112,10 +132,14 @@ def main():
     if args.iterations:
         config.max_iterations = args.iterations
 
+    # Auto-version the output directory
+    run_dir = _next_run_dir(args.output)
+    print(f"Output: {run_dir}")
+
     if config.harness == "openevolve":
-        run_openevolve(args.config, args.initial_program, args.evaluator, args.output, config.max_iterations)
+        run_openevolve(args.config, args.initial_program, args.evaluator, run_dir, config.max_iterations)
     else:
-        asyncio.run(run_reps(config, args.initial_program, args.evaluator, args.output))
+        asyncio.run(run_reps(config, args.initial_program, args.evaluator, run_dir))
 
 
 if __name__ == "__main__":
