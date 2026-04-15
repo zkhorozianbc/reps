@@ -81,47 +81,51 @@ Controller (single process, stateful)
 
 REPS modules run in the controller process at batch boundaries. Workers are stateless — they execute whatever config they receive. The underlying OpenEvolve LLM module, evaluator, and database are unmodified.
 
-## Setup
+## Quickstart
+
+Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), an [OpenRouter](https://openrouter.ai/) API key.
 
 ```bash
-cd openevolve
+git clone https://github.com/zkhorozianbc/reps.git
+cd reps/openevolve
 uv venv .venv --python 3.12
 uv pip install -e ".[dev]"
 ```
 
-## Running
+Set your API key:
 
 ```bash
-# Baseline (unmodified OpenEvolve)
-cd openevolve_clean
-uv run python openevolve-run.py \
-  examples/circle_packing/initial_program.py \
-  examples/circle_packing/evaluator.py \
-  --config <config.yaml> \
-  --iterations 100
+export OPENROUTER_API_KEY=sk-or-...
+```
 
-# REPS
-cd openevolve
+Run REPS on circle packing (n=26):
+
+```bash
 uv run python openevolve-run.py \
   examples/circle_packing/initial_program.py \
   examples/circle_packing/evaluator.py \
-  --config <reps_config.yaml> \
+  --config ../experiment/configs/circle_sonnet_reps.yaml \
   --iterations 100
 ```
 
-## Experiment Configs
+Results go to `openevolve_output/`. Best program is in `openevolve_output/best/`.
 
-All configs are in `experiment/configs/`. The baseline and REPS configs are identical except for the `reps:` section — verified by YAML parse comparison.
+## Configs
 
-- `circle_base.yaml` — shipped OpenEvolve config, only api_base changed for OpenRouter
-- `circle_reps.yaml` — same + REPS features enabled
-- `circle_sonnet_base.yaml` — Sonnet 4.6 baseline
-- `circle_sonnet_reps.yaml` — Sonnet 4.6 + REPS
+All configs are in `experiment/configs/`. Each pair is identical except for the `reps:` section.
+
+| Config | Model | REPS |
+|---|---|---|
+| `circle_sonnet_base.yaml` | claude-sonnet-4.6 | off |
+| `circle_sonnet_reps.yaml` | claude-sonnet-4.6 | on |
+| `circle_base.yaml` | gemini-2.0-flash | off |
+| `circle_reps.yaml` | gemini-2.0-flash | on |
+
+All configs use OpenRouter as the API provider. To use a different provider, change `api_base` and `api_key` in the config.
 
 ## Tests
 
 ```bash
 cd openevolve
 uv run python -m pytest tests/ --ignore=tests/integration
-# 350 passed
 ```
