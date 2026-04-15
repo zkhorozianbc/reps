@@ -820,7 +820,7 @@ class ProcessParallelController:
                     if child_program.metrics:
                         metrics_str = ", ".join(
                             [
-                                f"{k}={v:.4f}" if isinstance(v, (int, float)) else f"{k}={v}"
+                                f"{k}={v}" if isinstance(v, (int, float)) else f"{k}={v}"
                                 for k, v in child_program.metrics.items()
                             ]
                         )
