@@ -236,8 +236,11 @@ def _run_iteration_worker(
             is_revisitation = reps_config.get("is_revisitation", False)
             second_parent_id = reps_config.get("second_parent_id")
 
-        # Determine diff mode: REPS generation_mode overrides global config
-        if reps_generation_mode == "full":
+        # Determine diff mode: worker generation_mode can only narrow, not widen.
+        # If global config disables diffs, no worker can force diff mode on.
+        if not _worker_config.diff_based_evolution:
+            use_diff = False
+        elif reps_generation_mode == "full":
             use_diff = False
         elif reps_generation_mode == "diff":
             use_diff = True
