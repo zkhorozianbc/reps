@@ -135,9 +135,15 @@ class OpenAILLM(LLMInterface):
         )
 
         # Check if this is an OpenAI reasoning model based on model name pattern
-        # This works for all endpoints (OpenAI, Azure, OptiLLM, OpenRouter, etc.)
+        # Strip provider prefix (e.g. "openai/") for OpenRouter-style model IDs
         model_lower = str(self.model).lower()
-        is_openai_reasoning_model = model_lower.startswith(OPENAI_REASONING_MODEL_PREFIXES)
+        model_base = model_lower.split("/")[-1] if "/" in model_lower else model_lower
+        is_openai_reasoning_model = model_base.startswith(OPENAI_REASONING_MODEL_PREFIXES)
+
+        # Detect OpenRouter by api_base
+        is_openrouter = self.api_base and "openrouter.ai" in self.api_base
+
+        reasoning_effort = kwargs.get("reasoning_effort", self.reasoning_effort)
 
         if is_openai_reasoning_model:
             # For OpenAI reasoning models
@@ -146,10 +152,13 @@ class OpenAILLM(LLMInterface):
                 "messages": formatted_messages,
                 "max_completion_tokens": kwargs.get("max_tokens", self.max_tokens),
             }
-            # Add optional reasoning parameters if provided
-            reasoning_effort = kwargs.get("reasoning_effort", self.reasoning_effort)
+            # Add reasoning parameters
             if reasoning_effort is not None:
-                params["reasoning_effort"] = reasoning_effort
+                if is_openrouter:
+                    # OpenRouter uses nested reasoning object via extra_body
+                    params["extra_body"] = {"reasoning": {"effort": reasoning_effort}}
+                else:
+                    params["reasoning_effort"] = reasoning_effort
             if "verbosity" in kwargs:
                 params["verbosity"] = kwargs["verbosity"]
         else:
@@ -162,10 +171,12 @@ class OpenAILLM(LLMInterface):
                 "max_tokens": kwargs.get("max_tokens", self.max_tokens),
             }
 
-            # Handle reasoning_effort for open source reasoning models.
-            reasoning_effort = kwargs.get("reasoning_effort", self.reasoning_effort)
+            # Handle reasoning_effort for open source reasoning models
             if reasoning_effort is not None:
-                params["reasoning_effort"] = reasoning_effort
+                if is_openrouter:
+                    params["extra_body"] = {"reasoning": {"effort": reasoning_effort}}
+                else:
+                    params["reasoning_effort"] = reasoning_effort
 
         # Add seed parameter for reproducibility if configured
         # Skip seed parameter for Google AI Studio endpoint as it doesn't support it
