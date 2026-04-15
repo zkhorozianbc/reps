@@ -131,7 +131,7 @@ class ReflectionEngine:
         best_code = best_prog.code[:3000] if best_prog else "(no best program yet)"
         best_score = 0.0
         if best_prog and best_prog.metrics:
-            from openevolve.utils.metrics_utils import safe_numeric_average
+            from reps.utils import safe_numeric_average
             best_score = best_prog.metrics.get(
                 "combined_score", safe_numeric_average(best_prog.metrics)
             )

@@ -101,7 +101,7 @@ class MetricsLogger:
             if database and database.best_program_id:
                 best_prog = database.get_best_program()
                 if best_prog and best_prog.metrics:
-                    from openevolve.utils.metrics_utils import safe_numeric_average
+                    from reps.utils import safe_numeric_average
                     best_db_score = best_prog.metrics.get(
                         "combined_score", safe_numeric_average(best_prog.metrics)
                     )
