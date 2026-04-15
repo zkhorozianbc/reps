@@ -1,4 +1,12 @@
-# REPS: Recursive Evolutionary Program Search
+<h1 align="center">REPS</h1>
+
+<p align="center">A self-improving evolutionary code search agent that reflects, diversifies, and steers.</p>
+
+<p align="center">
+  <a href="https://colab.research.google.com/github/google-deepmind/alphaevolve_repository_of_problems/blob/main/experiments/packing_circles_max_sum_of_radii/packing_circle_max_sum_of_radii.ipynb"><img src="https://img.shields.io/badge/circle%20packing%20n%3D26-2.6359831%20%E2%9C%93-brightgreen" alt="Circle Packing Score"></a>
+  <a href="https://github.com/algorithmicsuperintelligence/openevolve"><img src="https://img.shields.io/badge/built%20on-OpenEvolve-blue" alt="Built on OpenEvolve"></a>
+  <img src="https://img.shields.io/badge/python-3.12-blue" alt="Python 3.12">
+</p>
 
 REPS extends [OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve) with self-improving meta-cognition for evolutionary code search. Instead of blindly sampling LLM mutations, the controller reflects on what's working, diversifies search strategies, and steers compute toward productive directions.
 
