@@ -1,7 +1,8 @@
 """
-Tests for the REPS LLM layer: base interface, OpenRouter provider, and ensemble.
+Tests for the REPS LLM layer: base interface, OpenRouter provider, Anthropic provider, and ensemble.
 """
 
+import asyncio
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -9,6 +10,7 @@ from openevolve.config import LLMModelConfig
 
 from reps.llm.base import LLMInterface
 from reps.llm.openrouter import OpenRouterLLM
+from reps.llm.anthropic import AnthropicLLM
 from reps.llm.ensemble import LLMEnsemble
 
 
@@ -105,3 +107,147 @@ def test_ensemble_model_override_selection(mock_openai_cls):
     # A non-existent override should fall back to sampling (still returns a model)
     selected = ensemble._select_model(model="nonexistent/model")
     assert selected.model in ("openai/gpt-4o-mini", "openai/gpt-4o")
+
+
+# ---------------------------------------------------------------------------
+# AnthropicLLM
+# ---------------------------------------------------------------------------
+
+def _make_anthropic_cfg(**overrides) -> LLMModelConfig:
+    """Create an LLMModelConfig tailored for Anthropic testing.
+
+    The ``provider`` attribute is set post-init because the installed
+    openevolve dataclass doesn't declare it as a field yet.
+    """
+    provider = overrides.pop("provider", "anthropic")
+    defaults = dict(
+        name="anthropic/claude-sonnet-4-20250514",
+        api_base="https://api.anthropic.com",
+        api_key="test-anthropic-key",
+        system_message="You are a helpful assistant.",
+        temperature=0.7,
+        top_p=0.95,
+        max_tokens=1024,
+        timeout=30,
+        retries=2,
+        retry_delay=1,
+        weight=1.0,
+    )
+    defaults.update(overrides)
+    cfg = LLMModelConfig(**defaults)
+    cfg.provider = provider
+    return cfg
+
+
+@patch("reps.llm.anthropic.anthropic.Anthropic")
+def test_anthropic_provider_instantiation(mock_anthropic_cls):
+    """AnthropicLLM can be created with config."""
+    cfg = _make_anthropic_cfg()
+    provider = AnthropicLLM(cfg)
+
+    # Model name should have the prefix stripped
+    assert provider.model == "claude-sonnet-4-20250514"
+    assert provider.temperature == 0.7
+    assert provider.retries == 2
+    assert provider.api_key == "test-anthropic-key"
+    assert provider.last_usage == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    # Verify the Anthropic client was constructed
+    mock_anthropic_cls.assert_called_once()
+
+
+@patch("reps.llm.anthropic.anthropic.Anthropic")
+def test_anthropic_implements_interface(mock_anthropic_cls):
+    """AnthropicLLM is a subclass of LLMInterface."""
+    cfg = _make_anthropic_cfg()
+    provider = AnthropicLLM(cfg)
+
+    assert isinstance(provider, LLMInterface)
+    assert hasattr(provider, "generate")
+    assert hasattr(provider, "generate_with_context")
+    assert callable(provider.generate)
+    assert callable(provider.generate_with_context)
+
+
+@patch("reps.llm.anthropic.anthropic.Anthropic")
+def test_anthropic_generate_with_context(mock_anthropic_cls):
+    """Anthropic makes correct API call structure (system separate, messages list)."""
+    # Set up mock response
+    mock_usage = MagicMock()
+    mock_usage.input_tokens = 100
+    mock_usage.output_tokens = 50
+
+    mock_content_block = MagicMock()
+    mock_content_block.text = "Hello from Claude!"
+
+    mock_response = MagicMock()
+    mock_response.content = [mock_content_block]
+    mock_response.usage = mock_usage
+
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_response
+    mock_anthropic_cls.return_value = mock_client
+
+    cfg = _make_anthropic_cfg()
+    provider = AnthropicLLM(cfg)
+
+    result = asyncio.get_event_loop().run_until_complete(
+        provider.generate_with_context(
+            system_message="Be helpful.",
+            messages=[{"role": "user", "content": "Say hello"}],
+        )
+    )
+
+    assert result == "Hello from Claude!"
+    # Verify the API was called with system as a top-level param, not in messages
+    call_kwargs = mock_client.messages.create.call_args[1]
+    assert call_kwargs["system"] == "Be helpful."
+    assert call_kwargs["messages"] == [{"role": "user", "content": "Say hello"}]
+    assert call_kwargs["model"] == "claude-sonnet-4-20250514"
+
+
+@patch("reps.llm.anthropic.anthropic.Anthropic")
+def test_anthropic_model_name_stripping(mock_anthropic_cls):
+    """'anthropic/claude-sonnet-4.6' becomes 'claude-sonnet-4.6' for native API."""
+    cfg = _make_anthropic_cfg(name="anthropic/claude-sonnet-4.6")
+    provider = AnthropicLLM(cfg)
+    assert provider.model == "claude-sonnet-4.6"
+
+    # A name without a prefix should be left as-is
+    cfg2 = _make_anthropic_cfg(name="claude-haiku-3")
+    provider2 = AnthropicLLM(cfg2)
+    assert provider2.model == "claude-haiku-3"
+
+
+@patch("reps.llm.anthropic.anthropic.Anthropic")
+def test_anthropic_token_usage_normalization(mock_anthropic_cls):
+    """input_tokens/output_tokens normalized to prompt_tokens/completion_tokens."""
+    mock_usage = MagicMock()
+    mock_usage.input_tokens = 200
+    mock_usage.output_tokens = 75
+
+    mock_content_block = MagicMock()
+    mock_content_block.text = "response"
+
+    mock_response = MagicMock()
+    mock_response.content = [mock_content_block]
+    mock_response.usage = mock_usage
+
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_response
+    mock_anthropic_cls.return_value = mock_client
+
+    cfg = _make_anthropic_cfg()
+    provider = AnthropicLLM(cfg)
+
+    asyncio.get_event_loop().run_until_complete(
+        provider.generate_with_context(
+            system_message="System",
+            messages=[{"role": "user", "content": "Hi"}],
+        )
+    )
+
+    assert provider.last_usage == {
+        "prompt_tokens": 200,
+        "completion_tokens": 75,
+        "total_tokens": 275,
+    }

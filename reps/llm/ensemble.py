@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 
 from reps.llm.base import LLMInterface
 from reps.llm.openrouter import OpenRouterLLM
+from reps.llm.anthropic import AnthropicLLM
 from openevolve.config import LLMModelConfig
 
 logger = logging.getLogger(__name__)
@@ -21,10 +22,7 @@ class LLMEnsemble:
         self.models_cfg = models_cfg
 
         # Initialize models from the configuration
-        self.models = [
-            model_cfg.init_client(model_cfg) if model_cfg.init_client else OpenRouterLLM(model_cfg)
-            for model_cfg in models_cfg
-        ]
+        self.models = [self._create_model(model_cfg) for model_cfg in models_cfg]
 
         # Extract and normalize model weights
         self.weights = [model.weight for model in models_cfg]
@@ -54,6 +52,22 @@ class LLMEnsemble:
                 )
             )
             logger._ensemble_logged = True
+
+    @staticmethod
+    def _create_model(model_cfg: LLMModelConfig) -> LLMInterface:
+        """Dispatch model creation based on provider attribute.
+
+        Priority:
+        1. ``model_cfg.init_client`` callable (fully custom)
+        2. ``model_cfg.provider == "anthropic"`` -> AnthropicLLM
+        3. Default -> OpenRouterLLM (OpenAI-compatible)
+        """
+        if model_cfg.init_client:
+            return model_cfg.init_client(model_cfg)
+        provider = getattr(model_cfg, "provider", None)
+        if provider == "anthropic":
+            return AnthropicLLM(model_cfg)
+        return OpenRouterLLM(model_cfg)
 
     async def generate(self, prompt: str, **kwargs) -> str:
         """Generate text using a randomly selected model based on weights"""
