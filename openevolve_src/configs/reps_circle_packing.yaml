@@ -1,0 +1,90 @@
+# REPS Configuration for Circle Packing (n=26)
+# Target: AlphaEvolve's published result of 2.635
+
+max_iterations: 200
+random_seed: 42
+
+llm:
+  models:
+    - name: "gemini-2.5-flash"
+      api_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
+      api_key: "${OPENAI_API_KEY}"
+      weight: 0.5
+      temperature: 0.7
+      max_tokens: 8192
+      timeout: 120
+      retries: 3
+      retry_delay: 5
+    - name: "gemini-2.5-pro"
+      api_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
+      api_key: "${OPENAI_API_KEY}"
+      weight: 0.5
+      temperature: 0.7
+      max_tokens: 8192
+      timeout: 120
+      retries: 3
+      retry_delay: 5
+
+# REPS-specific settings
+reps:
+  enabled: true
+  batch_size: 10
+
+  # F1: Reflection
+  reflection:
+    enabled: true
+    top_k: 3
+    bottom_k: 2
+
+  # F2: ε-revisitation
+  revisitation:
+    enabled: true
+    epsilon_start: 0.15
+    epsilon_end: 0.05
+    decay: "linear"
+    recency_window: 50
+
+  # F3: Worker diversity
+  workers:
+    types: ["exploiter", "explorer", "crossover"]
+    initial_allocation:
+      exploiter: 0.6
+      explorer: 0.25
+      crossover: 0.15
+    exploiter_temperature: 0.3
+    explorer_temperature: 1.0
+
+  # F4: Convergence monitor
+  convergence:
+    enabled: true
+    window_size: 20
+    entropy_threshold_mild: 0.5
+    entropy_threshold_moderate: 0.3
+    entropy_threshold_severe: 0.15
+
+  # F5: Intelligence contracts
+  contracts:
+    enabled: true
+    models: ["gemini-2.5-flash", "gemini-2.5-pro"]
+    temperatures: [0.3, 0.7, 1.0]
+
+  # F6: SOTA steering
+  sota:
+    enabled: true
+    target_score: 2.635  # AlphaEvolve's published result for n=26
+
+  # F8: Annotations
+  annotations:
+    enabled: true
+    dead_end_awareness: true
+
+# Standard OpenEvolve settings
+database:
+  population_size: 500
+  num_islands: 5
+  migration_interval: 20
+
+evaluator:
+  enable_artifacts: true
+  cascade_evaluation: true
+  parallel_evaluations: 4

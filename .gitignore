@@ -1,0 +1,15 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+openevolve_clean/
+openevolve_src/.venv/
+openevolve_src/results/
+uv.lock
+*.egg-info/
+
+# Experiment results — keep configs and best programs, skip logs/checkpoints
+experiment/results/*/seed_*/logs/
+experiment/results/*/seed_*/checkpoints/
+experiment/results/*/*.log
+experiment/results/*/seed_*/best/
