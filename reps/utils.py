@@ -318,8 +318,8 @@ def parse_full_rewrite(llm_response: str, language: str = "python") -> Optional[
         if matches:
             return matches[0].strip()
 
-    # Fallback to any code block
-    code_block_pattern = r"```(.*?)```"
+    # Fallback to any code block — strip optional language tag on opening fence
+    code_block_pattern = r"```\w*\n(.*?)```"
     matches = re.findall(code_block_pattern, llm_response, re.DOTALL)
 
     if matches:
