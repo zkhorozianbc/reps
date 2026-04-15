@@ -15,13 +15,13 @@ import numpy as np
 # DeepMind validation (from alphaevolve_repository_of_problems)
 # ---------------------------------------------------------------------------
 
-def _circles_overlap(centers, radii):
-    """Check if any circles overlap."""
+def _circles_overlap(centers, radii, tol=1e-9):
+    """Check if any circles overlap beyond floating-point tolerance."""
     n = centers.shape[0]
     for i in range(n):
         for j in range(i + 1, n):
             dist = np.sqrt(np.sum((centers[i] - centers[j]) ** 2))
-            if radii[i] + radii[j] > dist:
+            if radii[i] + radii[j] - dist > tol:
                 return True
     return False
 
@@ -39,8 +39,10 @@ def check_construction(centers, radii, n) -> dict:
         return {"sum_of_radii": -np.inf}
 
     # Containment: each circle must be fully inside [0, 1] x [0, 1]
+    # Allow floating-point tolerance for circles touching the boundary
+    tol = 1e-9
     is_contained = (
-        (radii[:, None] <= centers) & (centers <= 1 - radii[:, None])
+        (radii[:, None] - tol <= centers) & (centers <= 1 - radii[:, None] + tol)
     ).all(axis=1)
 
     if not is_contained.all():
