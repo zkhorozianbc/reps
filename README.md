@@ -4,13 +4,15 @@ REPS extends [OpenEvolve](https://github.com/algorithmicsuperintelligence/openev
 
 ## Result: Circle Packing n=26
 
-| System | sum_radii | Iterations | Phases | Model |
-|---|---|---|---|---|
-| OpenEvolve (shipped best) | 2.634292402141039 | 470 | 2 | gemini-2.0-flash + claude-3.7-sonnet |
-| AlphaEvolve (paper) | 2.635896 | — | — | Gemini 2.0 Pro |
-| **REPS** | **2.63598308491761** | **100** | **1** | **claude-sonnet-4.6** |
+| System | sum_radii | Iterations | Model |
+|---|---|---|---|
+| Prior SOTA | 2.634 | — | — |
+| OpenEvolve (shipped best) | 2.6342924 | 470 | gemini-2.0-flash + claude-3.7-sonnet |
+| AlphaEvolve (paper) | 2.6358628 | — | Gemini 2.0 Pro |
+| FICO Xpress Solver | 2.6359155 | — | — |
+| **REPS** | **2.6359831** | **100** | **claude-sonnet-4.6** |
 
-REPS exceeds the AlphaEvolve paper result by +0.00008708491761 sum_radii, in 100 iterations with a single phase. OpenEvolve required 470 iterations across 2 manually-configured phases to reach 2.634292402141039.
+Verified against [DeepMind's official validator](https://colab.research.google.com/github/google-deepmind/alphaevolve_repository_of_problems/blob/main/experiments/packing_circles_max_sum_of_radii/packing_circle_max_sum_of_radii.ipynb) (`verify_circles`). Full precision: **2.6359830849173465**.
 
 ![REPS Circle Packing](experiment/results/circle_sonnet_reps/packing.png)
 
@@ -35,7 +37,7 @@ Pack 26 non-overlapping circles into a unit square, maximizing sum of radii.
 | Variant | sum_radii | Iterations | Model |
 |---|---|---|---|
 | Baseline (unmodified OpenEvolve) | 2.497400 | 100 | claude-sonnet-4.6 |
-| **REPS** | **2.63598308491761** | **100** | **claude-sonnet-4.6** |
+| **REPS** | **2.6359831** | **100** | **claude-sonnet-4.6** |
 
 Same model, same config, same seed. REPS achieves +5.6% higher sum_radii.
 
