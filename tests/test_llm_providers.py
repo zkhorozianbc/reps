@@ -190,7 +190,7 @@ def test_anthropic_generate_with_context(mock_anthropic_cls):
     cfg = _make_anthropic_cfg()
     provider = AnthropicLLM(cfg)
 
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         provider.generate_with_context(
             system_message="Be helpful.",
             messages=[{"role": "user", "content": "Say hello"}],
@@ -239,7 +239,7 @@ def test_anthropic_token_usage_normalization(mock_anthropic_cls):
     cfg = _make_anthropic_cfg()
     provider = AnthropicLLM(cfg)
 
-    asyncio.get_event_loop().run_until_complete(
+    asyncio.run(
         provider.generate_with_context(
             system_message="System",
             messages=[{"role": "user", "content": "Hi"}],
