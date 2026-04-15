@@ -105,6 +105,9 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
             logger.info(f"Best program: {best.id}, metrics: {best.metrics}")
     finally:
         controller.stop()
+        # Save all programs, prompts, and responses to disk
+        db.save(output_dir)
+        logger.info(f"Database saved to {output_dir}")
 
 
 def run_openevolve(config_path: str, initial_program: str, evaluator: str, output_dir: str, iterations: int):
