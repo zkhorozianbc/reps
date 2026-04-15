@@ -6,7 +6,7 @@ import asyncio
 from unittest.mock import patch, MagicMock
 
 import pytest
-from openevolve.config import LLMModelConfig
+from reps.config import LLMModelConfig
 
 from reps.llm.base import LLMInterface
 from reps.llm.openrouter import OpenRouterLLM
