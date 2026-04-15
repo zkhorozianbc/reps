@@ -7,7 +7,36 @@ name = "reps"
 version = "0.1.0"
 description = "Recursive Evolutionary Program Search"
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.22.0"]
+dependencies = [
+    "numpy>=1.22.0",
+    "openai>=1.0.0",
+    "anthropic>=0.40.0",
+    "pyyaml>=6.0",
+    "dacite>=1.9.2",
+    "tqdm>=4.64.0",
+    "flask",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=22.0.0",
+    "isort>=5.10.0",
+]
+
+[project.scripts]
+reps-run = "reps.runner:main"
 
 [tool.setuptools.packages.find]
 include = ["reps*"]
+
+[tool.setuptools.package-data]
+reps = ["prompt_templates/*.txt", "prompt_templates/*.json"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks tests as integration tests requiring external services",
+]
+addopts = "--strict-markers"
