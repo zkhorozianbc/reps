@@ -41,13 +41,22 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
     # Initialize database
     db = ProgramDatabase(config.database)
 
-    # Load and add initial program
+    # Load, evaluate, and add initial program
     initial_code = Path(initial_program).read_text()
+
+    # Evaluate the seed program so it enters the database with real metrics
+    from reps.evaluator import Evaluator
+    seed_evaluator = Evaluator(config.evaluator, evaluator)
+    seed_metrics = asyncio.run(seed_evaluator.evaluate_program(initial_code, "initial"))
+    logger.info(f"Seed program metrics: {seed_metrics}")
+    if not seed_metrics or seed_metrics.get("combined_score", 0) == 0:
+        logger.warning("Seed program scored 0 — check that it runs correctly with the evaluator")
+
     initial_prog = Program(
         id="initial",
         code=initial_code,
         language=config.language or "python",
-        metrics={},
+        metrics=seed_metrics or {},
         iteration_found=0,
     )
     db.add(initial_prog)
