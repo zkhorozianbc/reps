@@ -1,5 +1,7 @@
 # base.yaml + all REPS features enabled
 # Everything above the reps: section is BYTE-IDENTICAL to base.yaml
+harness: reps
+provider: openrouter
 
 max_iterations: 100
 checkpoint_interval: 25

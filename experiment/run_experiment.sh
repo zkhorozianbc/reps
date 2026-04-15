@@ -1,20 +1,17 @@
 #!/bin/bash
 # REPS Experiment Runner
-# Runs baseline (clean OpenEvolve) vs REPS (modified OpenEvolve)
-# Same config, same seeds, same iterations
+# Runs baseline (openevolve harness) vs REPS harness experiments.
+# The harness: field inside each config determines which controller runs.
 #
 # Requirements:
 #   - OPENROUTER_API_KEY set in environment
-#   - openevolve_clean/ = unmodified git clone
-#   - openevolve/       = REPS-modified clone
+#   - reps-run installed (pip install -e . or uv run reps-run)
 #
 # Usage: bash experiment/run_experiment.sh
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CLEAN="$ROOT/openevolve_clean"
-REPS="$ROOT/openevolve"
 CONFIGS="$ROOT/experiment/configs"
 RESULTS="$ROOT/experiment/results"
 
@@ -40,13 +37,12 @@ echo "=========================================="
 echo "Benchmark: $BENCHMARK"
 echo "Iterations: $ITERATIONS"
 echo "Seeds: ${SEEDS[*]}"
-echo "Baseline: $CLEAN"
-echo "REPS:     $REPS"
+echo "Root: $ROOT"
 echo ""
 
 mkdir -p "$RESULTS"
 
-# --- Run baseline (clean OpenEvolve) ---
+# --- Run baseline (openevolve harness, set by harness: field in config) ---
 for seed in "${SEEDS[@]}"; do
     OUTDIR="$RESULTS/baseline/seed_$seed"
     if [ -d "$OUTDIR/best" ]; then
@@ -56,14 +52,13 @@ for seed in "${SEEDS[@]}"; do
     echo ""
     echo ">>> BASELINE seed=$seed"
 
-    # Create seed-specific config
     SEED_CONFIG="$RESULTS/baseline/config_seed_$seed.yaml"
     mkdir -p "$(dirname "$SEED_CONFIG")"
     cp "$CONFIGS/base.yaml" "$SEED_CONFIG"
     echo "random_seed: $seed" >> "$SEED_CONFIG"
 
-    cd "$CLEAN"
-    uv run python openevolve-run.py \
+    cd "$ROOT"
+    uv run reps-run \
         "$INITIAL" "$EVALUATOR" \
         --config "$SEED_CONFIG" \
         --iterations "$ITERATIONS" \
@@ -72,7 +67,7 @@ for seed in "${SEEDS[@]}"; do
     echo ">>> BASELINE seed=$seed DONE"
 done
 
-# --- Run REPS (modified OpenEvolve) ---
+# --- Run REPS (reps harness, set by harness: field in config) ---
 for seed in "${SEEDS[@]}"; do
     OUTDIR="$RESULTS/reps/seed_$seed"
     if [ -d "$OUTDIR/best" ]; then
@@ -87,8 +82,8 @@ for seed in "${SEEDS[@]}"; do
     cp "$CONFIGS/reps_full.yaml" "$SEED_CONFIG"
     echo "random_seed: $seed" >> "$SEED_CONFIG"
 
-    cd "$REPS"
-    uv run python openevolve-run.py \
+    cd "$ROOT"
+    uv run reps-run \
         "$INITIAL" "$EVALUATOR" \
         --config "$SEED_CONFIG" \
         --iterations "$ITERATIONS" \
@@ -104,7 +99,7 @@ echo "=========================================="
 
 # --- Collect results ---
 cd "$ROOT"
-uv run --directory "$REPS" python3 - <<'PYTHON'
+uv run python3 - <<'PYTHON'
 import json, os, sys, statistics
 
 results_dir = os.environ.get("RESULTS", "experiment/results")

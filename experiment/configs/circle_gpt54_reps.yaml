@@ -1,5 +1,8 @@
 # Circle packing with GPT-5.4 xhigh — REPS enabled
 # Starting from best Sonnet 4.6 program
+harness: reps
+provider: openrouter
+
 max_iterations: 30
 checkpoint_interval: 10
 log_level: "INFO"

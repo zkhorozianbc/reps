@@ -1,5 +1,8 @@
 # Circle packing with Sonnet 4.6 — baseline (no REPS)
 # Same structure as shipped config, upgraded model
+harness: openevolve
+provider: openrouter
+
 max_iterations: 100
 checkpoint_interval: 10
 log_level: "INFO"

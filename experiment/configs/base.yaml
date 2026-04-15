@@ -2,6 +2,9 @@
 # ONLY changes: api_base → OpenRouter, added api_key, max_iterations bumped to 100
 # Model names are identical — OpenRouter hosts these same models
 
+harness: openevolve
+provider: openrouter
+
 max_iterations: 100
 checkpoint_interval: 25
 

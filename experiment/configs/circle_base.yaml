@@ -1,5 +1,8 @@
 # EXACT copy of examples/circle_packing/config_phase_1.yaml
 # ONLY change: added api_key for OpenRouter (api_base already points there)
+harness: openevolve
+provider: openrouter
+
 max_iterations: 100
 checkpoint_interval: 10
 log_level: "INFO"

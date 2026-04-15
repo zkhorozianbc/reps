@@ -1,5 +1,8 @@
 # Circle packing with Opus 4.6 — REPS enabled
 # Starting from Sonnet's SOTA-beating program as initial seed
+harness: reps
+provider: openrouter
+
 max_iterations: 100
 checkpoint_interval: 10
 log_level: "INFO"

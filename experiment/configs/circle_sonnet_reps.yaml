@@ -1,5 +1,8 @@
 # Circle packing with Sonnet 4.6 — REPS enabled
 # Identical to circle_sonnet_base.yaml above reps: section
+harness: reps
+provider: openrouter
+
 max_iterations: 100
 checkpoint_interval: 10
 log_level: "INFO"
