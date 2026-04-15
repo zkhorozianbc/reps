@@ -88,7 +88,7 @@ REPS modules run in the controller process at batch boundaries. Workers are stat
 
 ## Quickstart
 
-Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), an [OpenRouter](https://openrouter.ai/) API key.
+Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/).
 
 ```bash
 git clone https://github.com/zkhorozianbc/reps.git
@@ -111,8 +111,8 @@ Run REPS on circle packing (n=26):
 
 ```bash
 reps-run \
-  experiment/circle_packing/initial_program.py \
-  experiment/circle_packing/evaluator.py \
+  experiment/benchmarks/circle_packing/initial_program.py \
+  experiment/benchmarks/circle_packing/evaluator.py \
   --config experiment/configs/circle_sonnet_reps.yaml \
   --output output/ \
   --iterations 100
@@ -121,6 +121,115 @@ reps-run \
 Results go to the directory specified by `--output`. Best program is in `output/best/`.
 
 To run a baseline (unmodified OpenEvolve), use a config with `harness: openevolve`.
+
+## Adding a Benchmark
+
+Benchmarks live in `experiment/benchmarks/<name>/`. Each benchmark needs two files:
+
+```
+experiment/benchmarks/<name>/
+├── initial_program.py    # Seed program the LLM will evolve
+└── evaluator.py          # Scores each candidate program
+```
+
+### `evaluator.py`
+
+Must define an `evaluate(program_path)` function that returns a dict with at least `combined_score`:
+
+```python
+import importlib.util
+import traceback
+
+def evaluate(program_path):
+    """Load a candidate program, run it, return metrics.
+
+    Args:
+        program_path: path to the .py file to evaluate
+
+    Returns:
+        dict with at least 'combined_score' (float, higher is better)
+    """
+    try:
+        spec = importlib.util.spec_from_file_location("program", program_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        result = module.solve()  # call whatever your program defines
+
+        score = ...  # compute how good the result is
+
+        return {"combined_score": score}
+    except Exception as e:
+        traceback.print_exc()
+        return {"combined_score": 0.0, "error": str(e)}
+```
+
+The evaluator is loaded once per worker process. It receives the path to a temporary `.py` file containing the candidate code, loads it dynamically, runs it, and returns a score. No relative imports — the evaluator must be a standalone file.
+
+For cascade evaluation (early rejection of bad candidates), optionally define `evaluate_stage1(program_path)` and `evaluate_stage2(program_path)` alongside the main `evaluate()`.
+
+### `initial_program.py`
+
+The seed code the LLM starts evolving from. Wrap the evolvable portion in `EVOLVE-BLOCK` markers:
+
+```python
+# EVOLVE-BLOCK-START
+import numpy as np
+
+def solve():
+    """The function the LLM will improve."""
+    # naive starting solution
+    return naive_result
+# EVOLVE-BLOCK-END
+
+# Code outside the block is fixed and won't be modified
+if __name__ == "__main__":
+    print(solve())
+```
+
+### Config
+
+Create a YAML config in `experiment/configs/` that references your benchmark. The initial program and evaluator are passed as CLI args, not in the config. The config controls the LLM, REPS features, and evolution parameters:
+
+```yaml
+harness: reps              # "reps" or "openevolve"
+provider: openrouter       # "openrouter" or "anthropic"
+max_iterations: 100
+
+llm:
+  primary_model: "anthropic/claude-sonnet-4.6"
+  api_key: "${OPENROUTER_API_KEY}"
+  temperature: 0.7
+  max_tokens: 8192
+  timeout: 120
+
+prompt:
+  system_message: |
+    You are an expert at <domain>. Improve the solve() function to ...
+  num_top_programs: 3
+
+evaluator:
+  timeout: 60
+  parallel_evaluations: 4
+
+reps:
+  enabled: true
+  batch_size: 5
+  # ... (see experiment/configs/ for full examples)
+```
+
+### Run
+
+```bash
+reps-run \
+  experiment/benchmarks/<name>/initial_program.py \
+  experiment/benchmarks/<name>/evaluator.py \
+  --config experiment/configs/<your_config>.yaml \
+  --output experiment/results/<name>/ \
+  --iterations 100
+```
+
+See `experiment/benchmarks/circle_packing/` for a complete working example.
 
 ## Configs
 
@@ -133,10 +242,10 @@ All configs are in `experiment/configs/`. Each pair is identical except for the 
 | `circle_base.yaml` | gemini-2.0-flash | off |
 | `circle_reps.yaml` | gemini-2.0-flash | on |
 
-All configs use OpenRouter as the default provider. To use the native Anthropic API, set `provider: anthropic` in the config (uses `ANTHROPIC_API_KEY`).
+All configs use OpenRouter as the default provider. To use the native Anthropic API, set `provider: anthropic` in the config and export `ANTHROPIC_API_KEY`.
 
 ## Tests
 
 ```bash
-uv run python -m pytest tests/ --ignore=tests/integration
+uv run python -m pytest tests/
 ```
