@@ -494,11 +494,11 @@ class ProcessParallelController:
         self._reps_rng = random.Random(config.random_seed)
 
         if self._reps_enabled:
-            from openevolve.reps.worker_pool import WorkerPool
-            from openevolve.reps.convergence_monitor import ConvergenceMonitor
-            from openevolve.reps.contract_selector import ContractSelector
-            from openevolve.reps.sota_controller import SOTAController
-            from openevolve.reps.metrics_logger import MetricsLogger
+            from reps.worker_pool import WorkerPool
+            from reps.convergence_monitor import ConvergenceMonitor
+            from reps.contract_selector import ContractSelector
+            from reps.sota_controller import SOTAController
+            from reps.metrics_logger import MetricsLogger
 
             reps = config.reps
 
@@ -1054,7 +1054,7 @@ class ProcessParallelController:
     def _reps_init_reflection_engine(self, llm_ensemble):
         """Lazily initialize the reflection engine with an LLM ensemble."""
         if self._reps_reflection is None and self._reps_enabled:
-            from openevolve.reps.reflection_engine import ReflectionEngine
+            from reps.reflection_engine import ReflectionEngine
             self._reps_reflection = ReflectionEngine(
                 llm_ensemble, self._reps_reflection_config
             )
@@ -1192,7 +1192,7 @@ class ProcessParallelController:
         self._reps_batch_count += 1
 
         # Convert SerializableResults to lightweight result dicts for REPS modules
-        from openevolve.reps.iteration_config import IterationResult
+        from reps.iteration_config import IterationResult
         reps_results = []
         for r in batch_results:
             meta = r.reps_meta or {}
@@ -1233,7 +1233,7 @@ class ProcessParallelController:
             self._reps_worker_pool.record_result(rr.worker_type, rr.improved)
 
         # F4: Convergence Monitor
-        from openevolve.reps.convergence_monitor import ConvergenceAction
+        from reps.convergence_monitor import ConvergenceAction
         action = self._reps_convergence.update(reps_results)
 
         if action == ConvergenceAction.MILD_BOOST:

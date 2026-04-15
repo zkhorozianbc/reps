@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reps"
+version = "0.1.0"
+description = "Recursive Evolutionary Program Search"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.22.0"]
+
+[tool.setuptools.packages.find]
+include = ["reps*"]

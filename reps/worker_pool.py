@@ -16,7 +16,7 @@ import random as _random
 from collections import deque
 from typing import Any, Dict, List, Optional, Tuple
 
-from openevolve.reps.iteration_config import IterationConfig
+from reps.iteration_config import IterationConfig
 
 logger = logging.getLogger(__name__)
 

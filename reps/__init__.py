@@ -12,13 +12,13 @@ Extension modules for OpenEvolve that add:
 - F8: Enriched Program Annotations
 """
 
-from openevolve.reps.iteration_config import IterationConfig, IterationResult
-from openevolve.reps.reflection_engine import ReflectionEngine
-from openevolve.reps.worker_pool import WorkerPool
-from openevolve.reps.convergence_monitor import ConvergenceMonitor, ConvergenceAction
-from openevolve.reps.contract_selector import ContractSelector, Contract
-from openevolve.reps.sota_controller import SOTAController, SearchRegime
-from openevolve.reps.metrics_logger import MetricsLogger
+from reps.iteration_config import IterationConfig, IterationResult
+from reps.reflection_engine import ReflectionEngine
+from reps.worker_pool import WorkerPool
+from reps.convergence_monitor import ConvergenceMonitor, ConvergenceAction
+from reps.contract_selector import ContractSelector, Contract
+from reps.sota_controller import SOTAController, SearchRegime
+from reps.metrics_logger import MetricsLogger
 
 __all__ = [
     "IterationConfig",
