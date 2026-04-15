@@ -311,11 +311,12 @@ def parse_full_rewrite(llm_response: str, language: str = "python") -> Optional[
     Returns:
         Extracted code or None if not found
     """
-    code_block_pattern = r"```" + language + r"\n(.*?)```"
-    matches = re.findall(code_block_pattern, llm_response, re.DOTALL)
+    if language:
+        code_block_pattern = r"```" + language + r"\n(.*?)```"
+        matches = re.findall(code_block_pattern, llm_response, re.DOTALL)
 
-    if matches:
-        return matches[0].strip()
+        if matches:
+            return matches[0].strip()
 
     # Fallback to any code block
     code_block_pattern = r"```(.*?)```"
