@@ -65,21 +65,26 @@ Both baseline and REPS saturate at combined_score ~1.4995 within 100 iterations.
 ## Architecture
 
 ```
-Controller (single process, stateful)
-├── WorkerPool          ← builds IterationConfig per dispatch
-├── ReflectionEngine    ← LLM call between batches
-├── ConvergenceMonitor  ← edit entropy tracking
-├── ContractSelector    ← Thompson-sampling model selection
-├── SOTAController      ← gap-aware regime switching
-├── MetricsLogger       ← CSV output
-└── dispatches IterationConfig → ProcessPoolExecutor
-    └── _run_iteration_worker (stateless)
-        ├── receives: DB snapshot + IterationConfig
-        ├── interprets: worker_type, generation_mode, temperature, prompt_extras
-        └── returns: SerializableResult + REPS metadata
+reps/
+├── config.py          # All config (evolution + REPS features)
+├── controller.py      # Evolution loop with REPS orchestration
+├── database.py        # Program database
+├── evaluator.py       # Program evaluator
+├── runner.py          # CLI entry point
+├── llm/               # LLM providers
+│   ├── openrouter.py  # OpenAI-compatible (OpenRouter, etc.)
+│   ├── anthropic.py   # Native Anthropic API
+│   └── ensemble.py    # Model ensemble
+├── prompt_sampler.py  # Prompt template building
+├── reflection_engine.py   # F1
+├── worker_pool.py         # F3
+├── convergence_monitor.py # F4
+├── contract_selector.py   # F5
+├── sota_controller.py     # F6
+└── metrics_logger.py      # Metrics CSV logging
 ```
 
-REPS modules run in the controller process at batch boundaries. Workers are stateless — they execute whatever config they receive. The underlying OpenEvolve LLM module, evaluator, and database are unmodified.
+REPS modules run in the controller process at batch boundaries. Workers are stateless — they execute whatever config they receive.
 
 ## Quickstart
 
@@ -87,28 +92,35 @@ Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), an [OpenRouter](ht
 
 ```bash
 git clone https://github.com/zkhorozianbc/reps.git
-cd reps/openevolve
+cd reps
 uv venv .venv --python 3.12
-uv pip install -e ".[dev]"
+uv pip install -e .
+# Optional: install OpenEvolve for baseline comparison
+uv pip install openevolve
 ```
 
 Set your API key:
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-...
+# Or, to use the native Anthropic API instead:
+export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 Run REPS on circle packing (n=26):
 
 ```bash
-uv run python openevolve-run.py \
-  examples/circle_packing/initial_program.py \
-  examples/circle_packing/evaluator.py \
-  --config ../experiment/configs/circle_sonnet_reps.yaml \
+reps-run \
+  experiment/circle_packing/initial_program.py \
+  experiment/circle_packing/evaluator.py \
+  --config experiment/configs/circle_sonnet_reps.yaml \
+  --output output/ \
   --iterations 100
 ```
 
-Results go to `openevolve_output/`. Best program is in `openevolve_output/best/`.
+Results go to the directory specified by `--output`. Best program is in `output/best/`.
+
+To run a baseline (unmodified OpenEvolve), use a config with `harness: openevolve`.
 
 ## Configs
 
@@ -121,11 +133,10 @@ All configs are in `experiment/configs/`. Each pair is identical except for the 
 | `circle_base.yaml` | gemini-2.0-flash | off |
 | `circle_reps.yaml` | gemini-2.0-flash | on |
 
-All configs use OpenRouter as the API provider. To use a different provider, change `api_base` and `api_key` in the config.
+All configs use OpenRouter as the default provider. To use the native Anthropic API, set `provider: anthropic` in the config (uses `ANTHROPIC_API_KEY`).
 
 ## Tests
 
 ```bash
-cd openevolve
 uv run python -m pytest tests/ --ignore=tests/integration
 ```
