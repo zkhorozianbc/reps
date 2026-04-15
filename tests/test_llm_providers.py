@@ -200,7 +200,7 @@ def test_anthropic_generate_with_context(mock_anthropic_cls):
     assert result == "Hello from Claude!"
     # Verify the API was called with system as a top-level param, not in messages
     call_kwargs = mock_client.messages.create.call_args[1]
-    assert call_kwargs["system"] == "Be helpful."
+    assert call_kwargs["system"] == [{"type": "text", "text": "Be helpful."}]
     assert call_kwargs["messages"] == [{"role": "user", "content": "Say hello"}]
     assert call_kwargs["model"] == "claude-sonnet-4-20250514"
 

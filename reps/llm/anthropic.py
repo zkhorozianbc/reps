@@ -66,11 +66,14 @@ class AnthropicLLM(LLMInterface):
         # Anthropic uses `system` as a top-level parameter, not in the messages list
         params = {
             "model": self.model,
-            "system": system_message,
             "messages": messages,
             "temperature": kwargs.get("temperature", self.temperature),
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),
         }
+
+        # Anthropic API requires system as a list of content blocks
+        if system_message:
+            params["system"] = [{"type": "text", "text": system_message}]
 
         # Attempt the API call with retries
         retries = kwargs.get("retries", self.retries)
