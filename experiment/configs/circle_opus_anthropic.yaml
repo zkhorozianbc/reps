@@ -1,4 +1,4 @@
-# Circle packing n=26 — Opus 4.7 via native Anthropic API
+# Circle packing n=26 — Opus via native Anthropic API
 # Starting from REPS best (2.6359831), attempting to push further
 harness: reps
 provider: anthropic
@@ -7,7 +7,7 @@ log_level: INFO
 random_seed: 42
 
 llm:
-  primary_model: "anthropic/claude-opus-4-7"
+  primary_model: "anthropic/claude-opus-4-6"
   primary_model_weight: 1.0
   api_key: "${ANTHROPIC_API_KEY}"
   temperature: 0.7
