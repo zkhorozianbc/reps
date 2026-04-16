@@ -64,12 +64,21 @@ class AnthropicLLM(LLMInterface):
         """Generate text using a system message and conversational context"""
         # Build parameters for the Anthropic API
         # Anthropic uses `system` as a top-level parameter, not in the messages list
+        # Reasoning models (e.g. opus-4-7) don't support temperature
+        REASONING_MODEL_PATTERNS = ("opus-4-7", "opus-4-8", "opus-4-9", "opus-5")
+        model_name = kwargs.get("model", self.model) or self.model
+        is_reasoning_model = any(p in model_name.lower() for p in REASONING_MODEL_PATTERNS)
+
         params = {
-            "model": self.model,
+            "model": model_name,
             "messages": messages,
-            "temperature": kwargs.get("temperature", self.temperature),
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),
         }
+
+        if not is_reasoning_model:
+            temperature = kwargs.get("temperature", self.temperature)
+            if temperature is not None:
+                params["temperature"] = temperature
 
         # Anthropic API requires system as a list of content blocks
         if system_message:
@@ -117,11 +126,21 @@ class AnthropicLLM(LLMInterface):
         if hasattr(response, "usage") and response.usage is not None:
             prompt_tokens = getattr(response.usage, "input_tokens", 0) or 0
             completion_tokens = getattr(response.usage, "output_tokens", 0) or 0
+            raw_cache_creation = getattr(response.usage, "cache_creation_input_tokens", None)
+            raw_cache_read = getattr(response.usage, "cache_read_input_tokens", None)
+            cache_creation = raw_cache_creation if isinstance(raw_cache_creation, int) else 0
+            cache_read = raw_cache_read if isinstance(raw_cache_read, int) else 0
             self.last_usage = {
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "total_tokens": prompt_tokens + completion_tokens,
+                "cache_creation_input_tokens": cache_creation,
+                "cache_read_input_tokens": cache_read,
             }
+            if cache_creation > 0 or cache_read > 0:
+                logger.debug(
+                    f"Cache: {cache_read} read, {cache_creation} created, {prompt_tokens} uncached"
+                )
         else:
             self.last_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
