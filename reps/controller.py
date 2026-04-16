@@ -285,7 +285,7 @@ def _run_iteration_worker(
         # Append any REPS context that wasn't consumed by template placeholders
         for key in ("reflection", "sota_injection", "dead_end_warnings"):
             text = prompt_extras.get(key, "")
-            if text and text in str(prompt_extras) and "{" + key + "}" not in prompt.get("user", ""):
+            if text and "{" + key + "}" not in prompt.get("user", ""):
                 # Template didn't have a placeholder for this key, append to user prompt
                 prompt["user"] = prompt["user"] + "\n\n" + text
 
@@ -672,6 +672,9 @@ class ProcessParallelController:
 
         # --- REPS: Build initial prompt extras ---
         reps_prompt_extras = self._reps_build_prompt_extras() if self._reps_enabled else {}
+        if reps_prompt_extras:
+            logger.info(f"REPS prompt extras keys: {list(reps_prompt_extras.keys())}, "
+                        f"lengths: {{k: len(v) for k, v in reps_prompt_extras.items() if v}}")
 
         # Submit initial batch - distribute across islands
         batch_per_island = max(1, batch_size // self.num_islands) if batch_size > 0 else 0
@@ -1091,11 +1094,13 @@ class ProcessParallelController:
             )
 
         # F6: SOTA injection
+        # Use sum_radii (raw score) for gap calculation, not combined_score (which may be a ratio)
         if self._reps_sota.enabled and self._reps_sota.target is not None:
             best = self.database.get_best_program()
             if best and best.metrics:
                 best_score = best.metrics.get(
-                    "combined_score", safe_numeric_average(best.metrics)
+                    "sum_radii",
+                    best.metrics.get("combined_score", safe_numeric_average(best.metrics))
                 )
                 self._reps_sota.get_regime(best_score)
                 extras["sota_injection"] = self._reps_sota.format_for_prompt()
