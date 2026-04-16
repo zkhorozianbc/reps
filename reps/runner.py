@@ -10,6 +10,7 @@ Output directories are auto-versioned: <output>/run_001, run_002, etc.
 import argparse
 import asyncio
 import logging
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -163,6 +164,9 @@ def main():
     # Auto-version the output directory
     run_dir = _next_run_dir(args.output)
     print(f"Output: {run_dir}")
+
+    # Make run_dir visible to benchmark evaluators (for persisting arrays etc.)
+    os.environ["REPS_RUN_DIR"] = run_dir
 
     if config.harness == "openevolve":
         run_openevolve(args.config, args.initial_program, args.evaluator, run_dir, config.max_iterations)

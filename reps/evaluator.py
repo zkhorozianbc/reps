@@ -60,6 +60,7 @@ class Evaluator:
 
         # Pending artifacts storage for programs
         self._pending_artifacts: Dict[str, Dict[str, Union[str, bytes]]] = {}
+        self._current_program_id: str = ""
 
         logger.info(f"Initialized evaluator with {evaluation_file}")
 
@@ -145,6 +146,14 @@ class Evaluator:
         """
         start_time = time.time()
         program_id_str = f" {program_id}" if program_id else ""
+        self._current_program_id = program_id
+
+        # Make program_id visible to benchmark evaluators for per-program artifacts
+        # (e.g. dumping (centers, radii) under REPS_RUN_DIR/packings/<id>.md).
+        if program_id:
+            os.environ["REPS_PROGRAM_ID"] = program_id
+        else:
+            os.environ.pop("REPS_PROGRAM_ID", None)
 
         # Check if artifacts are enabled
         artifacts_enabled = os.environ.get("ENABLE_ARTIFACTS", "true").lower() == "true"

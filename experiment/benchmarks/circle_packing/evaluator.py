@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import traceback
+from pathlib import Path
 
 import numpy as np
 
@@ -173,6 +174,66 @@ except Exception as e:
 
 
 # ---------------------------------------------------------------------------
+# Persist (centers, radii) + strict verdict to markdown for each eval
+# ---------------------------------------------------------------------------
+
+def _dump_packing_markdown(
+    centers: np.ndarray,
+    radii: np.ndarray,
+    reported_sum: float,
+    strict_sum: float,
+    strict_pass: bool,
+    tolerant_pass: bool,
+    eval_time: float,
+) -> None:
+    """Write the packing arrays + verdicts to REPS_RUN_DIR/packings/<program_id>.md.
+
+    No-op if env vars are not set (e.g., ad-hoc invocations outside a run).
+    """
+    run_dir = os.environ.get("REPS_RUN_DIR")
+    program_id = os.environ.get("REPS_PROGRAM_ID")
+    if not run_dir or not program_id:
+        return
+
+    out_dir = Path(run_dir) / "packings"
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+
+    # Full precision repr — copy-paste back into numpy verbatim.
+    np_printopts = {"precision": 17, "suppress": False, "threshold": np.inf, "linewidth": 100000}
+    with np.printoptions(**np_printopts):
+        centers_repr = repr(np.asarray(centers))
+        radii_repr = repr(np.asarray(radii))
+
+    lines = [
+        f"# Packing: {program_id}",
+        "",
+        f"- reported sum_radii: `{reported_sum!r}`",
+        f"- strict check_construction (DeepMind, no tolerance): **{'PASS' if strict_pass else 'FAIL'}**",
+        f"- strict sum_of_radii: `{strict_sum!r}`",
+        f"- tolerant check (tol=1e-6): {'pass' if tolerant_pass else 'fail'}",
+        f"- eval_time: {eval_time:.3f}s",
+        "",
+        "## centers (shape (26, 2))",
+        "```python",
+        centers_repr,
+        "```",
+        "",
+        "## radii (shape (26,))",
+        "```python",
+        radii_repr,
+        "```",
+        "",
+    ]
+    try:
+        (out_dir / f"{program_id}.md").write_text("\n".join(lines))
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # OpenEvolve-compatible evaluate interface
 # ---------------------------------------------------------------------------
 
@@ -195,16 +256,27 @@ def evaluate(program_path):
             return {"sum_radii": 0.0, "target_ratio": 0.0, "validity": 0.0,
                     "eval_time": eval_time, "combined_score": 0.0}
 
-        valid = validate_packing(centers, radii)
-
         shape_valid = centers.shape == (26, 2) and radii.shape == (26,)
-        if not shape_valid:
-            valid = False
+        tolerant_pass = shape_valid and validate_packing(centers, radii)
 
-        sum_radii = float(np.sum(radii)) if valid else 0.0
-        target_ratio = sum_radii / TARGET_VALUE if valid else 0.0
-        validity = 1.0 if valid else 0.0
+        strict_verdict = check_construction(centers, radii, 26) if shape_valid else {"sum_of_radii": -np.inf}
+        strict_sum = strict_verdict["sum_of_radii"]
+        strict_pass = np.isfinite(strict_sum)
+
+        # Score on the strict DeepMind checker — matches the benchmark standard.
+        sum_radii = float(strict_sum) if strict_pass else 0.0
+        validity = 1.0 if strict_pass else 0.0
+        target_ratio = sum_radii / TARGET_VALUE if strict_pass else 0.0
         combined_score = target_ratio * validity
+
+        _dump_packing_markdown(
+            centers, radii,
+            reported_sum=float(reported_sum) if reported_sum is not None else float("nan"),
+            strict_sum=float(strict_sum),
+            strict_pass=bool(strict_pass),
+            tolerant_pass=bool(tolerant_pass),
+            eval_time=eval_time,
+        )
 
         return {
             "sum_radii": sum_radii,
@@ -212,6 +284,8 @@ def evaluate(program_path):
             "validity": validity,
             "eval_time": eval_time,
             "combined_score": combined_score,
+            "strict_pass": 1.0 if strict_pass else 0.0,
+            "tolerant_pass": 1.0 if tolerant_pass else 0.0,
         }
 
     except Exception as e:
@@ -221,7 +295,7 @@ def evaluate(program_path):
 
 
 def evaluate_stage1(program_path):
-    """Quick validation check."""
+    """Quick validation check (strict DeepMind checker)."""
     try:
         centers, radii, sum_radii = run_with_timeout(program_path, timeout_seconds=600)
 
@@ -234,14 +308,15 @@ def evaluate_stage1(program_path):
         if not shape_valid:
             return {"validity": 0.0, "combined_score": 0.0, "error": "Invalid shapes"}
 
-        valid = validate_packing(centers, radii)
-        actual_sum = float(np.sum(radii)) if valid else 0.0
-        combined_score = (actual_sum / TARGET_VALUE) if valid else 0.0
+        strict = check_construction(centers, radii, 26)["sum_of_radii"]
+        strict_pass = np.isfinite(strict)
+        actual_sum = float(strict) if strict_pass else 0.0
+        combined_score = (actual_sum / TARGET_VALUE) if strict_pass else 0.0
 
         return {
-            "validity": 1.0 if valid else 0.0,
+            "validity": 1.0 if strict_pass else 0.0,
             "sum_radii": actual_sum,
-            "target_ratio": actual_sum / TARGET_VALUE if valid else 0.0,
+            "target_ratio": actual_sum / TARGET_VALUE if strict_pass else 0.0,
             "combined_score": combined_score,
         }
 
