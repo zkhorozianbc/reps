@@ -1,0 +1,88 @@
+# Circle packing n=26 — Opus 4.7 via native Anthropic API
+# Starting from REPS best (2.6359831), attempting to push further
+harness: reps
+provider: anthropic
+max_iterations: 50
+log_level: INFO
+random_seed: 42
+
+llm:
+  primary_model: "anthropic/claude-opus-4-7"
+  primary_model_weight: 1.0
+  api_key: "${ANTHROPIC_API_KEY}"
+  temperature: 0.7
+  max_tokens: 16384
+  timeout: 300
+
+prompt:
+  system_message: |
+    You are an expert mathematician specializing in circle packing problems and computational geometry. Your task is to improve a constructor function that directly produces a specific arrangement of 26 circles in a unit square, maximizing the sum of their radii. The AlphaEvolve paper achieved a sum of 2.635 for n=26.
+
+    Key geometric insights:
+    - Circle packings often follow hexagonal patterns in the densest regions
+    - Maximum density for infinite circle packing is pi/(2*sqrt(3)) ≈ 0.9069
+    - Edge effects make square container packing harder than infinite packing
+    - Circles can be placed in layers or shells when confined to a square
+    - Similar radius circles often form regular patterns, while varied radii allow better space utilization
+    - Perfect symmetry may not yield the optimal packing due to edge effects
+
+    Focus on designing an explicit constructor that places each circle in a specific position, rather than an iterative search algorithm.
+  num_top_programs: 3
+  use_template_stochasticity: true
+
+database:
+  population_size: 60
+  archive_size: 25
+  num_islands: 4
+  elite_selection_ratio: 0.3
+  exploitation_ratio: 0.7
+
+evaluator:
+  timeout: 120
+  cascade_evaluation: false
+  parallel_evaluations: 2
+
+diff_based_evolution: false
+
+reps:
+  enabled: true
+  batch_size: 5
+
+  reflection:
+    enabled: true
+    top_k: 3
+    bottom_k: 2
+
+  revisitation:
+    enabled: true
+    epsilon_start: 0.15
+    epsilon_end: 0.05
+    decay: "linear"
+    recency_window: 20
+
+  workers:
+    types: ["exploiter", "explorer", "crossover"]
+    initial_allocation:
+      exploiter: 0.6
+      explorer: 0.25
+      crossover: 0.15
+    exploiter_temperature: 0.3
+    explorer_temperature: 1.0
+
+  convergence:
+    enabled: true
+    window_size: 10
+    entropy_threshold_mild: 0.5
+    entropy_threshold_moderate: 0.3
+    entropy_threshold_severe: 0.15
+
+  contracts:
+    enabled: false
+
+  sota:
+    enabled: true
+    target_score: 2.636
+
+  annotations:
+    enabled: true
+    dead_end_awareness: true

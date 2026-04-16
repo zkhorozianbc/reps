@@ -826,6 +826,21 @@ class ProcessParallelController:
                         )
                         logger.info(f"Metrics: {metrics_str}")
 
+                    # Log token usage from REPS metadata
+                    if result.reps_meta:
+                        t_in = result.reps_meta.get("tokens_in", 0)
+                        t_out = result.reps_meta.get("tokens_out", 0)
+                        if t_in or t_out:
+                            if not hasattr(self, "_cumulative_tokens"):
+                                self._cumulative_tokens = {"in": 0, "out": 0}
+                            self._cumulative_tokens["in"] += t_in
+                            self._cumulative_tokens["out"] += t_out
+                            logger.info(
+                                f"Tokens: in={t_in}, out={t_out}, "
+                                f"cumulative_in={self._cumulative_tokens['in']}, "
+                                f"cumulative_out={self._cumulative_tokens['out']}"
+                            )
+
                         # Check if this is the first program without combined_score
                         if not hasattr(self, "_warned_about_combined_score"):
                             self._warned_about_combined_score = False
