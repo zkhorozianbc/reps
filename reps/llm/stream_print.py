@@ -27,3 +27,12 @@ def emit_block(kind: str, text: Optional[str]) -> None:
     header = f"━━━ [pid={pid} {kind}] ━━━"
     sys.stderr.write(f"\n{header}\n{body}\n")
     sys.stderr.flush()
+
+
+def emit_status(model: str, kind: str = "stream opened") -> None:
+    """Print a one-line status marker so the user sees the worker is alive
+    before the first content chunk arrives. Reasoning models often buffer
+    reasoning upstream for tens of seconds before streaming anything."""
+    pid = os.getpid()
+    sys.stderr.write(f"[pid={pid}] {kind}: {model}\n")
+    sys.stderr.flush()

@@ -182,8 +182,9 @@ class OpenRouterLLM(LLMInterface):
         we treat a switch from one mode to the other (or stream end) as the
         end of a block and emit the whole block in one tidy printout.
         """
-        from reps.llm.stream_print import emit_block
+        from reps.llm.stream_print import emit_block, emit_status
 
+        emit_status(params.get("model", "?"))
         stream = self.client.chat.completions.create(**params)
         content_parts: List[str] = []
         reasoning_parts: List[str] = []

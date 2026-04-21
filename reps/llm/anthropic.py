@@ -156,8 +156,9 @@ class AnthropicLLM(LLMInterface):
 
     def _stream_and_collect(self, params: Dict[str, Any]):
         """Blocking: stream, print per-block, return (answer, reasoning, usage)."""
-        from reps.llm.stream_print import emit_block
+        from reps.llm.stream_print import emit_block, emit_status
 
+        emit_status(params.get("model", "?"))
         answer_parts: List[str] = []
         reasoning_parts: List[str] = []
 
