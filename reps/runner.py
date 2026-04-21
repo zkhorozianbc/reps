@@ -50,12 +50,8 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
     logging.basicConfig(level=getattr(logging, config.log_level, logging.INFO))
     logger = logging.getLogger(__name__)
 
-    # Configure provider on model configs
     if config.provider == "anthropic":
-        for model in config.llm.models:
-            if getattr(model, "provider", None) is None:
-                model.provider = "anthropic"
-        for model in config.llm.evaluator_models:
+        for model in (*config.llm.models, *config.llm.evaluator_models):
             if getattr(model, "provider", None) is None:
                 model.provider = "anthropic"
 

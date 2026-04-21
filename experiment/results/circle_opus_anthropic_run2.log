@@ -1,0 +1,217 @@
+INFO:reps.database:Initialized program database with 0 programs
+INFO:reps.evaluator:Successfully loaded evaluation function from experiment/benchmarks/circle_packing/evaluator.py
+INFO:reps.evaluator:Initialized evaluator with experiment/benchmarks/circle_packing/evaluator.py
+INFO:reps.evaluator:Evaluated program initial in 9.00s: sum_radii=2.6360, target_ratio=1.0004, validity=1.0000, eval_time=8.9927, combined_score=1.0004
+INFO:reps.runner:Seed program metrics: {'sum_radii': 2.63598308491761, 'target_ratio': 1.0003730872552599, 'validity': 1.0, 'eval_time': 8.992661952972412, 'combined_score': 1.0003730872552599}
+INFO:reps.database:New MAP-Elites cell occupied in island 0: {'complexity': 5, 'diversity': 0}
+INFO:reps.worker_pool:WorkerPool initialized: {'exploiter': 0.6, 'explorer': 0.25, 'crossover': 0.15}
+INFO:reps.sota_controller:SOTAController targeting score: 2.636
+INFO:reps.metrics_logger:MetricsLogger writing to experiment/results/circle_opus_anthropic/run_002/metrics
+INFO:reps.controller:REPS enabled: batch_size=5, workers=['exploiter', 'explorer', 'crossover'], ε=0.15
+INFO:reps.controller:Initialized process parallel controller with 2 workers
+INFO:reps.llm.anthropic:Initialized AnthropicLLM with model: claude-opus-4-6
+INFO:reps.llm.ensemble:Initialized LLM ensemble with models: anthropic/claude-opus-4-6 (weight: 1.00)
+INFO:reps.controller:Set max None tasks per child
+INFO:reps.controller:Started process pool with 2 processes
+INFO:reps.controller:Starting process-based evolution from iteration 1 for 50 iterations (total: 51)
+Output: experiment/results/circle_opus_anthropic/run_002
+INFO:reps.controller:Early stopping disabled
+INFO:reps.database:New MAP-Elites cell occupied in island 0: {'complexity': 0, 'diversity': 5}
+INFO:reps.controller:Iteration 1: Program 74089837-b239-4d39-87f4-b9a8fa250306 (parent: initial) completed in 20.93s
+INFO:reps.controller:Metrics: sum_radii=2.598611545040434, target_ratio=0.9861903396737891, validity=1.0, eval_time=1.160295009613037, combined_score=0.9861903396737891
+INFO:reps.database:New MAP-Elites cell occupied in island 1: {'complexity': 0, 'diversity': 0}
+INFO:reps.controller:Iteration 2: Program 3656d9ce-6ae4-44cb-864c-ad962c900e0f (parent: initial) completed in 21.44s
+INFO:reps.controller:Metrics: sum_radii=2.59861154504045, target_ratio=0.9861903396737952, validity=1.0, eval_time=1.0209238529205322, combined_score=0.9861903396737952
+INFO:reps.database:New MAP-Elites cell occupied in island 3: {'complexity': 0, 'diversity': 0}
+INFO:reps.controller:Iteration 4: Program 2e1e747e-b985-49ec-ac12-d01e22936bff (parent: initial) completed in 20.46s
+INFO:reps.controller:Metrics: sum_radii=2.598611545041668, target_ratio=0.9861903396742573, validity=1.0, eval_time=1.0448579788208008, combined_score=0.9861903396742573
+INFO:reps.database:New MAP-Elites cell occupied in island 2: {'complexity': 1, 'diversity': 0}
+INFO:reps.controller:Iteration 3: Program fe5ed18b-448d-45ef-b99e-23f3e82fdd84 (parent: initial) completed in 29.46s
+INFO:reps.controller:Metrics: sum_radii=2.630713197527584, target_ratio=0.9983731299914931, validity=1.0, eval_time=7.463574171066284, combined_score=0.9983731299914931
+INFO:reps.database:New MAP-Elites cell occupied in island 0: {'complexity': 1, 'diversity': 0}
+INFO:reps.controller:Iteration 5: Program c621e10b-0c57-4aab-9940-993c65543315 (parent: 74089837-b239-4d39-87f4-b9a8fa250306) completed in 21.61s
+INFO:reps.controller:Metrics: sum_radii=2.6127337559583754, target_ratio=0.9915498125079224, validity=1.0, eval_time=1.6889221668243408, combined_score=0.9915498125079224
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.database:Island 1 MAP-Elites cell improved: {'complexity': 0, 'diversity': 0} (fitness: 0.986 -> 0.994)
+INFO:reps.controller:Iteration 6: Program b9fc922a-b9f8-411a-a19a-7c998a5b661d (parent: 3656d9ce-6ae4-44cb-864c-ad962c900e0f) completed in 24.11s
+INFO:reps.controller:Metrics: sum_radii=2.6186899617058748, target_ratio=0.9938102321464422, validity=1.0, eval_time=4.092169761657715, combined_score=0.9938102321464422
+INFO:reps.database:Island 3 MAP-Elites cell improved: {'complexity': 0, 'diversity': 0} (fitness: 0.986 -> 0.998)
+INFO:reps.controller:Iteration 7: Program aa70d82c-b8ef-4783-bf7c-21cc13bd1856 (parent: 2e1e747e-b985-49ec-ac12-d01e22936bff) completed in 25.66s
+INFO:reps.controller:Metrics: sum_radii=2.629883612477274, target_ratio=0.9980582969553223, validity=1.0, eval_time=6.130498170852661, combined_score=0.9980582969553223
+INFO:reps.database:New MAP-Elites cell occupied in island 0: {'complexity': 2, 'diversity': 0}
+INFO:reps.controller:Iteration 9: Program d761473f-f420-43eb-9ac7-c2586efd1bb0 (parent: 74089837-b239-4d39-87f4-b9a8fa250306) completed in 27.16s
+INFO:reps.controller:Metrics: sum_radii=2.6127337559583754, target_ratio=0.9915498125079224, validity=1.0, eval_time=4.21771502494812, combined_score=0.9915498125079224
+INFO:reps.database:New MAP-Elites cell occupied in island 2: {'complexity': 2, 'diversity': 0}
+INFO:reps.controller:Iteration 8: Program 77916ca1-1cc8-48c4-8031-f70eb81f56b0 (parent: fe5ed18b-448d-45ef-b99e-23f3e82fdd84) completed in 68.27s
+INFO:reps.controller:Metrics: sum_radii=2.632341639600192, target_ratio=0.998991134573128, validity=1.0, eval_time=48.72951316833496, combined_score=0.998991134573128
+INFO:reps.database:Island 3 MAP-Elites cell improved: {'complexity': 0, 'diversity': 0} (fitness: 0.998 -> 0.998)
+INFO:reps.controller:Iteration 11: Program af1948e7-9555-405a-9a2d-f719dcc9323a (parent: aa70d82c-b8ef-4783-bf7c-21cc13bd1856) completed in 22.96s
+INFO:reps.controller:Metrics: sum_radii=2.629883612477277, target_ratio=0.9980582969553233, validity=1.0, eval_time=3.8349449634552, combined_score=0.9980582969553233
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.database:New MAP-Elites cell occupied in island 1: {'complexity': 2, 'diversity': 0}
+INFO:reps.controller:Iteration 10: Program 01568837-20f8-444c-87e1-b3018f92f233 (parent: fe5ed18b-448d-45ef-b99e-23f3e82fdd84) completed in 59.39s
+INFO:reps.controller:Metrics: sum_radii=2.6323416396001917, target_ratio=0.9989911345731278, validity=1.0, eval_time=40.10374617576599, combined_score=0.9989911345731278
+INFO:reps.controller:Iteration 13: Program 5320aab5-0043-4b1a-8ae3-634c25f793fd (parent: 77916ca1-1cc8-48c4-8031-f70eb81f56b0) completed in 34.56s
+INFO:reps.controller:Metrics: sum_radii=2.6307131975275726, target_ratio=0.9983731299914888, validity=1.0, eval_time=15.288532972335815, combined_score=0.9983731299914888
+INFO:reps.database:New MAP-Elites cell occupied in island 0: {'complexity': 3, 'diversity': 0}
+INFO:reps.database:New best program 6344d239-d009-4380-ac82-c4f84bbeffe1 replaces initial (combined_score: 1.0004 → 1.0004, +0.0000)
+INFO:reps.controller:Iteration 12: Program 6344d239-d009-4380-ac82-c4f84bbeffe1 (parent: 74089837-b239-4d39-87f4-b9a8fa250306) completed in 52.32s
+INFO:reps.controller:Metrics: sum_radii=2.6359830849176156, target_ratio=1.000373087255262, validity=1.0, eval_time=28.281983852386475, combined_score=1.000373087255262
+INFO:reps.controller:🌟 New best solution found at iteration 12: 6344d239-d009-4380-ac82-c4f84bbeffe1
+INFO:reps.database:New MAP-Elites cell occupied in island 3: {'complexity': 1, 'diversity': 0}
+INFO:reps.controller:Iteration 14: Program a77b39be-1550-4b05-a37d-19bafa0a1207 (parent: af1948e7-9555-405a-9a2d-f719dcc9323a) completed in 28.10s
+INFO:reps.controller:Metrics: sum_radii=2.629883612477262, target_ratio=0.9980582969553178, validity=1.0, eval_time=8.646842241287231, combined_score=0.9980582969553178
+INFO:reps.controller:Iteration 15: Program 5b35d62f-5f1d-4a6d-b2da-6b1aa4e2e6d6 (parent: b9fc922a-b9f8-411a-a19a-7c998a5b661d) completed in 26.92s
+INFO:reps.controller:Metrics: sum_radii=2.630670044676939, target_ratio=0.9983567531980794, validity=1.0, eval_time=8.11732792854309, combined_score=0.9983567531980794
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.controller:Iteration 17: Program cfc4406c-0a2e-4f4e-b299-a7bcfb8faef2 (parent: 6344d239-d009-4380-ac82-c4f84bbeffe1) completed in 23.07s
+INFO:reps.controller:Metrics: sum_radii=2.5986115450404474, target_ratio=0.9861903396737942, validity=1.0, eval_time=1.0621631145477295, combined_score=0.9861903396737942
+INFO:reps.controller:Iteration 18: Program 22067919-e169-4bb2-bbc3-c46414790bf3 (parent: af1948e7-9555-405a-9a2d-f719dcc9323a) completed in 35.48s
+INFO:reps.controller:Metrics: sum_radii=2.6298836124772613, target_ratio=0.9980582969553174, validity=1.0, eval_time=16.752851009368896, combined_score=0.9980582969553174
+INFO:reps.database:Island 2 MAP-Elites cell improved: {'complexity': 2, 'diversity': 0} (fitness: 0.999 -> 0.999)
+INFO:reps.controller:Iteration 16: Program ce12b3ea-ca40-4270-8996-abad14182d10 (parent: 77916ca1-1cc8-48c4-8031-f70eb81f56b0) completed in 65.81s
+INFO:reps.controller:Metrics: sum_radii=2.632341639600196, target_ratio=0.9989911345731296, validity=1.0, eval_time=45.58748483657837, combined_score=0.9989911345731296
+INFO:reps.database:Island 0 MAP-Elites cell improved: {'complexity': 1, 'diversity': 0} (fitness: 0.992 -> 0.998)
+INFO:reps.controller:Iteration 20: Program 9514ce72-ab52-45b2-bf48-4bc259abacc6 (parent: 01568837-20f8-444c-87e1-b3018f92f233) completed in 25.50s
+INFO:reps.controller:Metrics: sum_radii=2.6295852393821204, target_ratio=0.9979450623841065, validity=1.0, eval_time=6.063243865966797, combined_score=0.9979450623841065
+INFO:reps.database:New MAP-Elites cell occupied in island 1: {'complexity': 1, 'diversity': 0}
+INFO:reps.controller:Iteration 19: Program 7b62f901-777f-4cc9-a79d-a12e4fb8eec4 (parent: b9fc922a-b9f8-411a-a19a-7c998a5b661d) completed in 34.61s
+INFO:reps.controller:Metrics: sum_radii=2.632341639600192, target_ratio=0.998991134573128, validity=1.0, eval_time=15.664707899093628, combined_score=0.998991134573128
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.controller:Iteration 22: Program e0060ab8-9ef9-4f3d-8597-83eb1a54f605 (parent: ce12b3ea-ca40-4270-8996-abad14182d10) completed in 42.71s
+INFO:reps.controller:Metrics: sum_radii=2.6307131975275713, target_ratio=0.9983731299914882, validity=1.0, eval_time=23.31514596939087, combined_score=0.9983731299914882
+INFO:reps.database:New MAP-Elites cell occupied in island 3: {'complexity': 2, 'diversity': 0}
+INFO:reps.controller:Iteration 21: Program a2d4962d-d3d5-496e-ac4f-09034284789f (parent: a77b39be-1550-4b05-a37d-19bafa0a1207) completed in 54.36s
+INFO:reps.controller:Metrics: sum_radii=2.6359830849176085, target_ratio=1.0003730872552594, validity=1.0, eval_time=32.15326690673828, combined_score=1.0003730872552594
+INFO:reps.database:Island 0 MAP-Elites cell improved: {'complexity': 2, 'diversity': 0} (fitness: 0.992 -> 1.000)
+INFO:reps.database:New best program 227f1532-7248-4332-b25d-235ef1176dbd replaces 6344d239-d009-4380-ac82-c4f84bbeffe1 (combined_score: 1.0004 → 1.0004, +0.0000)
+INFO:reps.controller:Iteration 23: Program 227f1532-7248-4332-b25d-235ef1176dbd (parent: cfc4406c-0a2e-4f4e-b299-a7bcfb8faef2) completed in 25.71s
+INFO:reps.controller:Metrics: sum_radii=2.635983084917616, target_ratio=1.0003730872552623, validity=1.0, eval_time=7.303357362747192, combined_score=1.0003730872552623
+INFO:reps.controller:🌟 New best solution found at iteration 23: 227f1532-7248-4332-b25d-235ef1176dbd
+INFO:reps.controller:Iteration 24: Program 9b41af86-3119-48d5-958b-5127d20fc0ae (parent: b9fc922a-b9f8-411a-a19a-7c998a5b661d) completed in 34.43s
+INFO:reps.controller:Metrics: sum_radii=2.632341639600192, target_ratio=0.998991134573128, validity=1.0, eval_time=15.627293109893799, combined_score=0.998991134573128
+INFO:reps.database:Island 2 MAP-Elites cell improved: {'complexity': 1, 'diversity': 0} (fitness: 0.998 -> 1.000)
+INFO:reps.controller:Iteration 25: Program b14edcaf-59af-46cb-aee5-d20567019a09 (parent: ce12b3ea-ca40-4270-8996-abad14182d10) completed in 51.86s
+INFO:reps.controller:Metrics: sum_radii=2.635977394754394, target_ratio=1.000370927800529, validity=1.0, eval_time=32.30290675163269, combined_score=1.000370927800529
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.controller:Iteration 27: Program c1b35143-260a-4879-b31a-c60e7038e5b5 (parent: 74089837-b239-4d39-87f4-b9a8fa250306) completed in 25.92s
+INFO:reps.controller:Metrics: sum_radii=2.635983084917616, target_ratio=1.0003730872552623, validity=1.0, eval_time=7.06596827507019, combined_score=1.0003730872552623
+INFO:reps.database:Island 3 MAP-Elites cell improved: {'complexity': 1, 'diversity': 0} (fitness: 0.998 -> 1.000)
+INFO:reps.controller:Iteration 26: Program 8b9698fe-0938-4e78-8cf9-82d4ae66b07c (parent: a2d4962d-d3d5-496e-ac4f-09034284789f) completed in 116.62s
+INFO:reps.controller:Metrics: sum_radii=2.6359830849176085, target_ratio=1.0003730872552594, validity=1.0, eval_time=96.33026003837585, combined_score=1.0003730872552594
+INFO:reps.database:Island 1 MAP-Elites cell improved: {'complexity': 2, 'diversity': 0} (fitness: 0.999 -> 0.999)
+INFO:reps.controller:Iteration 28: Program bcd9157d-c998-49ff-b4f9-e999caa226ce (parent: 9b41af86-3119-48d5-958b-5127d20fc0ae) completed in 63.47s
+INFO:reps.controller:Metrics: sum_radii=2.6323416396001926, target_ratio=0.9989911345731282, validity=1.0, eval_time=38.04039216041565, combined_score=0.9989911345731282
+INFO:reps.controller:Iteration 30: Program 364df740-cd67-4f71-9c79-cdafe0eb8a67 (parent: 9514ce72-ab52-45b2-bf48-4bc259abacc6) completed in 27.56s
+INFO:reps.controller:Metrics: sum_radii=2.635983084917616, target_ratio=1.0003730872552623, validity=1.0, eval_time=7.146507740020752, combined_score=1.0003730872552623
+INFO:reps.database:Island 2 MAP-Elites cell improved: {'complexity': 2, 'diversity': 0} (fitness: 0.999 -> 1.000)
+INFO:reps.controller:Iteration 29: Program 115377db-8645-4f90-9516-47e067d06b30 (parent: 5320aab5-0043-4b1a-8ae3-634c25f793fd) completed in 68.48s
+INFO:reps.controller:Metrics: sum_radii=2.63598308491761, target_ratio=1.0003730872552599, validity=1.0, eval_time=47.41906404495239, combined_score=1.0003730872552599
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.controller:Iteration 32: Program 2bb72b13-e1b7-4028-88bc-c5fa9d9774b0 (parent: 5b35d62f-5f1d-4a6d-b2da-6b1aa4e2e6d6) completed in 58.14s
+INFO:reps.controller:Metrics: sum_radii=2.6323416396001926, target_ratio=0.9989911345731282, validity=1.0, eval_time=38.21386003494263, combined_score=0.9989911345731282
+INFO:reps.controller:Iteration 31: Program a1c8e371-691a-4ed0-b4ff-73455d6f2344 (parent: 22067919-e169-4bb2-bbc3-c46414790bf3) completed in 112.90s
+INFO:reps.controller:Metrics: sum_radii=2.6359830849176085, target_ratio=1.0003730872552594, validity=1.0, eval_time=93.85968828201294, combined_score=1.0003730872552594
+INFO:reps.controller:Iteration 33: Program 7c1eea74-833e-4995-8f49-2f4c6f109502 (parent: 6344d239-d009-4380-ac82-c4f84bbeffe1) completed in 36.64s
+INFO:reps.controller:Metrics: sum_radii=2.635983084917608, target_ratio=1.0003730872552592, validity=1.0, eval_time=14.406346082687378, combined_score=1.0003730872552592
+INFO:reps.controller:Iteration 34: Program 8453b6a6-932d-404a-acef-877fd43fbbca (parent: 5320aab5-0043-4b1a-8ae3-634c25f793fd) completed in 67.03s
+INFO:reps.controller:Metrics: sum_radii=2.63598308491761, target_ratio=1.0003730872552599, validity=1.0, eval_time=47.918123960494995, combined_score=1.0003730872552599
+INFO:reps.database:Island 1 MAP-Elites cell improved: {'complexity': 2, 'diversity': 0} (fitness: 0.999 -> 0.999)
+INFO:reps.controller:Iteration 35: Program fd82676a-5392-4b72-9339-7173f3e5ed89 (parent: 5b35d62f-5f1d-4a6d-b2da-6b1aa4e2e6d6) completed in 59.26s
+INFO:reps.controller:Metrics: sum_radii=2.632341639600193, target_ratio=0.9989911345731284, validity=1.0, eval_time=38.63110327720642, combined_score=0.9989911345731284
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.database:Island 0 MAP-Elites cell improved: {'complexity': 1, 'diversity': 0} (fitness: 0.998 -> 0.998)
+INFO:reps.controller:Iteration 37: Program 73e0f553-bfe8-4c51-85c1-9385771c4990 (parent: 364df740-cd67-4f71-9c79-cdafe0eb8a67) completed in 28.04s
+INFO:reps.controller:Metrics: sum_radii=2.6296280013809175, target_ratio=0.9979612908466481, validity=1.0, eval_time=6.075340032577515, combined_score=0.9979612908466481
+INFO:reps.database:Island 3 MAP-Elites cell improved: {'complexity': 1, 'diversity': 0} (fitness: 1.000 -> 1.000)
+INFO:reps.controller:Iteration 36: Program 0a30c378-ee34-4ea0-a7d4-c0c4c7df5989 (parent: a2d4962d-d3d5-496e-ac4f-09034284789f) completed in 98.01s
+INFO:reps.controller:Metrics: sum_radii=2.6359830849176094, target_ratio=1.0003730872552599, validity=1.0, eval_time=77.17248511314392, combined_score=1.0003730872552599
+INFO:reps.controller:Iteration 38: Program 80617710-8be5-4388-8435-3c6abebefbb5 (parent: e0060ab8-9ef9-4f3d-8597-83eb1a54f605) completed in 67.77s
+INFO:reps.controller:Metrics: sum_radii=2.63598308491761, target_ratio=1.0003730872552599, validity=1.0, eval_time=45.42283797264099, combined_score=1.0003730872552599
+INFO:reps.controller:Iteration 40: Program 4088c5e3-29a2-4fca-ba90-025dd5dec038 (parent: 73e0f553-bfe8-4c51-85c1-9385771c4990) completed in 27.31s
+INFO:reps.controller:Metrics: sum_radii=2.635983084917616, target_ratio=1.0003730872552623, validity=1.0, eval_time=6.969109058380127, combined_score=1.0003730872552623
+INFO:reps.controller:Iteration 39: Program 03f3f2e2-b49b-481e-9dba-ab6d4c6aa499 (parent: 7b62f901-777f-4cc9-a79d-a12e4fb8eec4) completed in 81.36s
+INFO:reps.controller:Metrics: sum_radii=2.6317301707535643, target_ratio=0.9987590780848442, validity=1.0, eval_time=59.74339485168457, combined_score=0.9987590780848442
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.database:New MAP-Elites cell occupied in island 3: {'complexity': 0, 'diversity': 1}
+INFO:reps.database:New best program bd61baca-4d57-4b7b-8bb5-860e0f522845 replaces 227f1532-7248-4332-b25d-235ef1176dbd (combined_score: 1.0004 → 1.0004, +0.0000)
+INFO:reps.controller:Iteration 41: Program bd61baca-4d57-4b7b-8bb5-860e0f522845 (parent: a2d4962d-d3d5-496e-ac4f-09034284789f) completed in 106.12s
+INFO:reps.controller:Metrics: sum_radii=2.635983084917759, target_ratio=1.0003730872553165, validity=1.0, eval_time=87.84402799606323, combined_score=1.0003730872553165
+INFO:reps.controller:🌟 New best solution found at iteration 41: bd61baca-4d57-4b7b-8bb5-860e0f522845
+INFO:reps.database:New MAP-Elites cell occupied in island 2: {'complexity': 0, 'diversity': 1}
+INFO:reps.controller:Iteration 42: Program 6e5ed497-575c-450f-b439-26d7a89126c0 (parent: 227f1532-7248-4332-b25d-235ef1176dbd) completed in 56.33s
+INFO:reps.controller:Metrics: sum_radii=2.626374609581991, target_ratio=0.996726607051989, validity=1.0, eval_time=36.034573793411255, combined_score=0.996726607051989
+INFO:reps.controller:Iteration 43: Program cd7eeb57-9701-4d84-bab7-797c186535db (parent: 364df740-cd67-4f71-9c79-cdafe0eb8a67) completed in 43.08s
+INFO:reps.controller:Metrics: sum_radii=2.635983084917608, target_ratio=1.0003730872552592, validity=1.0, eval_time=20.587327003479004, combined_score=1.0003730872552592
+INFO:reps.controller:Iteration 44: Program 954027e1-5756-4075-ba3d-268a1fbe2f9a (parent: 03f3f2e2-b49b-481e-9dba-ab6d4c6aa499) completed in 47.78s
+INFO:reps.controller:Metrics: sum_radii=2.6323416396001926, target_ratio=0.9989911345731282, validity=1.0, eval_time=28.87407612800598, combined_score=0.9989911345731282
+INFO:reps.database:New MAP-Elites cell occupied in island 2: {'complexity': 0, 'diversity': 0}
+INFO:reps.controller:Iteration 46: Program 7664043f-d847-42ea-9fbc-180cc7490cfe (parent: b14edcaf-59af-46cb-aee5-d20567019a09) completed in 50.81s
+INFO:reps.controller:Metrics: sum_radii=2.6283954125108067, target_ratio=0.9974935151843669, validity=1.0, eval_time=30.913121223449707, combined_score=0.9974935151843669
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.controller:Iteration 47: Program 0282504d-0f9d-4d4a-b516-771a24814324 (parent: cfc4406c-0a2e-4f4e-b299-a7bcfb8faef2) completed in 26.72s
+INFO:reps.controller:Metrics: sum_radii=2.635983084917616, target_ratio=1.0003730872552623, validity=1.0, eval_time=6.67936372756958, combined_score=1.0003730872552623
+INFO:reps.database:Island 3 MAP-Elites cell improved: {'complexity': 0, 'diversity': 1} (fitness: 1.000 -> 1.000)
+INFO:reps.database:New best program 1697386a-628d-4dfb-a685-53858e076bac replaces bd61baca-4d57-4b7b-8bb5-860e0f522845 (combined_score: 1.0004 → 1.0004, +0.0000)
+INFO:reps.controller:Iteration 45: Program 1697386a-628d-4dfb-a685-53858e076bac (parent: bd61baca-4d57-4b7b-8bb5-860e0f522845) completed in 125.00s
+INFO:reps.controller:Metrics: sum_radii=2.6359830849180867, target_ratio=1.000373087255441, validity=1.0, eval_time=108.31860399246216, combined_score=1.000373087255441
+INFO:reps.controller:🌟 New best solution found at iteration 45: 1697386a-628d-4dfb-a685-53858e076bac
+INFO:reps.controller:Iteration 48: Program 7f5696c3-d84a-4bde-8e4f-9b0a2b24b427 (parent: 5b35d62f-5f1d-4a6d-b2da-6b1aa4e2e6d6) completed in 61.47s
+INFO:reps.controller:Metrics: sum_radii=2.632341639600193, target_ratio=0.9989911345731284, validity=1.0, eval_time=40.804555892944336, combined_score=0.9989911345731284
+INFO:reps.database:New MAP-Elites cell occupied in island 0: {'complexity': 0, 'diversity': 1}
+INFO:reps.controller:Iteration 50: Program 6d46aa04-c140-4585-8b6a-d03bf9dd6996 (parent: 227f1532-7248-4332-b25d-235ef1176dbd) completed in 38.85s
+INFO:reps.controller:Metrics: sum_radii=2.62975956688695, target_ratio=0.9980112208299621, validity=1.0, eval_time=17.704715967178345, combined_score=0.9980112208299621
+INFO:reps.controller:Iteration 49: Program a21abc23-0fa9-4640-8029-2326b9587b42 (parent: 115377db-8645-4f90-9516-47e067d06b30) completed in 73.03s
+INFO:reps.controller:Metrics: sum_radii=2.6359830849176094, target_ratio=1.0003730872552599, validity=1.0, eval_time=51.927221059799194, combined_score=1.0003730872552599
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.controller:✅ Evolution completed - Maximum iterations reached
+INFO:reps.runner:Best program: 1697386a-628d-4dfb-a685-53858e076bac, metrics: {'sum_radii': 2.6359830849180867, 'target_ratio': 1.000373087255441, 'validity': 1.0, 'eval_time': 108.31860399246216, 'combined_score': 1.000373087255441}
+INFO:reps.controller:Stopped process pool
+INFO:reps.database:Saved database with 51 programs to experiment/results/circle_opus_anthropic/run_002
+INFO:reps.runner:Database saved to experiment/results/circle_opus_anthropic/run_002
+INFO:reps.runner:Best program saved to experiment/results/circle_opus_anthropic/run_002/best_program.py
+/Users/zkhorozian/code/reps/experiment/results/circle_opus_anthropic/run_002/best_program.py:10: RuntimeWarning: overflow encountered in exp
+  return -np.sum(np.exp(x[2*n:]))
+/Users/zkhorozian/code/reps/experiment/results/circle_opus_anthropic/run_002/best_program.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/experiment/results/circle_opus_anthropic/run_002/best_program.py:17: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+Saved packing visualization to experiment/results/circle_opus_anthropic/run_002/packing.png

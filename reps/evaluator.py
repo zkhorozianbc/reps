@@ -15,7 +15,6 @@ import traceback
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-import traceback
 
 from reps.config import EvaluatorConfig
 from reps.database import ProgramDatabase
@@ -355,7 +354,7 @@ class Evaluator:
 
         # Create a coroutine that runs the evaluation function in an executor
         async def run_evaluation():
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, self.evaluate_function, program_path)
 
         # Run the evaluation with timeout - let exceptions bubble up for retry handling
@@ -400,7 +399,7 @@ class Evaluator:
             try:
 
                 async def run_stage1():
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     return await loop.run_in_executor(None, module.evaluate_stage1, program_path)
 
                 stage1_result = await asyncio.wait_for(run_stage1(), timeout=self.config.timeout)
@@ -441,7 +440,7 @@ class Evaluator:
             try:
 
                 async def run_stage2():
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     return await loop.run_in_executor(None, module.evaluate_stage2, program_path)
 
                 stage2_result = await asyncio.wait_for(run_stage2(), timeout=self.config.timeout)
@@ -503,7 +502,7 @@ class Evaluator:
             try:
 
                 async def run_stage3():
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     return await loop.run_in_executor(None, module.evaluate_stage3, program_path)
 
                 stage3_result = await asyncio.wait_for(run_stage3(), timeout=self.config.timeout)

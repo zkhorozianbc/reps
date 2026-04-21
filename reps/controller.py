@@ -482,6 +482,8 @@ class ProcessParallelController:
         self.executor: Optional[ProcessPoolExecutor] = None
         self.shutdown_event = mp.Event()
         self.early_stopping_triggered = False
+        self._cumulative_tokens = {"in": 0, "out": 0}
+        self._warned_about_combined_score = False
 
         # Number of worker processes
         self.num_workers = config.evaluator.parallel_evaluations
@@ -834,8 +836,6 @@ class ProcessParallelController:
                         t_in = result.reps_meta.get("tokens_in", 0)
                         t_out = result.reps_meta.get("tokens_out", 0)
                         if t_in or t_out:
-                            if not hasattr(self, "_cumulative_tokens"):
-                                self._cumulative_tokens = {"in": 0, "out": 0}
                             self._cumulative_tokens["in"] += t_in
                             self._cumulative_tokens["out"] += t_out
                             logger.info(
@@ -844,32 +844,23 @@ class ProcessParallelController:
                                 f"cumulative_out={self._cumulative_tokens['out']}"
                             )
 
-                        # Check if this is the first program without combined_score
-                        if not hasattr(self, "_warned_about_combined_score"):
-                            self._warned_about_combined_score = False
-
                         if (
                             "combined_score" not in child_program.metrics
                             and not self._warned_about_combined_score
                         ):
                             avg_score = safe_numeric_average(child_program.metrics)
                             logger.warning(
-                                f"⚠️  No 'combined_score' metric found in evaluation results. "
+                                f"No 'combined_score' metric found in evaluation results. "
                                 f"Using average of all numeric metrics ({avg_score:.4f}) for evolution guidance. "
-                                f"For better evolution results, please modify your evaluator to return a 'combined_score' "
-                                f"metric that properly weights different aspects of program performance."
+                                f"Return a 'combined_score' from your evaluator for better results."
                             )
                             self._warned_about_combined_score = True
 
-                    # Check for new best
                     if self.database.best_program_id == child_program.id:
                         logger.info(
-                            f"🌟 New best solution found at iteration {completed_iteration}: "
-                            f"{child_program.id}"
+                            f"New best at iteration {completed_iteration}: {child_program.id}"
                         )
 
-                    # Checkpoint callback
-                    # Don't checkpoint at iteration 0 (that's just the initial program)
                     if (
                         completed_iteration > 0
                         and completed_iteration % self.config.checkpoint_interval == 0
@@ -1007,13 +998,12 @@ class ProcessParallelController:
             for future in pending_futures.values():
                 future.cancel()
 
-        # Log completion reason
         if self.early_stopping_triggered:
-            logger.info("✅ Evolution completed - Early stopping triggered due to convergence")
+            logger.info("Evolution completed: early stopping triggered by convergence")
         elif self.shutdown_event.is_set():
-            logger.info("✅ Evolution completed - Shutdown requested")
+            logger.info("Evolution completed: shutdown requested")
         else:
-            logger.info("✅ Evolution completed - Maximum iterations reached")
+            logger.info("Evolution completed: maximum iterations reached")
 
         return self.database.get_best_program()
 

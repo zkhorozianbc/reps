@@ -1,0 +1,11 @@
+batch,model,tokens_in,tokens_out,wall_clock_seconds
+1,default,35487,8545,113.89
+2,default,27073,8444,168.16
+3,default,38533,9132,201.29
+4,default,60966,8985,184.46
+5,default,66879,9234,209.07
+6,default,79549,9547,302.06
+7,default,82071,9446,333.98
+8,default,87224,9465,302.50
+9,default,85501,8498,304.11
+10,default,84088,8831,325.08

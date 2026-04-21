@@ -1,0 +1,1125 @@
+INFO:reps.database:Initialized program database with 0 programs
+INFO:reps.evaluator:Successfully loaded evaluation function from experiment/benchmarks/circle_packing/evaluator.py
+INFO:reps.evaluator:Initialized evaluator with experiment/benchmarks/circle_packing/evaluator.py
+INFO:reps.evaluator:Evaluated program initial in 9.48s: sum_radii=2.6360, target_ratio=1.0004, validity=1.0000, eval_time=9.4763, combined_score=1.0004
+INFO:reps.runner:Seed program metrics: {'sum_radii': 2.63598308491761, 'target_ratio': 1.0003730872552599, 'validity': 1.0, 'eval_time': 9.476262092590332, 'combined_score': 1.0003730872552599}
+INFO:reps.database:New MAP-Elites cell occupied in island 0: {'complexity': 5, 'diversity': 0}
+INFO:reps.worker_pool:WorkerPool initialized: {'exploiter': 0.6, 'explorer': 0.25, 'crossover': 0.15}
+INFO:reps.sota_controller:SOTAController targeting score: 2.636
+INFO:reps.metrics_logger:MetricsLogger writing to experiment/results/circle_opus_anthropic/run_001/metrics
+INFO:reps.controller:REPS enabled: batch_size=5, workers=['exploiter', 'explorer', 'crossover'], ε=0.15
+INFO:reps.controller:Initialized process parallel controller with 2 workers
+INFO:reps.llm.anthropic:Initialized AnthropicLLM with model: claude-opus-4-6
+INFO:reps.llm.ensemble:Initialized LLM ensemble with models: anthropic/claude-opus-4-6 (weight: 1.00)
+INFO:reps.controller:Set max None tasks per child
+INFO:reps.controller:Started process pool with 2 processes
+INFO:reps.controller:Starting process-based evolution from iteration 1 for 50 iterations (total: 51)
+Output: experiment/results/circle_opus_anthropic/run_001
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp_5kk6xvo.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.63598308491761
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmprm4dqfo7.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp_5kk6xvo.py:78: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp_5kk6xvo.py:80: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbg/opt/homebrew/Cellar/python@3.12/3.12.11/Frameworks/Python.framework/Versions/3.12/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 10 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+ island 1: {'complexity': 0, 'diversity': 5}
+INFO:reps.controller:Iteration 2: Program c564b091-26da-49fe-bbda-a436cece1a77 (parent: initial) completed in 21.86s
+INFO:reps.controller:Metrics: sum_radii=2.5986, target_ratio=0.9862, validity=1.0000, eval_time=0.9955, combined_score=0.9862
+INFO:reps.database:New MAP-Elites cell occupied in island 0: {'complexity': 1, 'diversity': 0}
+INFO:reps.controller:Iteration 1: Program 41c2793e-804e-428f-8fec-3ecf28304588 (parent: initial) completed in 30.94s
+INFO:reps.controller:Metrics: sum_radii=2.6307, target_ratio=0.9984, validity=1.0000, eval_time=9.5374, combined_score=0.9984
+INFO:reps.database:New MAP-Elites cell occupied in island 2: {'complexity': 0, 'diversity': 0}
+INFO:reps.controller:Iteration 3: Program f95bc866-7d6d-4c4c-90a6-0830975d5db6 (parent: initial) completed in 23.27s
+INFO:reps.controller:Metrics: sum_radii=2.5986, target_ratio=0.9862, validity=1.0000, eval_time=0.7677, combined_score=0.9862
+INFO:reps.database:New MAP-Elites cell occupied in island 3: {'complexity': 1, 'diversity': 0}
+INFO:reps.controller:Iteration 4: Program 82ae3205-caf3-4c2b-8b4f-ab073594430e (parent: initial) completed in 25.60s
+INFO:reps.controller:Metrics: sum_radii=2.6298, target_ratio=0.9980, validity=1.0000, eval_time=4.2560, combined_score=0.9980
+INFO:reps.database:New MAP-Elites cell occupied in island 1: {'complexity': 0, 'diversity': 0}
+INFO:reps.controller:Iteration 5: Program e27c52fc-74c5-4bfd-bec4-10134a1c321e (parent: c564b091-26da-49fe-bbda-a436cece1a77) completed in 21.47s
+INFO:reps.controller:Metrics: sum_radii=2.6296, target_ratio=0.9979, validity=1.0000, eval_time=3.3615, combined_score=0.9979
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.database:New MAP-Elites cell occupied in island 0: {'complexity': 2, 'diversity': 0}
+INFO:reps.controller:Iteration 6: Program 98324680-5a29-4822-b339-7e9852f0fb11 (parent: 41c2793e-804e-428f-8fec-3ecf28304588) completed in 24.59s
+INFO:reps.controller:Metrics: sum_radii=2.6360, target_ratio=1.0004, validity=1.0000, eval_time=3.9127, combined_score=1.0004
+INFO:reps.database:New MAP-Elites cell occupied in island 2: {'complexity': 1, 'diversity': 0}
+INFO:reps.controller:Iteration 7: Program 6310e0db-8f45-4606-ad2e-3cff9985b744 (parent: f95bc866-7d6d-4c4c-90a6-0830975d5db6) completed in 24.13s
+INFO:reps.controller:Metrics: sum_radii=2.6307, target_ratio=0.9984, validity=1.0000, eval_time=5.4407, combined_score=0.9984
+INFO:reps.database:Island 1 MAP-Elites cell improved: {'complexity': 0, 'diversity': 0} (fitness: 0.998 -> 0.998)
+INFO:reps.controller:Iteration 9: Program 96cb8178-2cca-41a9-b4c9-9948495f9efa (parent: e27c52fc-74c5-4bfd-bec4-10134a1c321e) completed in 27.90s
+INFO:reps.controller:Metrics: sum_radii=2.6296, target_ratio=0.9979, validity=1.0000, eval_time=9.7646, combined_score=0.9979
+INFO:reps.database:Island 3 MAP-Elites cell improved: {'complexity': 1, 'diversity': 0} (fitness: 0.998 -> 0.999)
+INFO:reps.controller:Iteration 8: Program feb98528-1015-419e-b238-2d6e797aac79 (parent: 41c2793e-804e-428f-8fec-3ecf28304588) completed in 44.54s
+INFO:reps.controller:Metrics: sum_radii=2.6311, target_ratio=0.9985, validity=1.0000, eval_time=24.5205, combined_score=0.9985
+INFO:reps.database:New MAP-Elites cell occupied in island 0: {'complexity': 3, 'diversity': 1}
+INFO:reps.controller:Iteration 10: Program f18890d0-6ae1-4999-8980-fc9d72c9a131 (parent: 98324680-5a29-4822-b339-7e9852f0fb11) completed in 47.38s
+INFO:reps.controller:Metrics: sum_radii=2.6359, target_ratio=1.0003, validity=1.0000, eval_time=22.7765, combined_score=1.0003
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.controller:Iteration 11: Program 95e183ca-bf4e-4e0c-8434-c3b162b05597 (parent: 6310e0db-8f45-4606-ad2e-3cff9985b744) completed in 47.70s
+INFO:reps.controller:Metrics: sum_radii=2.6307, target_ratio=0.9984, validity=1.0000, eval_time=28.6837, combined_score=0.9984
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp30_2982h.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6307003042085255
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpz4t5l4uc.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp30_2982h.py:41: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp30_2982h.py:43: RuntimeWarning: overflow encountered in exp
+  cc2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp30_2982h.py:46: RuntimeWarning: overflow encountered in exp
+  cc2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp30_2982h.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp30_2982h.py:15: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp30_2982h.py:18: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp30_2982h.py:59: RuntimeWarning: divide by zero encountered in log
+  xv = np.r_[cu.ravel(), np.log(ru)]
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:574: RuntimeWarning: invalid value encountered in subtract
+  dx = ((x0 + h) - x0)
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:685: RuntimeWarning: invalid value encountered in scalar subtract
+  dx = [(x0[i] + h[i]) - x0[i] for i in range(n)]
+
+Evaluation: valid=True, sum_radii=2.630700, target=2.635, ratio=0.998368, time=9.54s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp2bonusf0.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6298370788883045
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzuz585zp.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp2bonusf0.py:32: RuntimeWarning: overflow encountered in exp
+  return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp2bonusf0.py:34: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp2bonusf0.py:37: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp2bonusf0.py:22: RuntimeWarning: overflow encountered in exp
+  return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp2bonusf0.py:24: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp2bonusf0.py:27: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.629837, target=2.635, ratio=0.998041, time=4.26s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpijp530cx.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6359830849176085
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpow3gwjke.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpijp530cx.py:18: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpijp530cx.py:20: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpijp530cx.py:23: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpijp530cx.py:60: RuntimeWarning: divide by zero encountered in log
+  xv = np.r_[cu.ravel(), np.log(ru)]
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:574: RuntimeWarning: invalid value encountered in subtract
+  dx = ((x0 + h) - x0)
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:685: RuntimeWarning: invalid value encountered in scalar subtract
+  dx = [(x0[i] + h[i]) - x0[i] for i in range(n)]
+
+Evaluation: valid=True, sum_radii=2.635983, target=2.635, ratio=1.000373, time=3.91s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzy5v24_w.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.631093589101789
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmph20agk5g.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzy5v24_w.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzy5v24_w.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzy5v24_w.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzy5v24_w.py:50: RuntimeWarning: overflow encountered in exp
+  cr = xv[:2*n].reshape(n,2); rr = np.exp(xv[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzy5v24_w.py:23: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzy5v24_w.py:25: RuntimeWarning: overflow encountered in exp
+  cc2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzy5v24_w.py:28: RuntimeWarning: overflow encountered in exp
+  cc2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzy5v24_w.py:41: RuntimeWarning: divide by zero encountered in log
+  xv = np.r_[cu.ravel(), np.log(ru)]
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:574: RuntimeWarning: invalid value encountered in subtract
+  dx = ((x0 + h) - x0)
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:685: RuntimeWarning: invalid value encountered in scalar subtract
+  dx = [(x0[i] + h[i]) - x0[i] for i in range(n)]
+
+Evaluation: valid=True, sum_radii=2.631094, target=2.635, ratio=0.998517, time=24.52s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmprrn6yf95.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6307131975275704
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpqkwdoewz.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmprrn6yf95.py:53: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmprrn6yf95.py:55: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmprrn6yf95.py:58: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[-1])
+
+Evaluation: valid=True, sum_radii=2.630713, target=2.635, ratio=0.998373, time=28.68s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpb24mgyw6.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.5986115450404332
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp6tn_159s.py.results
+INFO:reps.controller:Iteration 13: Program 7fc3e542-718d-4e1d-a7d0-2bb89ee07198 (parent: 98324680-5a29-4822-b339-7e9852f0fb11) completed in 20.76s
+INFO:reps.controller:Metrics: sum_radii=2.5986, target_ratio=0.9862, validity=1.0000, eval_time=1.0906, combined_score=0.9862
+INFO:reps.database:Island 1 MAP-Elites cell improved: {'complexity': 0, 'diversity': 0} (fitness: 0.998 -> 0.998)
+INFO:reps.controller:Iteration 12: Program a77a78fe-70ca-46c6-81af-7041c8a04fb0 (parent: 96cb8178-2cca-41a9-b4c9-9948495f9efa) completed in 29.85s
+INFO:reps.controller:Metrics: sum_radii=2.6296, target_ratio=0.9979, validity=1.0000, eval_time=13.1705, combined_score=0.9979
+INFO:reps.controller:Iteration 14: Program a1e01649-5910-4760-9fcf-03b8d5ba51a9 (parent: initial) completed in 28.60s
+INFO:reps.controller:Metrics: sum_radii=2.6360, target_ratio=1.0004, validity=1.0000, eval_time=5.4317, combined_score=1.0004
+INFO:reps.database:New MAP-Elites cell occupied in island 3: {'complexity': 0, 'diversity': 0}
+INFO:reps.controller:Iteration 16: Program e476c126-98a5-4035-a1bb-7fb748e8b165 (parent: feb98528-1015-419e-b238-2d6e797aac79) completed in 19.94s
+INFO:reps.controller:Metrics: sum_radii=2.5961, target_ratio=0.9853, validity=1.0000, eval_time=1.3825, combined_score=0.9853
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.controller:Iteration 15: Program 8bf9be8b-87ec-4e5c-9472-051126780b64 (parent: 95e183ca-bf4e-4e0c-8434-c3b162b05597) completed in 59.77s
+INFO:reps.controller:Metrics: sum_radii=2.6299, target_ratio=0.9981, validity=1.0000, eval_time=40.8439, combined_score=0.9981
+INFO:reps.controller:Iteration 17: Program a07c741b-c2eb-404f-b87f-da08a26f4e50 (parent: a77a78fe-70ca-46c6-81af-7041c8a04fb0) completed in 39.14s
+INFO:reps.controller:Metrics: sum_radii=2.6296, target_ratio=0.9979, validity=1.0000, eval_time=20.2897, combined_score=0.9979
+INFO:reps.controller:Iteration 18: Program 09e2a11e-35a1-4cf9-8d16-367d8ddc95a7 (parent: initial) completed in 31.66s
+INFO:reps.controller:Metrics: sum_radii=2.6360, target_ratio=1.0004, validity=1.0000, eval_time=7.1705, combined_score=1.0004
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpg2r_csaw.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.598611545041668
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmph2nb70pp.py.results
+
+Evaluation: valid=True, sum_radii=2.598612, target=2.635, ratio=0.986190, time=1.00s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp5a96pfxm.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.5986115450404337
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpppbty1go.py.results
+
+Evaluation: valid=True, sum_radii=2.598612, target=2.635, ratio=0.986190, time=0.77s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpewhs00ks.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6295852393749968
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpq_01yfqc.py.results
+
+Evaluation: valid=True, sum_radii=2.629585, target=2.635, ratio=0.997945, time=3.36s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpz0_skqtu.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6307131975275704
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpb2wcp6yf.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpz0_skqtu.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpz0_skqtu.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpz0_skqtu.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.630713, target=2.635, ratio=0.998373, time=5.44s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1zupnivw.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6295852393749977
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpjmzsu91u.py.results
+
+Evaluation: valid=True, sum_radii=2.629585, target=2.635, ratio=0.997945, time=9.76s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpevoweczp.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.635895738581975
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmplugx3pcb.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpevoweczp.py:19: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpevoweczp.py:21: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpevoweczp.py:24: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpevoweczp.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpevoweczp.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpevoweczp.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpevoweczp.py:76: RuntimeWarning: divide by zero encountered in log
+  xv = np.r_[cu.ravel(), np.log(ru)]
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:574: RuntimeWarning: invalid value encountered in subtract
+  dx = ((x0 + h) - x0)
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:685: RuntimeWarning: invalid value encountered in scalar subtract
+  dx = [(x0[i] + h[i]) - x0[i] for i in range(n)]
+
+Evaluation: valid=True, sum_radii=2.635896, target=2.635, ratio=1.000340, time=22.78s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp3worvkng.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6295852393749986
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp25mrtl84.py.results
+
+Evaluation: valid=True, sum_radii=2.629585, target=2.635, ratio=0.997945, time=13.17s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp0s73a7fk.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6298836124772618
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp_g5kmgzj.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp0s73a7fk.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp0s73a7fk.py:15: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp0s73a7fk.py:18: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.629884, target=2.635, ratio=0.998058, time=40.84s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmprh86l62f.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.635983084917608
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp9zpfg9jp.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmprh86l62f.py:8: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmprh86l62f.py:10: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmprh86l62f.py:13: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.635983, target=2.635, ratio=1.000373, time=7.17s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpvtqn1epp.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6214909620168623
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpvvdbqcz8.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpvtqn1epp.py:31: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpvtqn1epp.py:33: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpvtqn1epp.py:36: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[-1])
+
+Evaluation: valid=True, sum_radii=2.621491, target=2.635, ratio=0.994873, time=4.54sINFO:reps.database:Island 2 MAP-Elites cell improved: {'complexity': 0, 'diversity': 0} (fitness: 0.986 -> 0.995)
+INFO:reps.controller:Iteration 20: Program 0e9cb77e-4ee2-4b52-b04c-78f8c7861f92 (parent: a1e01649-5910-4760-9fcf-03b8d5ba51a9) completed in 23.61s
+INFO:reps.controller:Metrics: sum_radii=2.6215, target_ratio=0.9949, validity=1.0000, eval_time=4.5384, combined_score=0.9949
+INFO:reps.controller:Iteration 21: Program 2afbca34-9381-4080-a88b-9b2e1e8d0353 (parent: c564b091-26da-49fe-bbda-a436cece1a77) completed in 34.43s
+INFO:reps.controller:Metrics: sum_radii=2.6296, target_ratio=0.9979, validity=1.0000, eval_time=17.3726, combined_score=0.9979
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.database:Island 3 MAP-Elites cell improved: {'complexity': 1, 'diversity': 0} (fitness: 0.999 -> 1.000)
+INFO:reps.controller:Iteration 19: Program a72d5ec7-c426-44c5-a5b8-de74d3dc1b35 (parent: 7fc3e542-718d-4e1d-a7d0-2bb89ee07198) completed in 64.67s
+INFO:reps.controller:Metrics: sum_radii=2.6343, target_ratio=0.9997, validity=1.0000, eval_time=45.2548, combined_score=0.9997
+INFO:reps.database:Island 0 MAP-Elites cell improved: {'complexity': 1, 'diversity': 0} (fitness: 0.998 -> 1.000)
+INFO:reps.controller:Iteration 22: Program d7456809-27c1-4de3-85c1-fd2c866da15d (parent: f18890d0-6ae1-4999-8980-fc9d72c9a131) completed in 27.35s
+INFO:reps.controller:Metrics: sum_radii=2.6360, target_ratio=1.0004, validity=1.0000, eval_time=6.4228, combined_score=1.0004
+INFO:reps.controller:Iteration 23: Program 9faff695-f7e6-44dd-85f8-24cc328e7ef0 (parent: 8bf9be8b-87ec-4e5c-9472-051126780b64) completed in 46.90s
+INFO:reps.controller:Metrics: sum_radii=2.6307, target_ratio=0.9984, validity=1.0000, eval_time=26.9073, combined_score=0.9984
+INFO:reps.controller:Iteration 24: Program fd689bbb-28ab-43c0-ba42-3c0eaf659fbb (parent: c564b091-26da-49fe-bbda-a436cece1a77) completed in 30.04s
+INFO:reps.controller:Metrics: sum_radii=2.6296, target_ratio=0.9979, validity=1.0000, eval_time=13.8800, combined_score=0.9979
+
+Evaluation: valid=True, sum_radii=2.598612, target=2.635, ratio=0.986190, time=1.09s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmphv5bhsl7.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6359830849176085
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpimthwdh0.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmphv5bhsl7.py:18: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmphv5bhsl7.py:20: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmphv5bhsl7.py:23: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+
+Evaluation: valid=True, sum_radii=2.635983, target=2.635, ratio=1.000373, time=5.43s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpujwrxny3.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.5961449304057203
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpp0n9k1u2.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpujwrxny3.py:31: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpujwrxny3.py:33: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpujwrxny3.py:36: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+
+Evaluation: valid=True, sum_radii=2.596145, target=2.635, ratio=0.985254, time=1.38s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpqxkv0bc1.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6295852393749986
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp9fy7ghjo.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpqxkv0bc1.py:10: RuntimeWarning: overflow encountered in exp
+  return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpqxkv0bc1.py:16: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpqxkv0bc1.py:19: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.629585, target=2.635, ratio=0.997945, time=20.29s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwcbeclbm.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.634292402071374
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpsd6pcmhm.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwcbeclbm.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwcbeclbm.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwcbeclbm.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwcbeclbm.py:22: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwcbeclbm.py:24: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwcbeclbm.py:27: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwcbeclbm.py:48: RuntimeWarning: overflow encountered in exp
+  cr = xv[:2*n].reshape(n,2); rr = np.exp(xv[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwcbeclbm.py:39: RuntimeWarning: divide by zero encountered in log
+  xv = np.r_[cu.ravel(), np.log(ru)]
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:574: RuntimeWarning: invalid value encountered in subtract
+  dx = ((x0 + h) - x0)
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:685: RuntimeWarning: invalid value encountered in scalar subtract
+  dx = [(x0[i] + h[i]) - x0[i] for i in range(n)]
+
+Evaluation: valid=True, sum_radii=2.634292, target=2.635, ratio=0.999731, time=45.25s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp5aaz1dei.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.63071319752757
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1a9dqoch.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp5aaz1dei.py:45: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp5aaz1dei.py:47: RuntimeWarning: overflow encountered in exp
+  c,r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp5aaz1dei.py:50: RuntimeWarning: overflow encountered in exp
+  c,r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp5aaz1dei.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp5aaz1dei.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp5aaz1dei.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp5aaz1dei.py:71: RuntimeWarning: overflow encountered in exp
+  c, r = res.x[:2*n].reshape(n,2), np.exp(res.x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.630713, target=2.635, ratio=0.998373, time=26.91s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp7tsw_tra.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6330352288723597
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpz2ipmylo.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp7tsw_tra.py:10: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp7tsw_tra.py:17: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp7tsw_tra.py:20: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp7tsw_tra.py:52: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp7tsw_tra.py:54: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp7tsw_tra.py:57: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp7tsw_tra.py:69: RuntimeWarning: divide by zero encountered in log
+  xv = np.r_[cu.ravel(), np.log(ru)]
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:574: RuntimeWarning: invalid value encountered in subtract
+  dx = ((x0 + h) - x0)
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:685: RuntimeWarning: invalid value encountered in scalar subtract
+  dx = [(x0[i] + h[i]) - x0[i] for i in range(n)]
+INFO:reps.controller:Iteration 25: Program d3eb2132-6204-4bd0-9082-079d214842bc (parent: a72d5ec7-c426-44c5-a5b8-de74d3dc1b35) completed in 35.41s
+INFO:reps.controller:Metrics: sum_radii=2.6330, target_ratio=0.9993, validity=1.0000, eval_time=16.9562, combined_score=0.9993
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.controller:Iteration 26: Program 08acba65-1df5-429c-b746-2985cfa8b6a3 (parent: f18890d0-6ae1-4999-8980-fc9d72c9a131) completed in 27.84s
+INFO:reps.controller:Metrics: sum_radii=2.5961, target_ratio=0.9853, validity=1.0000, eval_time=6.0590, combined_score=0.9853
+INFO:reps.controller:Iteration 27: Program fa10af51-0124-4468-b245-bb794146c8d6 (parent: 0e9cb77e-4ee2-4b52-b04c-78f8c7861f92) completed in 48.69s
+INFO:reps.controller:Metrics: sum_radii=2.6307, target_ratio=0.9984, validity=1.0000, eval_time=30.8048, combined_score=0.9984
+INFO:reps.database:New MAP-Elites cell occupied in island 1: {'complexity': 1, 'diversity': 0}
+INFO:reps.controller:Iteration 28: Program c765f1e4-023e-4ab9-9f38-b0bc421510c1 (parent: 2afbca34-9381-4080-a88b-9b2e1e8d0353) completed in 53.84s
+INFO:reps.controller:Metrics: sum_radii=2.6299, target_ratio=0.9981, validity=1.0000, eval_time=29.9320, combined_score=0.9981
+INFO:reps.controller:Iteration 30: Program 5712071a-0b29-47e7-b036-7072285ffccd (parent: initial) completed in 45.06s
+INFO:reps.controller:Metrics: sum_radii=2.6360, target_ratio=1.0004, validity=1.0000, eval_time=14.3059, combined_score=1.0004
+
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4nmkjwx7.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6295852393749986
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmplocgph0k.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4nmkjwx7.py:10: RuntimeWarning: overflow encountered in exp
+  return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4nmkjwx7.py:16: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4nmkjwx7.py:19: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.629585, target=2.635, ratio=0.997945, time=17.37s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpjnnabosv.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.635983084917608
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp89ittu_o.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpjnnabosv.py:26: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpjnnabosv.py:28: RuntimeWarning: overflow encountered in exp
+  c2,rr=x[:2*n].reshape(n,2),np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpjnnabosv.py:31: RuntimeWarning: overflow encountered in exp
+  c2,rr=x[:2*n].reshape(n,2),np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpjnnabosv.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpjnnabosv.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpjnnabosv.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.635983, target=2.635, ratio=1.000373, time=6.42s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp2x8ou9jn.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6295852393749986
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp8zodg5v0.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp2x8ou9jn.py:10: RuntimeWarning: overflow encountered in exp
+  return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp2x8ou9jn.py:16: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp2x8ou9jn.py:19: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.629585, target=2.635, ratio=0.997945, time=13.88s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp5dduu8ld.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.5961449304057207
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpebit446i.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp5dduu8ld.py:30: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp5dduu8ld.py:32: RuntimeWarning: overflow encountered in exp
+  c2,rr=x[:2*n].reshape(n,2),np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp5dduu8ld.py:35: RuntimeWarning: overflow encountered in exp
+  c2,rr=x[:2*n].reshape(n,2),np.exp(x[-1])
+
+Evaluation: valid=True, sum_radii=2.596145, target=2.635, ratio=0.985254, time=6.06s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4rehjzmy.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6298836124772635
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4hx695bq.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4rehjzmy.py:10: RuntimeWarning: overflow encountered in exp
+  return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4rehjzmy.py:16: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4rehjzmy.py:19: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4rehjzmy.py:13: RuntimeWarning: overflow encountered in exp
+  g[2*n:] = -np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4rehjzmy.py:26: RuntimeWarning: overflow encountered in exp
+  c, r = res.x[:2*n].reshape(n,2), np.exp(res.x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.629884, target=2.635, ratio=0.998058, time=29.93s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp_g31fjh1.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6359830849176085
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpsm1s3l0e.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp_g31fjh1.py:22: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp_g31fjh1.py:24: RuntimeWarning: overflow encountered in exp
+  c2,rr=x[:2*n].reshape(n,2),np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp_g31fjh1.py:27: RuntimeWarning: overflow encountered in exp
+  c2,rr=x[:2*n].reshape(n,2),np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp_g31fjh1.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp_g31fjh1.py:15: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp_g31fjh1.py:18: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.635983, target=2.635, ratio=1.000373, time=14.31s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpt1rs_y39.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.63071319752757
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpc4ah5fcv.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpt1rs_y39.py:43: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpt1rs_y39.py:45: RuntimeWarning: overflow encountered in exp
+  c,r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpt1rs_y39.py:48: RuntimeWarning: overflow encountered in exp
+  c,r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpt1rs_y39.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpt1rs_y39.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpt1rs_y39.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpt1rs_y39.py:69: RuntimeWarning: overflow encountered in exp
+  c, r = res.x[:2*n].reshape(n,2), np.exp(res.x[2*n:])
+INFO:reps.controller:Iteration 31: Program 688f861f-ce85-48a8-813b-8bf9330f73a6 (parent: 0e9cb77e-4ee2-4b52-b04c-78f8c7861f92) completed in 46.18s
+INFO:reps.controller:Metrics: sum_radii=2.6307, target_ratio=0.9984, validity=1.0000, eval_time=26.0307, combined_score=0.9984
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.database:New MAP-Elites cell occupied in island 3: {'complexity': 2, 'diversity': 0}
+INFO:reps.controller:Iteration 29: Program 5f374224-6cbb-4459-b56b-62a8abefa763 (parent: a72d5ec7-c426-44c5-a5b8-de74d3dc1b35) completed in 119.35s
+INFO:reps.controller:Metrics: sum_radii=2.6359, target_ratio=1.0003, validity=1.0000, eval_time=100.1262, combined_score=1.0003
+INFO:reps.database:New MAP-Elites cell occupied in island 0: {'complexity': 0, 'diversity': 0}
+INFO:reps.controller:Iteration 33: Program 25a20cec-9c7b-4b84-af48-99491130f8b8 (parent: 09e2a11e-35a1-4cf9-8d16-367d8ddc95a7) completed in 28.34s
+INFO:reps.controller:Metrics: sum_radii=2.6024, target_ratio=0.9876, validity=1.0000, eval_time=7.2379, combined_score=0.9876
+INFO:reps.database:Island 1 MAP-Elites cell improved: {'complexity': 1, 'diversity': 0} (fitness: 0.998 -> 0.998)
+INFO:reps.controller:Iteration 32: Program fc68cd7f-c6ee-4d5f-a072-ad2cfc70804a (parent: fd689bbb-28ab-43c0-ba42-3c0eaf659fbb) completed in 62.18s
+INFO:reps.controller:Metrics: sum_radii=2.6299, target_ratio=0.9981, validity=1.0000, eval_time=38.3303, combined_score=0.9981
+INFO:reps.database:Island 3 MAP-Elites cell improved: {'complexity': 2, 'diversity': 0} (fitness: 1.000 -> 1.000)
+INFO:reps.controller:Iteration 35: Program ad5c2476-602d-48d9-9532-65601997bc4c (parent: d3eb2132-6204-4bd0-9082-079d214842bc) completed in 39.04s
+INFO:reps.controller:Metrics: sum_radii=2.6360, target_ratio=1.0004, validity=1.0000, eval_time=14.5464, combined_score=1.0004
+INFO:reps.database:Island 2 MAP-Elites cell improved: {'complexity': 1, 'diversity': 0} (fitness: 0.998 -> 1.000)
+INFO:reps.controller:Iteration 34: Program dfa708c8-3fbd-4733-b51e-2d9e1e822e4d (parent: 0e9cb77e-4ee2-4b52-b04c-78f8c7861f92) completed in 64.30s
+INFO:reps.controller:Metrics: sum_radii=2.6353, target_ratio=1.0001, validity=1.0000, eval_time=44.4898, combined_score=1.0001
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.controller:Iteration 36: Program 56a8761a-6941-4b08-a130-c2b475a6d944 (parent: d7456809-27c1-4de3-85c1-fd2c866da15d) completed in 39.56s
+INFO:reps.controller:Metrics: sum_radii=2.6353, target_ratio=1.0001, validity=1.0000, eval_time=17.7538, combined_score=1.0001
+INFO:reps.controller:Iteration 37: Program 1bdf05fa-9fbc-4b2a-a965-fb51dea76e73 (parent: 2afbca34-9381-4080-a88b-9b2e1e8d0353) completed in 67.59s
+INFO:reps.controller:Metrics: sum_radii=2.6299, target_ratio=0.9981, validity=1.0000, eval_time=43.2672, combined_score=0.9981
+INFO:reps.controller:Iteration 38: Program 6310d82b-0bdc-4ca8-959f-a1a1d3c97620 (parent: ad5c2476-602d-48d9-9532-65601997bc4c) completed in 45.12s
+INFO:reps.controller:Metrics: sum_radii=2.6359, target_ratio=1.0003, validity=1.0000, eval_time=22.8776, combined_score=1.0003
+
+Evaluation: valid=True, sum_radii=2.630713, target=2.635, ratio=0.998373, time=26.03s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1jm0zfy4.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.629883651239219
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpm8705akq.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1jm0zfy4.py:10: RuntimeWarning: overflow encountered in exp
+  return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1jm0zfy4.py:16: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1jm0zfy4.py:19: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1jm0zfy4.py:13: RuntimeWarning: overflow encountered in exp
+  g[2*n:] = -np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1jm0zfy4.py:26: RuntimeWarning: overflow encountered in exp
+  c, r = res.x[:2*n].reshape(n,2), np.exp(res.x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.629884, target=2.635, ratio=0.998058, time=38.33s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpqr0nmalg.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.635983084917608
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpcbn80stu.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpqr0nmalg.py:18: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpqr0nmalg.py:20: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpqr0nmalg.py:23: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpqr0nmalg.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpqr0nmalg.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpqr0nmalg.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpqr0nmalg.py:55: RuntimeWarning: divide by zero encountered in log
+  xv = np.r_[cu.ravel(), np.log(ru)]
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:574: RuntimeWarning: invalid value encountered in subtract
+  dx = ((x0 + h) - x0)
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:685: RuntimeWarning: invalid value encountered in scalar subtract
+  dx = [(x0[i] + h[i]) - x0[i] for i in range(n)]
+
+Evaluation: valid=True, sum_radii=2.635983, target=2.635, ratio=1.000373, time=14.55s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1kjuxrt2.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6353284124888052
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpg7u9zon8.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1kjuxrt2.py:28: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1kjuxrt2.py:30: RuntimeWarning: overflow encountered in exp
+  c2,rr=x[:2*n].reshape(n,2),np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1kjuxrt2.py:33: RuntimeWarning: overflow encountered in exp
+  c2,rr=x[:2*n].reshape(n,2),np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1kjuxrt2.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1kjuxrt2.py:13: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp1kjuxrt2.py:16: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.635328, target=2.635, ratio=1.000125, time=17.75s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzql22azi.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6358957385817665
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmprgvi6enq.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzql22azi.py:55: RuntimeWarning: divide by zero encountered in log
+  xv = np.r_[cu.ravel(), np.log(ru)]
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:574: RuntimeWarning: invalid value encountered in subtract
+  dx = ((x0 + h) - x0)
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:685: RuntimeWarning: invalid value encountered in scalar subtract
+  dx = [(x0[i] + h[i]) - x0[i] for i in range(n)]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzql22azi.py:18: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzql22azi.py:20: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzql22azi.py:23: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzql22azi.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzql22azi.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzql22azi.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.635896, target=2.635, ratio=1.000340, time=22.88s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpkkk23x3p.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.626443232469803
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp5vkcarx9.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpkkk23x3p.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpkkk23x3p.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpkkk23x3p.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpkkk23x3p.py:55: RuntimeWarning: overflow encountered in exp
+  xv=res.x; cr=xv[:2*n].reshape(n,2); rr=np.exp(xv[2*n:]); s=np.sum(rr)
+
+Evaluation: valid=True, sum_radii=2.626443, target=2.635, ratio=0.996753, time=34.88sINFO:reps.controller:Iteration 40: Program 6b030282-4e0a-4ebf-9f63-1fc0d8cb8770 (parent: 09e2a11e-35a1-4cf9-8d16-367d8ddc95a7) completed in 55.69s
+INFO:reps.controller:Metrics: sum_radii=2.6264, target_ratio=0.9968, validity=1.0000, eval_time=34.8802, combined_score=0.9968
+
+Evaluation: valid=True, sum_radii=2.633035, target=2.635, ratio=0.999254, time=16.96s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpfi0ghs2r.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.63071319752757
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmptf6sptnh.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpfi0ghs2r.py:43: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpfi0ghs2r.py:45: RuntimeWarning: overflow encountered in exp
+  c,r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpfi0ghs2r.py:48: RuntimeWarning: overflow encountered in exp
+  c,r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpfi0ghs2r.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpfi0ghs2r.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpfi0ghs2r.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpfi0ghs2r.py:69: RuntimeWarning: overflow encountered in exp
+  c, r = res.x[:2*n].reshape(n,2), np.exp(res.x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.630713, target=2.635, ratio=0.998373, time=30.80s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpgx6ssr6j.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6358957385817656
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp_uki7nrm.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpgx6ssr6j.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpgx6ssr6j.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpgx6ssr6j.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpgx6ssr6j.py:38: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpgx6ssr6j.py:40: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpgx6ssr6j.py:43: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpgx6ssr6j.py:50: RuntimeWarning: overflow encountered in exp
+  cu = res.x[:2*n].reshape(n,2); ru = np.full(n, np.exp(res.x[-1]))
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:574: RuntimeWarning: invalid value encountered in subtract
+  dx = ((x0 + h) - x0)
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:685: RuntimeWarning: invalid value encountered in scalar subtract
+  dx = [(x0[i] + h[i]) - x0[i] for i in range(n)]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpgx6ssr6j.py:57: RuntimeWarning: divide by zero encountered in log
+  xv = np.r_[cu.ravel(), np.log(ru)]
+
+Evaluation: valid=True, sum_radii=2.635896, target=2.635, ratio=1.000340, time=100.13s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiobhz1cp.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6024416624177116
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpmu5_rwr7.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiobhz1cp.py:31: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiobhz1cp.py:33: RuntimeWarning: overflow encountered in exp
+  c,r=x[:2*n].reshape(n,2),np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiobhz1cp.py:36: RuntimeWarning: overflow encountered in exp
+  c,r=x[:2*n].reshape(n,2),np.exp(x[-1])
+
+Evaluation: valid=True, sum_radii=2.602442, target=2.635, ratio=0.987644, time=7.24s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpj7m8y0y8.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.635328412488803
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmprpg0_1tg.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpj7m8y0y8.py:44: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpj7m8y0y8.py:46: RuntimeWarning: overflow encountered in exp
+  c,r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpj7m8y0y8.py:49: RuntimeWarning: overflow encountered in exp
+  c,r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpj7m8y0y8.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpj7m8y0y8.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpj7m8y0y8.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.635328, target=2.635, ratio=1.000125, time=44.49s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpoq6fztke.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.629883612477444
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpq7g2rnnf.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpoq6fztke.py:10: RuntimeWarning: overflow encountered in exp
+  return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpoq6fztke.py:16: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpoq6fztke.py:19: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpoq6fztke.py:13: RuntimeWarning: overflow encountered in exp
+  g[2*n:] = -np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpoq6fztke.py:26: RuntimeWarning: overflow encountered in exp
+  c, r = res.x[:2*n].reshape(n,2), np.exp(res.x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.629884, target=2.635, ratio=0.998058, time=43.27s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiyts1hd5.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.635895738581766
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpisa290j2.py.results
+INFO:reps.database:Island 2 MAP-Elites cell improved: {'complexity': 1, 'diversity': 0} (fitness: 1.000 -> 1.000)
+INFO:reps.controller:Iteration 39: Program 81a39926-dbaa-4c9b-b0de-123524f34319 (parent: fa10af51-0124-4468-b245-bb794146c8d6) completed in 82.75s
+INFO:reps.controller:Metrics: sum_radii=2.6359, target_ratio=1.0003, validity=1.0000, eval_time=62.7360, combined_score=1.0003
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.controller:Iteration 42: Program 94e3d439-f94d-41f7-88fd-81306914f4e9 (parent: 5712071a-0b29-47e7-b036-7072285ffccd) completed in 22.75s
+INFO:reps.controller:Metrics: sum_radii=2.5961, target_ratio=0.9853, validity=1.0000, eval_time=2.9407, combined_score=0.9853
+INFO:reps.database:Island 1 MAP-Elites cell improved: {'complexity': 1, 'diversity': 0} (fitness: 0.998 -> 0.998)
+INFO:reps.controller:Iteration 41: Program 048ac6ac-1f43-459d-9383-aebfa52da499 (parent: fd689bbb-28ab-43c0-ba42-3c0eaf659fbb) completed in 72.09s
+INFO:reps.controller:Metrics: sum_radii=2.6299, target_ratio=0.9981, validity=1.0000, eval_time=52.0555, combined_score=0.9981
+INFO:reps.controller:Iteration 43: Program 36a45da2-12da-4c4e-a7e0-4401d3039826 (parent: a1e01649-5910-4760-9fcf-03b8d5ba51a9) completed in 28.11s
+INFO:reps.controller:Metrics: sum_radii=2.5961, target_ratio=0.9853, validity=1.0000, eval_time=7.3243, combined_score=0.9853
+INFO:reps.controller:Iteration 45: Program aae4ae1a-7820-4e19-a51a-4eb9bfd7dd79 (parent: ad5c2476-602d-48d9-9532-65601997bc4c) completed in 31.20s
+INFO:reps.controller:Metrics: sum_radii=2.6353, target_ratio=1.0001, validity=1.0000, eval_time=12.3271, combined_score=1.0001
+INFO:reps.controller:Iteration 44: Program 34f3db5f-2122-4d2e-ac27-1d26c140423a (parent: 95e183ca-bf4e-4e0c-8434-c3b162b05597) completed in 89.85s
+INFO:reps.controller:Metrics: sum_radii=2.6323, target_ratio=0.9990, validity=1.0000, eval_time=69.6710, combined_score=0.9990
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.database:Island 1 MAP-Elites cell improved: {'complexity': 1, 'diversity': 0} (fitness: 0.998 -> 0.999)
+INFO:reps.controller:Iteration 46: Program fdbeeb6e-5196-4deb-b9a2-9c1bb6a5af68 (parent: 2afbca34-9381-4080-a88b-9b2e1e8d0353) completed in 75.95s
+INFO:reps.controller:Metrics: sum_radii=2.6330, target_ratio=0.9993, validity=1.0000, eval_time=57.3911, combined_score=0.9993
+INFO:reps.controller:Iteration 47: Program 80128524-1732-43a4-a678-fe1874803598 (parent: initial) completed in 25.42s
+INFO:reps.controller:Metrics: sum_radii=2.6296, target_ratio=0.9979, validity=1.0000, eval_time=2.5924, combined_score=0.9979
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiyts1hd5.py:45: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiyts1hd5.py:47: RuntimeWarning: overflow encountered in exp
+  c,r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiyts1hd5.py:50: RuntimeWarning: overflow encountered in exp
+  c,r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiyts1hd5.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiyts1hd5.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiyts1hd5.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiyts1hd5.py:71: RuntimeWarning: overflow encountered in exp
+  c, r = res.x[:2*n].reshape(n,2), np.exp(res.x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.635896, target=2.635, ratio=1.000340, time=62.74s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4pdbsx7n.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.5961449304057203
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpf297kvxi.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4pdbsx7n.py:32: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4pdbsx7n.py:34: RuntimeWarning: overflow encountered in exp
+  c2,rr=x[:2*n].reshape(n,2),np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp4pdbsx7n.py:37: RuntimeWarning: overflow encountered in exp
+  c2,rr=x[:2*n].reshape(n,2),np.exp(x[-1])
+
+Evaluation: valid=True, sum_radii=2.596145, target=2.635, ratio=0.985254, time=2.94s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpx9r95wiw.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.596144930405721
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmplu0wkjqt.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpx9r95wiw.py:33: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpx9r95wiw.py:35: RuntimeWarning: overflow encountered in exp
+  c,r=x[:2*n].reshape(n,2),np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpx9r95wiw.py:38: RuntimeWarning: overflow encountered in exp
+  c,r=x[:2*n].reshape(n,2),np.exp(x[-1])
+
+Evaluation: valid=True, sum_radii=2.596145, target=2.635, ratio=0.985254, time=7.32s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpshc4j3op.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.635328412488805
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpojwg0qhb.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpshc4j3op.py:20: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpshc4j3op.py:22: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpshc4j3op.py:25: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpshc4j3op.py:54: RuntimeWarning: divide by zero encountered in log
+  xv = np.r_[cu.ravel(), np.log(ru)]
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:574: RuntimeWarning: invalid value encountered in subtract
+  dx = ((x0 + h) - x0)
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:685: RuntimeWarning: invalid value encountered in scalar subtract
+  dx = [(x0[i] + h[i]) - x0[i] for i in range(n)]
+
+Evaluation: valid=True, sum_radii=2.635328, target=2.635, ratio=1.000125, time=12.33s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpphd1row6.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.633035229099739
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzplimbt8.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpphd1row6.py:10: RuntimeWarning: overflow encountered in exp
+  return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpphd1row6.py:16: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpphd1row6.py:19: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpphd1row6.py:13: RuntimeWarning: overflow encountered in exp
+  g[2*n:] = -np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpphd1row6.py:26: RuntimeWarning: overflow encountered in exp
+  c, r = res.x[:2*n].reshape(n,2), np.exp(res.x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.633035, target=2.635, ratio=0.999254, time=57.39s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwqr00spo.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.635983084917608
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpishp9n86.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwqr00spo.py:18: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwqr00spo.py:20: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwqr00spo.py:23: RuntimeWarning: overflow encountered in exp
+  c2, rr = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwqr00spo.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwqr00spo.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwqr00spo.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpwqr00spo.py:53: RuntimeWarning: divide by zero encountered in log
+  xv = np.r_[cu.ravel(), np.log(ru)]
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:574: RuntimeWarning: invalid value encountered in subtract
+  dx = ((x0 + h) - x0)
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:685: RuntimeWarning: invalid value encountered in scalar subtract
+  dx = [(x0[i] + h[i]) - x0[i] for i in range(n)]
+
+Evaluation: valid=True, sum_radii=2.635983, target=2.635, ratio=1.000373, time=14.86sINFO:reps.controller:Iteration 48: Program 50c27baf-51dc-4fc9-8b5c-c5c141051fc9 (parent: d3eb2132-6204-4bd0-9082-079d214842bc) completed in 36.81s
+INFO:reps.controller:Metrics: sum_radii=2.6360, target_ratio=1.0004, validity=1.0000, eval_time=14.8620, combined_score=1.0004
+INFO:reps.database:Island 2 MAP-Elites cell improved: {'complexity': 1, 'diversity': 0} (fitness: 1.000 -> 1.000)
+INFO:reps.controller:Iteration 49: Program 5715c376-0e3f-4b13-9716-470f0ee9e9bd (parent: 9faff695-f7e6-44dd-85f8-24cc328e7ef0) completed in 100.26s
+INFO:reps.controller:Metrics: sum_radii=2.6360, target_ratio=1.0004, validity=1.0000, eval_time=80.3770, combined_score=1.0004
+INFO:reps.controller:Iteration 50: Program b37dc6c9-19c2-4b87-9460-8efd012faf2b (parent: 1bdf05fa-9fbc-4b2a-a965-fb51dea76e73) completed in 94.08s
+INFO:reps.controller:Metrics: sum_radii=2.6310, target_ratio=0.9985, validity=1.0000, eval_time=74.0994, combined_score=0.9985
+WARNING:reps.convergence_monitor:SEVERE convergence collapse detected: entropy=-0.0000
+INFO:reps.worker_pool:Model switch requested by convergence monitor
+INFO:reps.worker_pool:Worker allocation set to: {'exploiter': 0.3, 'explorer': 0.5, 'crossover': 0.2}
+INFO:reps.llm.ensemble:Sampled model: claude-opus-4-6
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:reps.controller:✅ Evolution completed - Maximum iterations reached
+INFO:reps.runner:Best program: initial, metrics: {'sum_radii': 2.63598308491761, 'target_ratio': 1.0003730872552599, 'validity': 1.0, 'eval_time': 9.476262092590332, 'combined_score': 1.0003730872552599}
+
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp7fnpv1_b.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.629883746305605
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmplz7wsi0a.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp7fnpv1_b.py:10: RuntimeWarning: overflow encountered in exp
+  return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp7fnpv1_b.py:16: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp7fnpv1_b.py:19: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp7fnpv1_b.py:13: RuntimeWarning: overflow encountered in exp
+  g[2*n:] = -np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmp7fnpv1_b.py:26: RuntimeWarning: overflow encountered in exp
+  c, r = res.x[:2*n].reshape(n,2), np.exp(res.x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.629884, target=2.635, ratio=0.998058, time=52.06s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpdz4es01j.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6323416396001917
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpympul655.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpdz4es01j.py:45: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpdz4es01j.py:47: RuntimeWarning: overflow encountered in exp
+  c,r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpdz4es01j.py:50: RuntimeWarning: overflow encountered in exp
+  c,r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpdz4es01j.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpdz4es01j.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpdz4es01j.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpdz4es01j.py:71: RuntimeWarning: overflow encountered in exp
+  c, r = res.x[:2*n].reshape(n,2), np.exp(res.x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.632342, target=2.635, ratio=0.998991, time=69.67s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpt_0dq0ok.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6295852393749963
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpv4nywgbs.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpt_0dq0ok.py:30: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpt_0dq0ok.py:32: RuntimeWarning: overflow encountered in exp
+  c2,rr=x[:2*n].reshape(n,2),np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpt_0dq0ok.py:35: RuntimeWarning: overflow encountered in exp
+  c2,rr=x[:2*n].reshape(n,2),np.exp(x[-1])
+
+Evaluation: valid=True, sum_radii=2.629585, target=2.635, ratio=0.997945, time=2.59s
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpucw0w7vn.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.6359830849176076
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpzvi5wh7e.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpucw0w7vn.py:46: RuntimeWarning: overflow encountered in exp
+  def fu(x): return -n*np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpucw0w7vn.py:48: RuntimeWarning: overflow encountered in exp
+  c,r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpucw0w7vn.py:51: RuntimeWarning: overflow encountered in exp
+  c,r = x[:2*n].reshape(n,2), np.exp(x[-1])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpucw0w7vn.py:9: RuntimeWarning: overflow encountered in exp
+  def obj(x): return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpucw0w7vn.py:11: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpucw0w7vn.py:14: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpucw0w7vn.py:72: RuntimeWarning: overflow encountered in exp
+  c, r = res.x[:2*n].reshape(n,2), np.exp(res.x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.635983, target=2.635, ratio=1.000373, time=80.38s
+
+Subprocess stdout: Running in subprocess, Python version: 3.12.11 (main, Jun  3 2025, 15:41:47) [Clang 17.0.0 (clang-1700.0.13.3)]
+Program path: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiu3eulrn.py
+Calling run_packing()...
+run_packing() returned successfully: sum_radii = 2.63097226765293
+Results saved to /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpagfud6x2.py.results
+
+Subprocess stderr: /var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiu3eulrn.py:10: RuntimeWarning: overflow encountered in exp
+  return -np.sum(np.exp(x[2*n:]))
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiu3eulrn.py:16: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiu3eulrn.py:19: RuntimeWarning: overflow encountered in exp
+  c, r = x[:2*n].reshape(n,2), np.exp(x[2*n:])
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiu3eulrn.py:13: RuntimeWarning: overflow encountered in exp
+  g[2*n:] = -np.exp(x[2*n:])
+/Users/zkhorozian/code/reps/.venv/lib/python3.12/site-packages/scipy/optimize/_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+/var/folders/lk/338qmw_d37bghypplh_pbgpr0000gp/T/tmpiu3eulrn.py:26: RuntimeWarning: overflow encountered in exp
+  c, r = res.x[:2*n].reshape(n,2), np.exp(res.x[2*n:])
+
+Evaluation: valid=True, sum_radii=2.630972, target=2.635, ratio=0.998471, time=74.10s
+INFO:reps.controller:Stopped process pool

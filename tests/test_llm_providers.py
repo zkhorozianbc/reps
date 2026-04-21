@@ -250,4 +250,6 @@ def test_anthropic_token_usage_normalization(mock_anthropic_cls):
         "prompt_tokens": 200,
         "completion_tokens": 75,
         "total_tokens": 275,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
     }

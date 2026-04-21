@@ -115,7 +115,7 @@ class LLMConfig(LLMModelConfig):
     # n-model configuration for evaluator LLM ensemble
     evaluator_models: List[LLMModelConfig] = field(default_factory=lambda: [])
 
-    # Backwardes compatibility with primary_model(_weight) options
+    # YAML-facing shorthand: primary_model / secondary_model (+ weights)
     primary_model: str = None
     primary_model_weight: float = None
     secondary_model: str = None
@@ -191,52 +191,6 @@ class LLMConfig(LLMModelConfig):
             for key, value in args.items():
                 if overwrite or getattr(model, key, None) is None:
                     setattr(model, key, value)
-
-    def rebuild_models(self) -> None:
-        """Rebuild the models list after primary_model/secondary_model field changes"""
-        # Clear existing models lists
-        self.models = []
-        self.evaluator_models = []
-
-        # Re-run model generation logic from __post_init__
-        if self.primary_model:
-            # Create primary model
-            primary_model = LLMModelConfig(
-                name=self.primary_model, weight=self.primary_model_weight or 1.0
-            )
-            self.models.append(primary_model)
-
-        if self.secondary_model:
-            # Create secondary model (only if weight > 0)
-            if self.secondary_model_weight is None or self.secondary_model_weight > 0:
-                secondary_model = LLMModelConfig(
-                    name=self.secondary_model,
-                    weight=(
-                        self.secondary_model_weight
-                        if self.secondary_model_weight is not None
-                        else 0.2
-                    ),
-                )
-                self.models.append(secondary_model)
-
-        # If no evaluator models are defined, use the same models as for evolution
-        if not self.evaluator_models:
-            self.evaluator_models = self.models.copy()
-
-        # Update models with shared configuration values
-        shared_config = {
-            "api_base": self.api_base,
-            "api_key": self.api_key,
-            "temperature": self.temperature,
-            "top_p": self.top_p,
-            "max_tokens": self.max_tokens,
-            "timeout": self.timeout,
-            "retries": self.retries,
-            "retry_delay": self.retry_delay,
-            "random_seed": self.random_seed,
-            "reasoning_effort": self.reasoning_effort,
-        }
-        self.update_model_params(shared_config)
 
 
 @dataclass

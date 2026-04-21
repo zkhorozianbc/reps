@@ -1,0 +1,45 @@
+INFO:reps.database:Initialized program database with 0 programs
+INFO:reps.evaluator:Successfully loaded evaluation function from experiment/benchmarks/circle_packing/evaluator.py
+INFO:reps.evaluator:Initialized evaluator with experiment/benchmarks/circle_packing/evaluator.py
+INFO:reps.evaluator:Evaluated program initial in 9.05s: sum_radii=2.6360, target_ratio=1.0004, validity=1.0000, eval_time=9.0460, combined_score=1.0004
+INFO:reps.runner:Seed program metrics: {'sum_radii': 2.63598308491761, 'target_ratio': 1.0003730872552599, 'validity': 1.0, 'eval_time': 9.045986890792847, 'combined_score': 1.0003730872552599}
+INFO:reps.database:New MAP-Elites cell occupied in island 0: {'complexity': 5, 'diversity': 0}
+INFO:reps.worker_pool:WorkerPool initialized: {'exploiter': 0.6, 'explorer': 0.25, 'crossover': 0.15}
+INFO:reps.sota_controller:SOTAController targeting score: 2.636
+INFO:reps.metrics_logger:MetricsLogger writing to experiment/results/circle_opus47_anthropic/run_001/metrics
+INFO:reps.controller:REPS enabled: batch_size=5, workers=['exploiter', 'explorer', 'crossover'], ε=0.15
+INFO:reps.controller:Initialized process parallel controller with 2 workers
+INFO:reps.llm.anthropic:Initialized AnthropicLLM with model: claude-opus-4-7
+INFO:reps.llm.ensemble:Initialized LLM ensemble with models: anthropic/claude-opus-4-7 (weight: 1.00)
+INFO:reps.controller:Set max None tasks per child
+INFO:reps.controller:Started process pool with 2 processes
+INFO:reps.controller:Starting process-based evolution from iteration 1 for 50 iterations (total: 51)
+Output: experiment/results/circle_opus47_anthropic/run_001
+INFO:reps.controller:Early stopping disabled
+INFO:reps.database:New MAP-Elites cell occupied in island 1: {'complexity': 0, 'diversity': 5}
+INFO:reps.controller:Iteration 2: Program 7a2cd824-8cdb-4d05-b50f-d67844d8696a (parent: initial) completed in 34.08s
+INFO:reps.controller:Metrics: sum_radii=2.6297544047991157, target_ratio=0.9980092617833457, validity=1.0, eval_time=6.6000449657440186, combined_score=0.9980092617833457
+INFO:reps.controller:Tokens: in=6, out=2784, cumulative_in=6, cumulative_out=2784
+INFO:reps.database:New MAP-Elites cell occupied in island 0: {'complexity': 9, 'diversity': 9}
+INFO:reps.database:New best program 65ccf318-57d2-420f-8487-57feba630735 replaces initial (combined_score: 1.0004 → 1.0004, +0.0000)
+INFO:reps.controller:Iteration 1: Program 65ccf318-57d2-420f-8487-57feba630735 (parent: initial) completed in 51.89s
+INFO:reps.controller:Metrics: sum_radii=2.635983084917747, target_ratio=1.000373087255312, validity=1.0, eval_time=11.655263900756836, combined_score=1.000373087255312
+INFO:reps.controller:Tokens: in=6, out=4326, cumulative_in=12, cumulative_out=7110
+INFO:reps.controller:🌟 New best solution found at iteration 1: 65ccf318-57d2-420f-8487-57feba630735
+Error on attempt 1/4: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7krRTL9TiFt7MPFAcuR'}. Retrying...
+Error on attempt 2/4: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7kroG1K861EtaPF7r8r'}. Retrying...
+Error on attempt 3/4: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7ksBJKSR9cjW5Fzuhir'}. Retrying...
+All 4 attempts failed with error: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7ksZDgSmgMHxwurW6pq'}
+LLM generation failed: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7ksZDgSmgMHxwurW6pq'}
+Error on attempt 1/4: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7ksZXYBCXDUfGyS83GV'}. Retrying...
+Error on attempt 2/4: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7kswQg1LmV6hmHDqXP2'}. Retrying...
+Error on attempt 3/4: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7ktLRGpNpE9QXqQCoQA'}. Retrying...
+Error on attempt 1/4: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7ktZKAdK9Rbn1fM2TyJ'}. Retrying...
+All 4 attempts failed with error: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7kti71BdN6BPSB1dGVs'}
+LLM generation failed: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7kti71BdN6BPSB1dGVs'}
+Error on attempt 2/4: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7ktw6MMJoT994mbLatW'}. Retrying...
+Error on attempt 3/4: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7kuKWEeE8XLvHyoZUHU'}. Retrying...
+All 4 attempts failed with error: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7kuhK9mWMdqXgTdqYWC'}
+LLM generation failed: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Ca7kuhK9mWMdqXgTdqYWC'}
+/opt/homebrew/Cellar/python@3.12/3.12.11/Frameworks/Python.framework/Versions/3.12/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 10 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
