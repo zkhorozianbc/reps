@@ -170,21 +170,28 @@ def test_anthropic_implements_interface(mock_anthropic_cls):
 
 def _make_anthropic_stream_mock(mock_client, text_answer="Hello from Claude!",
                                  thinking=None, input_tokens=100, output_tokens=50):
-    """Build a mock for client.messages.stream() context manager that yields a
-    content_block_stop for each provided block and returns a final message."""
-    # Events the provider listens for
-    text_event = MagicMock()
-    text_event.type = "content_block_stop"
-    text_event.content_block.type = "text"
-    text_event.content_block.text = text_answer
+    """Build a mock for client.messages.stream() that emits synthesized
+    `text` / `thinking` delta events followed by content_block_stop markers
+    (matches the Anthropic SDK's real event stream)."""
     events = []
     if thinking is not None:
-        think_event = MagicMock()
-        think_event.type = "content_block_stop"
-        think_event.content_block.type = "thinking"
-        think_event.content_block.thinking = thinking
-        events.append(think_event)
-    events.append(text_event)
+        think_delta = MagicMock()
+        think_delta.type = "thinking"
+        think_delta.thinking = thinking
+        events.append(think_delta)
+        think_stop = MagicMock()
+        think_stop.type = "content_block_stop"
+        think_stop.content_block = MagicMock(type="thinking", thinking=thinking)
+        events.append(think_stop)
+
+    text_delta = MagicMock()
+    text_delta.type = "text"
+    text_delta.text = text_answer
+    events.append(text_delta)
+    text_stop = MagicMock()
+    text_stop.type = "content_block_stop"
+    text_stop.content_block = MagicMock(type="text", text=text_answer)
+    events.append(text_stop)
 
     final_usage = MagicMock()
     final_usage.input_tokens = input_tokens

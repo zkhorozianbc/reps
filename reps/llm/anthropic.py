@@ -155,31 +155,72 @@ class AnthropicLLM(LLMInterface):
         return answer
 
     def _stream_and_collect(self, params: Dict[str, Any]):
-        """Blocking: stream, print per-block, return (answer, reasoning, usage)."""
+        """Blocking: stream, print paragraphs as they complete, return
+        (answer, reasoning, usage) at end.
+
+        Uses the Anthropic SDK's synthesized `text` / `thinking` delta events
+        to emit progress every `\\n\\n` (paragraph boundary) rather than
+        waiting for the whole block to finish. For a long reasoning block,
+        this means visible progress every few seconds instead of silent
+        multi-minute waits.
+        """
         from reps.llm.stream_print import emit_block, emit_status
 
         emit_status(params.get("model", "?"))
         answer_parts: List[str] = []
         reasoning_parts: List[str] = []
 
+        mode: Optional[str] = None  # "answer" | "thinking"
+        buf = ""
+
+        def flush_paragraphs():
+            nonlocal buf
+            while "\n\n" in buf:
+                para, _, buf = buf.partition("\n\n")
+                if para.strip():
+                    emit_block(mode, para)
+
+        def flush_remaining():
+            nonlocal buf
+            if buf.strip():
+                emit_block(mode, buf)
+            buf = ""
+
         with self.client.messages.stream(**params) as stream:
             for event in stream:
-                if getattr(event, "type", None) != "content_block_stop":
-                    continue
-                block = getattr(event, "content_block", None)
-                btype = getattr(block, "type", None)
-                if btype == "thinking":
-                    text = getattr(block, "thinking", "") or ""
-                    reasoning_parts.append(text)
-                    emit_block("thinking", text)
-                elif btype == "text":
-                    text = getattr(block, "text", "") or ""
-                    answer_parts.append(text)
-                    emit_block("answer", text)
+                et = getattr(event, "type", None)
+
+                if et == "thinking":
+                    piece = getattr(event, "thinking", "") or ""
+                    if piece:
+                        if mode != "thinking":
+                            flush_remaining()
+                            mode = "thinking"
+                        buf += piece
+                        reasoning_parts.append(piece)
+                        flush_paragraphs()
+
+                elif et == "text":
+                    piece = getattr(event, "text", "") or ""
+                    if piece:
+                        if mode != "answer":
+                            flush_remaining()
+                            mode = "answer"
+                        buf += piece
+                        answer_parts.append(piece)
+                        flush_paragraphs()
+
+                elif et == "content_block_stop":
+                    # Block finished — flush remaining partial as the tail.
+                    flush_remaining()
+                    mode = None
 
             final_msg = stream.get_final_message()
 
+        # Final flush for any trailing partial (usually already flushed).
+        flush_remaining()
+
         usage = getattr(final_msg, "usage", None)
-        answer = "\n".join(answer_parts)
-        reasoning = "\n".join(reasoning_parts).strip() or None
+        answer = "".join(answer_parts)
+        reasoning = "".join(reasoning_parts).strip() or None
         return answer, reasoning, usage

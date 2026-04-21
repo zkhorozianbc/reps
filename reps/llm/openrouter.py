@@ -174,13 +174,18 @@ class OpenRouterLLM(LLMInterface):
         return content
 
     def _stream_and_collect(self, params: Dict[str, Any]):
-        """Blocking: iterate the SSE stream, print each completed block live
-        (not every chunk), return buffers.
+        """Blocking: iterate the SSE stream, print paragraphs live as they
+        complete, return the accumulated (answer, reasoning, usage) at end.
 
-        OpenRouter/OpenAI streams deltas under `delta.content` (answer) and
-        `delta.reasoning` (thinking). There's no content_block_stop marker, so
-        we treat a switch from one mode to the other (or stream end) as the
-        end of a block and emit the whole block in one tidy printout.
+        Flush triggers:
+        - paragraph boundary (`\\n\\n` in the current buffer) — natural
+          'completed thought' unit, usually every few sentences
+        - mode switch (thinking → answer or vice versa) — flush remaining
+          partial of the completed mode
+        - stream end — flush whatever is left
+
+        This gives the user visible progress every few seconds instead of a
+        silent 3-minute wait for a long reasoning block to fully accumulate.
         """
         from reps.llm.stream_print import emit_block, emit_status
 
@@ -191,13 +196,22 @@ class OpenRouterLLM(LLMInterface):
         usage = None
 
         mode: Optional[str] = None   # "answer" | "thinking"
-        buf: List[str] = []
+        buf = ""
 
-        def flush():
+        def flush_paragraphs():
+            """Emit complete paragraphs from buf, leave partial tail in buf."""
             nonlocal buf
-            if mode and buf:
-                emit_block(mode, "".join(buf))
-            buf = []
+            while "\n\n" in buf:
+                para, _, buf = buf.partition("\n\n")
+                if para.strip():
+                    emit_block(mode, para)
+
+        def flush_remaining():
+            """Emit whatever's in buf as a final block for this mode."""
+            nonlocal buf
+            if buf.strip():
+                emit_block(mode, buf)
+            buf = ""
 
         for chunk in stream:
             u = getattr(chunk, "usage", None)
@@ -211,18 +225,20 @@ class OpenRouterLLM(LLMInterface):
             r_piece = getattr(delta, "reasoning", None) or ""
             if r_piece:
                 if mode != "thinking":
-                    flush()
+                    flush_remaining()
                     mode = "thinking"
-                buf.append(r_piece)
+                buf += r_piece
                 reasoning_parts.append(r_piece)
+                flush_paragraphs()
 
             c_piece = getattr(delta, "content", None) or ""
             if c_piece:
                 if mode != "answer":
-                    flush()
+                    flush_remaining()
                     mode = "answer"
-                buf.append(c_piece)
+                buf += c_piece
                 content_parts.append(c_piece)
+                flush_paragraphs()
 
-        flush()
+        flush_remaining()
         return "".join(content_parts), "".join(reasoning_parts), usage
