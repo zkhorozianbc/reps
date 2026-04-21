@@ -1,19 +1,25 @@
-# Circle packing n=26 — Opus 4.7 via native Anthropic API
-# Starting from REPS best (2.6359831), attempting to push further
+# Circle packing n=26 — Opus 4.7 via OpenRouter
+# Same REPS setup as circle_opus47_anthropic.yaml, routed through OpenRouter so
+# reasoning output is surfaced in the response.
 harness: reps
-provider: anthropic
+provider: openrouter
+reasoning: medium
 task: ../benchmarks/circle_packing
 max_iterations: 50
 log_level: INFO
 random_seed: 42
 
 llm:
-  primary_model: "anthropic/claude-opus-4-7"
+  primary_model: "anthropic/claude-opus-4.7"
   primary_model_weight: 1.0
-  api_key: "${ANTHROPIC_API_KEY}"
+  api_base: "https://openrouter.ai/api/v1"
+  api_key: "${OPENROUTER_API_KEY}"
   temperature: 0.7
-  max_tokens: 16384
-  timeout: 300
+  # Opus 4.7 with reasoning=medium can spend 25k+ tokens thinking before the
+  # final answer. Anything under ~60k causes finish_reason=length with no
+  # content returned. Leave generous headroom.
+  max_tokens: 64000
+  timeout: 600
 
 prompt:
   num_top_programs: 3

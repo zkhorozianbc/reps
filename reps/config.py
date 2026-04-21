@@ -448,6 +448,18 @@ class Config:
     provider: str = "openrouter"  # valid: "openrouter", "anthropic"
     harness: str = "reps"         # valid: "reps", "openevolve"
 
+    # Top-level reasoning / extended-thinking toggle. Applied uniformly across
+    # providers by the runner: translates to `reasoning_effort` for OpenAI and
+    # OpenRouter-hosted models, and to native Anthropic `thinking` with a
+    # mapped budget for `provider: anthropic`. Valid: None (default), "low",
+    # "medium", "high", or "off".
+    reasoning: Optional[str] = None
+
+    # Path to benchmark directory. When set, `reps-run` derives
+    # `initial_program.py` and `evaluator.py` from this directory so the CLI
+    # doesn't need positional args. Resolved relative to the config file.
+    task: Optional[str] = None
+
     # Component configurations
     llm: LLMConfig = field(default_factory=LLMConfig)
     prompt: PromptConfig = field(default_factory=PromptConfig)
@@ -482,6 +494,12 @@ class Config:
             template_path = Path(config.prompt.template_dir)
             if not template_path.is_absolute():
                 config.prompt.template_dir = str((config_path.parent / template_path).resolve())
+
+        # Resolve task directory relative to config file location
+        if config.task:
+            task_path = Path(config.task)
+            if not task_path.is_absolute():
+                config.task = str((config_path.parent / task_path).resolve())
 
         return config
 

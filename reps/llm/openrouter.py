@@ -70,8 +70,13 @@ class OpenRouterLLM(LLMInterface):
     async def generate_with_context(
         self, system_message: str, messages: List[Dict[str, str]], **kwargs
     ) -> str:
-        formatted_messages = [{"role": "system", "content": system_message}]
-        formatted_messages.extend(messages)
+        # Only prepend the system role when we actually have a system message.
+        # Some providers reject {"role": "system", "content": null/""}.
+        if system_message:
+            formatted_messages = [{"role": "system", "content": system_message}]
+            formatted_messages.extend(messages)
+        else:
+            formatted_messages = list(messages)
 
         model_base = str(self.model).lower().split("/")[-1]
         is_reasoning = model_base.startswith(self.OPENAI_REASONING_MODEL_PREFIXES)
@@ -123,14 +128,44 @@ class OpenRouterLLM(LLMInterface):
         )
         usage = getattr(response, "usage", None)
         if usage is not None:
+            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+            total_tokens = getattr(usage, "total_tokens", 0) or 0
+            # OpenRouter reports cache stats under prompt_tokens_details.cached_tokens.
+            ptd = getattr(usage, "prompt_tokens_details", None)
+            cached = 0
+            if ptd is not None:
+                cached = getattr(ptd, "cached_tokens", 0) or 0
             self.last_usage = {
-                "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
-                "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
-                "total_tokens": getattr(usage, "total_tokens", 0) or 0,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "cache_read_input_tokens": cached,
+                "cache_creation_input_tokens": 0,
             }
+            if cached:
+                logger.info(
+                    f"Cache: {cached} read, {prompt_tokens - cached} uncached"
+                )
         else:
-            self.last_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            self.last_usage = {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            }
+
+        message = response.choices[0].message
+        content = message.content
+        # Capture reasoning output if the model produced any (e.g. Opus 4.7 with
+        # reasoning_effort set). OpenRouter surfaces it as `reasoning` (string)
+        # and/or `reasoning_details` (list of blocks).
+        reasoning = getattr(message, "reasoning", None)
+        reasoning_details = getattr(message, "reasoning_details", None)
+        self.last_reasoning = reasoning or None
+        self.last_reasoning_details = reasoning_details or None
 
         logger.debug(f"API parameters: {params}")
-        logger.debug(f"API response: {response.choices[0].message.content}")
-        return response.choices[0].message.content
+        logger.debug(f"API response: {content}")
+        return content

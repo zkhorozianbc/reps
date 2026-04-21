@@ -74,11 +74,14 @@ class ReflectionEngine:
                 - top_k (int): number of top candidates to analyze
                 - bottom_k (int): number of bottom candidates to analyze
                 - enabled (bool): whether reflection is active
+                - model (Optional[str]): model id to use for reflection calls;
+                  when None, the ensemble's default weighted sampling is used.
         """
         self.llm = llm_ensemble
         self.top_k = config.get("top_k", 3)
         self.bottom_k = config.get("bottom_k", 2)
         self.enabled = config.get("enabled", True)
+        self.model_override = config.get("model")
         self._current_reflection: Dict[str, Any] = {}
         self._call_count = 0
         self._total_tokens = {"prompt_tokens": 0, "completion_tokens": 0}
@@ -155,7 +158,10 @@ class ReflectionEngine:
         )
 
         try:
-            response = await self.llm.generate(prompt)
+            gen_kwargs: Dict[str, Any] = {}
+            if self.model_override:
+                gen_kwargs["model"] = self.model_override
+            response = await self.llm.generate(prompt, **gen_kwargs)
             self._call_count += 1
             # Track reflection token costs
             usage = getattr(self.llm, "last_usage", {})
