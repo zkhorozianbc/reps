@@ -2,6 +2,7 @@
 
 # Current Program Information
 - Fitness: {fitness_score}
+- Best score in population so far: {current_best}
 - Feature coordinates: {feature_coords}
 - Focus areas: {improvement_areas}
 

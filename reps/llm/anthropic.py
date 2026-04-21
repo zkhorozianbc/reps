@@ -117,12 +117,20 @@ class AnthropicLLM(LLMInterface):
         )
 
     async def _call_api(self, params: Dict[str, Any]) -> str:
+        """Stream the Messages API, print each completed block live, return
+        the accumulated answer text once the stream closes.
+
+        Uses `client.messages.stream()` which hands us typed SSE events. We
+        listen for `content_block_stop` events — each marks the end of a
+        thinking or text block — and emit the whole block in one tidy
+        printout. Final usage + reasoning are grabbed from `get_final_message`
+        after the context exits.
+        """
         loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(
-            None, lambda: self.client.messages.create(**params)
+        answer, reasoning, usage = await loop.run_in_executor(
+            None, lambda: self._stream_and_collect(params)
         )
 
-        usage = getattr(response, "usage", None)
         if usage is not None:
             prompt_tokens = _to_int(getattr(usage, "input_tokens", 0))
             completion_tokens = _to_int(getattr(usage, "output_tokens", 0))
@@ -142,24 +150,35 @@ class AnthropicLLM(LLMInterface):
         else:
             self.last_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
-        # Walk content blocks: text blocks are the answer, thinking blocks are
-        # reasoning (present when extended thinking is enabled).
+        self.last_reasoning = reasoning or None
+        logger.debug(f"API parameters: {params}")
+        return answer
+
+    def _stream_and_collect(self, params: Dict[str, Any]):
+        """Blocking: stream, print per-block, return (answer, reasoning, usage)."""
+        from reps.llm.stream_print import emit_block
+
         answer_parts: List[str] = []
         reasoning_parts: List[str] = []
-        for block in response.content:
-            btype = getattr(block, "type", None)
-            if btype == "thinking":
-                reasoning_parts.append(getattr(block, "thinking", "") or "")
-            elif btype == "text":
-                answer_parts.append(getattr(block, "text", "") or "")
-            else:
-                # Unknown block type — fall back to text attr if present.
-                text = getattr(block, "text", None)
-                if text:
-                    answer_parts.append(text)
-        self.last_reasoning = "\n".join(reasoning_parts).strip() or None
-        answer = "\n".join(answer_parts)
 
-        logger.debug(f"API parameters: {params}")
-        logger.debug(f"API response: {answer}")
-        return answer
+        with self.client.messages.stream(**params) as stream:
+            for event in stream:
+                if getattr(event, "type", None) != "content_block_stop":
+                    continue
+                block = getattr(event, "content_block", None)
+                btype = getattr(block, "type", None)
+                if btype == "thinking":
+                    text = getattr(block, "thinking", "") or ""
+                    reasoning_parts.append(text)
+                    emit_block("thinking", text)
+                elif btype == "text":
+                    text = getattr(block, "text", "") or ""
+                    answer_parts.append(text)
+                    emit_block("answer", text)
+
+            final_msg = stream.get_final_message()
+
+        usage = getattr(final_msg, "usage", None)
+        answer = "\n".join(answer_parts)
+        reasoning = "\n".join(reasoning_parts).strip() or None
+        return answer, reasoning, usage

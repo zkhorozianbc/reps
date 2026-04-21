@@ -310,6 +310,15 @@ def _run_iteration_worker(
             parent_changes_desc = None
             child_changes_desc = None
 
+        # Compute the best score across the whole population so the prompt can
+        # anchor the model on the current target-to-beat (not the stale seed).
+        best_so_far = 0.0
+        for prog in programs.values():
+            if prog.metrics:
+                s = prog.metrics.get("combined_score", safe_numeric_average(prog.metrics))
+                if isinstance(s, (int, float)) and s > best_so_far:
+                    best_so_far = s
+
         # --- REPS: Build prompt with extras (reflection, SOTA, dead-end warnings) ---
         prompt = _worker_prompt_sampler.build_prompt(
             current_program=parent.code,
@@ -320,6 +329,7 @@ def _run_iteration_worker(
             inspirations=[p.to_dict() for p in inspirations],
             language=_worker_config.language,
             evolution_round=iteration,
+            current_best=f"{best_so_far:.4f}",
             diff_based_evolution=use_diff,
             program_artifacts=parent_artifacts,
             feature_dimensions=db_snapshot.get("feature_dimensions", []),

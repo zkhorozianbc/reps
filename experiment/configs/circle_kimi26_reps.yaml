@@ -17,8 +17,8 @@ llm:
   api_key: "${OPENROUTER_API_KEY}"
   temperature: 0.7
   top_p: 0.95
-  max_tokens: 32000
-  timeout: 600
+  max_tokens: 64000
+  timeout: 900
 
 prompt:
   num_top_programs: 3

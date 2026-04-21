@@ -168,23 +168,47 @@ def test_anthropic_implements_interface(mock_anthropic_cls):
     assert callable(provider.generate_with_context)
 
 
+def _make_anthropic_stream_mock(mock_client, text_answer="Hello from Claude!",
+                                 thinking=None, input_tokens=100, output_tokens=50):
+    """Build a mock for client.messages.stream() context manager that yields a
+    content_block_stop for each provided block and returns a final message."""
+    # Events the provider listens for
+    text_event = MagicMock()
+    text_event.type = "content_block_stop"
+    text_event.content_block.type = "text"
+    text_event.content_block.text = text_answer
+    events = []
+    if thinking is not None:
+        think_event = MagicMock()
+        think_event.type = "content_block_stop"
+        think_event.content_block.type = "thinking"
+        think_event.content_block.thinking = thinking
+        events.append(think_event)
+    events.append(text_event)
+
+    final_usage = MagicMock()
+    final_usage.input_tokens = input_tokens
+    final_usage.output_tokens = output_tokens
+    final_usage.cache_creation_input_tokens = 0
+    final_usage.cache_read_input_tokens = 0
+    final_msg = MagicMock()
+    final_msg.usage = final_usage
+
+    stream_obj = MagicMock()
+    stream_obj.__iter__ = lambda self: iter(events)
+    stream_obj.get_final_message.return_value = final_msg
+
+    cm = MagicMock()
+    cm.__enter__ = lambda self: stream_obj
+    cm.__exit__ = lambda self, *a: None
+    mock_client.messages.stream.return_value = cm
+
+
 @patch("reps.llm.anthropic.anthropic.Anthropic")
 def test_anthropic_generate_with_context(mock_anthropic_cls):
-    """Anthropic makes correct API call structure (system separate, messages list)."""
-    # Set up mock response
-    mock_usage = MagicMock()
-    mock_usage.input_tokens = 100
-    mock_usage.output_tokens = 50
-
-    mock_content_block = MagicMock()
-    mock_content_block.text = "Hello from Claude!"
-
-    mock_response = MagicMock()
-    mock_response.content = [mock_content_block]
-    mock_response.usage = mock_usage
-
+    """Anthropic makes correct streaming API call (system separate, messages list)."""
     mock_client = MagicMock()
-    mock_client.messages.create.return_value = mock_response
+    _make_anthropic_stream_mock(mock_client, text_answer="Hello from Claude!")
     mock_anthropic_cls.return_value = mock_client
 
     cfg = _make_anthropic_cfg()
@@ -198,8 +222,7 @@ def test_anthropic_generate_with_context(mock_anthropic_cls):
     )
 
     assert result == "Hello from Claude!"
-    # Verify the API was called with system as a top-level param, not in messages
-    call_kwargs = mock_client.messages.create.call_args[1]
+    call_kwargs = mock_client.messages.stream.call_args[1]
     assert call_kwargs["system"] == [
         {
             "type": "text",
@@ -227,19 +250,9 @@ def test_anthropic_model_name_stripping(mock_anthropic_cls):
 @patch("reps.llm.anthropic.anthropic.Anthropic")
 def test_anthropic_token_usage_normalization(mock_anthropic_cls):
     """input_tokens/output_tokens normalized to prompt_tokens/completion_tokens."""
-    mock_usage = MagicMock()
-    mock_usage.input_tokens = 200
-    mock_usage.output_tokens = 75
-
-    mock_content_block = MagicMock()
-    mock_content_block.text = "response"
-
-    mock_response = MagicMock()
-    mock_response.content = [mock_content_block]
-    mock_response.usage = mock_usage
-
     mock_client = MagicMock()
-    mock_client.messages.create.return_value = mock_response
+    _make_anthropic_stream_mock(mock_client, text_answer="response",
+                                 input_tokens=200, output_tokens=75)
     mock_anthropic_cls.return_value = mock_client
 
     cfg = _make_anthropic_cfg()

@@ -122,20 +122,33 @@ class OpenRouterLLM(LLMInterface):
         )
 
     async def _call_api(self, params: Dict[str, Any]) -> str:
+        """Call the Chat Completions endpoint, streaming so we can live-log
+        reasoning and content as they arrive. Full message is still returned
+        to the caller as a single string once the stream completes.
+
+        Output is written to stderr with an `[or pid=NNNN think]` or
+        `[or pid=NNNN answer]` prefix, line-buffered so parallel workers
+        interleave cleanly. The run.log file-handler does NOT get these
+        chunks — we use `print(..., file=sys.stderr)` directly to keep the
+        structured log readable.
+        """
+        stream_params = {
+            **params,
+            "stream": True,
+            # Usage only arrives in the final chunk when this is set.
+            "stream_options": {"include_usage": True},
+        }
         loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(
-            None, lambda: self.client.chat.completions.create(**params)
+        content, reasoning, usage = await loop.run_in_executor(
+            None, lambda: self._stream_and_collect(stream_params)
         )
-        usage = getattr(response, "usage", None)
+
         if usage is not None:
             prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
             completion_tokens = getattr(usage, "completion_tokens", 0) or 0
             total_tokens = getattr(usage, "total_tokens", 0) or 0
-            # OpenRouter reports cache stats under prompt_tokens_details.cached_tokens.
             ptd = getattr(usage, "prompt_tokens_details", None)
-            cached = 0
-            if ptd is not None:
-                cached = getattr(ptd, "cached_tokens", 0) or 0
+            cached = getattr(ptd, "cached_tokens", 0) or 0 if ptd is not None else 0
             self.last_usage = {
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
@@ -144,9 +157,7 @@ class OpenRouterLLM(LLMInterface):
                 "cache_creation_input_tokens": 0,
             }
             if cached:
-                logger.info(
-                    f"Cache: {cached} read, {prompt_tokens - cached} uncached"
-                )
+                logger.info(f"Cache: {cached} read, {prompt_tokens - cached} uncached")
         else:
             self.last_usage = {
                 "prompt_tokens": 0,
@@ -156,16 +167,61 @@ class OpenRouterLLM(LLMInterface):
                 "cache_creation_input_tokens": 0,
             }
 
-        message = response.choices[0].message
-        content = message.content
-        # Capture reasoning output if the model produced any (e.g. Opus 4.7 with
-        # reasoning_effort set). OpenRouter surfaces it as `reasoning` (string)
-        # and/or `reasoning_details` (list of blocks).
-        reasoning = getattr(message, "reasoning", None)
-        reasoning_details = getattr(message, "reasoning_details", None)
         self.last_reasoning = reasoning or None
-        self.last_reasoning_details = reasoning_details or None
+        self.last_reasoning_details = None  # deltas only expose .reasoning strings
 
         logger.debug(f"API parameters: {params}")
-        logger.debug(f"API response: {content}")
         return content
+
+    def _stream_and_collect(self, params: Dict[str, Any]):
+        """Blocking: iterate the SSE stream, print each completed block live
+        (not every chunk), return buffers.
+
+        OpenRouter/OpenAI streams deltas under `delta.content` (answer) and
+        `delta.reasoning` (thinking). There's no content_block_stop marker, so
+        we treat a switch from one mode to the other (or stream end) as the
+        end of a block and emit the whole block in one tidy printout.
+        """
+        from reps.llm.stream_print import emit_block
+
+        stream = self.client.chat.completions.create(**params)
+        content_parts: List[str] = []
+        reasoning_parts: List[str] = []
+        usage = None
+
+        mode: Optional[str] = None   # "answer" | "thinking"
+        buf: List[str] = []
+
+        def flush():
+            nonlocal buf
+            if mode and buf:
+                emit_block(mode, "".join(buf))
+            buf = []
+
+        for chunk in stream:
+            u = getattr(chunk, "usage", None)
+            if u is not None:
+                usage = u
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            delta = choices[0].delta
+
+            r_piece = getattr(delta, "reasoning", None) or ""
+            if r_piece:
+                if mode != "thinking":
+                    flush()
+                    mode = "thinking"
+                buf.append(r_piece)
+                reasoning_parts.append(r_piece)
+
+            c_piece = getattr(delta, "content", None) or ""
+            if c_piece:
+                if mode != "answer":
+                    flush()
+                    mode = "answer"
+                buf.append(c_piece)
+                content_parts.append(c_piece)
+
+        flush()
+        return "".join(content_parts), "".join(reasoning_parts), usage

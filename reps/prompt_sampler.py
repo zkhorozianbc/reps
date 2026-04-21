@@ -205,6 +205,10 @@ class PromptSampler:
             "language": language,
             "artifacts": artifacts_section,
             "crossover_context": "",
+            # Current-best score seen so far across the whole population.
+            # Filled in by the controller; defaults to "—" so the placeholder
+            # renders cleanly when no best exists yet.
+            "current_best": "—",
         }
         # Caller-supplied kwargs override defaults (e.g. crossover_context, reflection, ...)
         format_kwargs.update(kwargs)
