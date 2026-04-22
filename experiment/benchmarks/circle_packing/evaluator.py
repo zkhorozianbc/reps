@@ -98,7 +98,7 @@ class TimeoutError(Exception):
     pass
 
 
-def run_with_timeout(program_path, timeout_seconds=600):
+def run_with_timeout(program_path, timeout_seconds=600, env=None):
     """Run the program in a subprocess with timeout."""
     with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as temp_file:
         script = f"""
@@ -146,6 +146,7 @@ except Exception as e:
             [sys.executable, temp_file_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=env,
         )
         try:
             stdout, stderr = process.communicate(timeout=timeout_seconds)
@@ -191,8 +192,12 @@ def _dump_packing_markdown(
     No-op if env vars are not set (e.g., ad-hoc invocations outside a run).
     """
     run_dir = os.environ.get("REPS_RUN_DIR")
-    program_id = os.environ.get("REPS_PROGRAM_ID")
-    if not run_dir or not program_id:
+    try:
+        from reps.runtime import current_program_id
+        program_id = current_program_id() or "unknown"
+    except ImportError:
+        program_id = os.environ.get("REPS_PROGRAM_ID", "unknown")
+    if not run_dir or not program_id or program_id == "unknown":
         return
 
     out_dir = Path(run_dir) / "packings"
@@ -240,11 +245,11 @@ def _dump_packing_markdown(
 TARGET_VALUE = 2.635  # AlphaEvolve result for n=26
 
 
-def evaluate(program_path):
+def evaluate(program_path, env=None):
     """Evaluate a circle packing program. Returns full-precision metrics."""
     try:
         start_time = time.time()
-        centers, radii, reported_sum = run_with_timeout(program_path, timeout_seconds=600)
+        centers, radii, reported_sum = run_with_timeout(program_path, timeout_seconds=600, env=env)
         eval_time = time.time() - start_time
 
         if not isinstance(centers, np.ndarray):
@@ -294,10 +299,10 @@ def evaluate(program_path):
                 "eval_time": 0.0, "combined_score": 0.0, "error": str(e)}
 
 
-def evaluate_stage1(program_path):
+def evaluate_stage1(program_path, env=None):
     """Quick validation check (strict DeepMind checker)."""
     try:
-        centers, radii, sum_radii = run_with_timeout(program_path, timeout_seconds=600)
+        centers, radii, sum_radii = run_with_timeout(program_path, timeout_seconds=600, env=env)
 
         if not isinstance(centers, np.ndarray):
             centers = np.array(centers)
@@ -325,6 +330,6 @@ def evaluate_stage1(program_path):
         return {"validity": 0.0, "combined_score": 0.0, "error": str(e)}
 
 
-def evaluate_stage2(program_path):
+def evaluate_stage2(program_path, env=None):
     """Full evaluation."""
-    return evaluate(program_path)
+    return evaluate(program_path, env=env)
