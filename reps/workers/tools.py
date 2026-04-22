@@ -43,7 +43,8 @@ def edit_file_schema() -> ToolSchema:
             "Apply a SEARCH/REPLACE edit to the in-flight child program. The "
             "`search` substring must appear exactly once in the current child "
             "code; it will be replaced with `replace`. Multiple edit_file calls "
-            "may be made before submit_child."
+            "may be made before submit_child. Callable from code_execution so "
+            "many edits can be chained in one Python block."
         ),
         "input_schema": {
             "type": "object",
@@ -53,26 +54,29 @@ def edit_file_schema() -> ToolSchema:
             },
             "required": ["search", "replace"],
         },
+        "allowed_callers": ["direct", "code_execution_20260120"],
     }
 
 
 def view_parent_schema() -> ToolSchema:
     return {
         "name": "view_parent",
-        "description": "Return the parent program's current source code.",
+        "description": "Return the parent program's current source code (returns a string).",
         "input_schema": {"type": "object", "properties": {}, "required": []},
+        "allowed_callers": ["direct", "code_execution_20260120"],
     }
 
 
 def view_program_schema() -> ToolSchema:
     return {
         "name": "view_program",
-        "description": "Return the source of an inspiration or top program by id.",
+        "description": "Return the source of an inspiration or top program by id (returns a string).",
         "input_schema": {
             "type": "object",
             "properties": {"program_id": {"type": "string"}},
             "required": ["program_id"],
         },
+        "allowed_callers": ["direct", "code_execution_20260120"],
     }
 
 
@@ -80,15 +84,17 @@ def run_tests_schema() -> ToolSchema:
     return {
         "name": "run_tests",
         "description": (
-            "Evaluate candidate code in an isolated scratch workspace. Returns "
-            "metrics + a truncated summary. Intermediate artifacts are NOT "
-            "persisted to the final child program's record."
+            "Evaluate candidate code in an isolated scratch workspace. Returns a "
+            "JSON string with metrics and a truncated artifacts summary. "
+            "Intermediate artifacts are NOT persisted to the final child "
+            "program's record."
         ),
         "input_schema": {
             "type": "object",
             "properties": {"code": {"type": "string"}},
             "required": ["code"],
         },
+        "allowed_callers": ["direct", "code_execution_20260120"],
     }
 
 

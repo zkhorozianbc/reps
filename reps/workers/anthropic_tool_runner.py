@@ -45,7 +45,11 @@ class AnthropicToolRunnerWorker:
         self.retries = int(config.impl_options.get("retries", 3))
         self.retry_base_delay = float(config.impl_options.get("retry_base_delay", 1.0))
         self.thinking_effort = str(config.impl_options.get("thinking_effort", "medium"))
+        # Opus 4.7 omits thinking content by default; set "summarized" to see reasoning text.
+        self.thinking_display = str(config.impl_options.get("thinking_display", "summarized"))
         self.max_tokens = int(config.impl_options.get("max_tokens", 16000))
+        # Opt-in code execution server tool → enables programmatic tool calling.
+        self.use_code_execution = bool(config.impl_options.get("code_execution", False))
 
     @classmethod
     def from_config(cls, config: WorkerConfig) -> "AnthropicToolRunnerWorker":
@@ -60,6 +64,11 @@ class AnthropicToolRunnerWorker:
         system_prompt, user_prompt = self._build_initial_prompt(request, ctx)
 
         tool_schemas = build_tool_schemas(ctx, self.config.tools)
+        if self.use_code_execution:
+            # Server-side code execution tool. Also enables programmatic tool calling
+            # for any custom tool that declares `allowed_callers: ["code_execution_20260120"]`.
+            tool_schemas.insert(0, {"type": "code_execution_20260120", "name": "code_execution"})
+        container_id: Optional[str] = None  # reused across turns for state persistence
 
         # In-flight child code starts as parent; edit_file mutates it.
         child_code_holder = [request.parent.code]
@@ -91,9 +100,15 @@ class AnthropicToolRunnerWorker:
                     messages=messages,
                     tools=tool_schemas,
                     is_reasoning=is_reasoning,
+                    container=container_id,
                 )
             except WorkerError as we:
                 return self._fail(we, turns, usage_total, t0)
+
+            # Capture container id for reuse across turns (code-execution sessions).
+            resp_container = getattr(response, "container", None)
+            if resp_container is not None:
+                container_id = getattr(resp_container, "id", None) or container_id
 
             self._accumulate_usage(usage_total, response.usage)
 
@@ -114,18 +129,51 @@ class AnthropicToolRunnerWorker:
                 worker_type="anthropic_tool_runner",
             ))
 
-            if response.stop_reason == "refusal":
+            stop_reason = response.stop_reason
+
+            if stop_reason == "refusal":
                 return self._fail(
                     WorkerError(kind="REFUSED", detail="model refused"),
                     turns, usage_total, t0,
                 )
 
-            if response.stop_reason != "tool_use":
+            if stop_reason == "model_context_window_exceeded":
                 return self._fail(
-                    WorkerError(
-                        kind="PARSE_ERROR",
-                        detail=f"terminal stop_reason={response.stop_reason} without submit_child",
-                    ),
+                    WorkerError(kind="INTERNAL", detail="context window exhausted"),
+                    turns, usage_total, t0,
+                )
+
+            if stop_reason == "max_tokens":
+                # If the tail block is an incomplete tool_use, the model was mid-call.
+                last = response.content[-1] if response.content else None
+                incomplete_tool = last is not None and getattr(last, "type", None) == "tool_use"
+                detail = "max_tokens hit mid-tool_use" if incomplete_tool else "max_tokens hit"
+                return self._fail(
+                    WorkerError(kind="INTERNAL", detail=detail),
+                    turns, usage_total, t0,
+                )
+
+            if stop_reason == "pause_turn":
+                # Server-side loop (code_execution / web search) reached its iteration cap.
+                # Re-send the conversation as-is to resume — no tool dispatch required.
+                messages.append({"role": "assistant", "content": assistant_blocks_for_message})
+                continue
+
+            if stop_reason == "stop_sequence":
+                return self._fail(
+                    WorkerError(kind="PARSE_ERROR", detail="unexpected stop_sequence"),
+                    turns, usage_total, t0,
+                )
+
+            if stop_reason == "end_turn":
+                return self._fail(
+                    WorkerError(kind="PARSE_ERROR", detail="end_turn without submit_child"),
+                    turns, usage_total, t0,
+                )
+
+            if stop_reason != "tool_use":
+                return self._fail(
+                    WorkerError(kind="PARSE_ERROR", detail=f"unexpected stop_reason={stop_reason}"),
                     turns, usage_total, t0,
                 )
 
@@ -268,7 +316,7 @@ class AnthropicToolRunnerWorker:
             system_text = prompt.get("system", "")
         return system_text, prompt.get("user", "")
 
-    async def _call_with_retry(self, *, model, system_prompt, messages, tools, is_reasoning):
+    async def _call_with_retry(self, *, model, system_prompt, messages, tools, is_reasoning, container=None):
         params: Dict[str, Any] = {
             "model": model,
             "max_tokens": self.max_tokens,
@@ -276,9 +324,12 @@ class AnthropicToolRunnerWorker:
             "messages": messages,
             "tools": tools,
         }
+        if container is not None:
+            params["container"] = container
         if is_reasoning:
             # Opus 4.7+ uses adaptive thinking + output_config.effort (not budget_tokens).
-            params["thinking"] = {"type": "adaptive"}
+            # display="summarized" restores reasoning text (Opus 4.7 defaults to omitted).
+            params["thinking"] = {"type": "adaptive", "display": self.thinking_display}
             params["output_config"] = {"effort": self.thinking_effort}
         else:
             if self.config.temperature is not None:
@@ -319,7 +370,18 @@ class AnthropicToolRunnerWorker:
         if t == "redacted_thinking":
             return {"type": "redacted_thinking", "data": raw.data}
         if t == "tool_use":
-            return {"type": "tool_use", "id": raw.id, "name": raw.name, "input": raw.input}
+            d: Dict[str, Any] = {"type": "tool_use", "id": raw.id, "name": raw.name, "input": raw.input}
+            # Preserve caller field (programmatic tool calling) for echo-back.
+            caller = getattr(raw, "caller", None)
+            if caller is not None:
+                d["caller"] = caller.model_dump() if hasattr(caller, "model_dump") else dict(caller)
+            return d
+        if t == "server_tool_use":
+            return {"type": "server_tool_use", "id": raw.id, "name": raw.name, "input": raw.input}
+        if t == "code_execution_tool_result":
+            if hasattr(raw, "model_dump"):
+                return raw.model_dump()
+            return {"type": "code_execution_tool_result", "tool_use_id": getattr(raw, "tool_use_id", None)}
         # fallback: best-effort dict
         if hasattr(raw, "model_dump"):
             return raw.model_dump()
@@ -338,11 +400,35 @@ class AnthropicToolRunnerWorker:
         if t == "redacted_thinking":
             return ContentBlock(type="redacted_thinking", data=getattr(raw, "data", None))
         if t == "tool_use":
+            caller = getattr(raw, "caller", None)
+            extras: Dict[str, Any] = {}
+            if caller is not None:
+                extras["caller"] = caller.model_dump() if hasattr(caller, "model_dump") else dict(caller)
             return ContentBlock(
                 type="tool_use",
                 tool_use_id=raw.id,
                 tool_name=raw.name,
                 tool_input=dict(raw.input) if raw.input else {},
+                provider_extras=extras,
+            )
+        if t == "server_tool_use":
+            # Persist server-tool invocations (code_execution). Not echoed in our ContentBlock
+            # taxonomy natively; stash in provider_extras so trace-render can show it.
+            return ContentBlock(
+                type="tool_use",
+                tool_use_id=getattr(raw, "id", None),
+                tool_name=getattr(raw, "name", "code_execution"),
+                tool_input=dict(getattr(raw, "input", {}) or {}),
+                provider_extras={"server_tool_use": True},
+            )
+        if t == "code_execution_tool_result":
+            content_payload = getattr(raw, "content", None)
+            body = content_payload.model_dump() if hasattr(content_payload, "model_dump") else content_payload
+            return ContentBlock(
+                type="tool_result",
+                tool_result_for_id=getattr(raw, "tool_use_id", None),
+                tool_result_content=body if isinstance(body, (str, list)) else str(body),
+                provider_extras={"code_execution_tool_result": True},
             )
         return ContentBlock(type="text", text=str(raw))
 

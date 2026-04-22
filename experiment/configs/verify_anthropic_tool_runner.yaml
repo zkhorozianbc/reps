@@ -58,13 +58,15 @@ reps:
         model_id: claude-opus-4-7
         generation_mode: full
         tools: [view_parent, view_program, edit_file, run_tests, submit_child]
-        max_turns: 10
+        max_turns: 30
         uses_evaluator: true
         expected_wall_clock_s: 180
         impl_options:
-          thinking_budget: 8000
+          thinking_effort: high
+          thinking_display: summarized
+          code_execution: true   # server-side code execution + programmatic tool calling
           retries: 3
-          max_tokens: 16000
+          max_tokens: 32000
         weight: 1.0
   reflection:
     enabled: true
