@@ -280,8 +280,75 @@ class AnthropicToolRunnerWorker:
                     error=None,
                 )
 
+        # Turn budget exhausted without submit_child. Give the model one final
+        # nudge to ship whatever it has before we fail.
+        nudge_text = (
+            f"You have reached the turn limit (max_turns={self.config.max_turns}). "
+            "Your next and final response MUST call submit_child with your best "
+            "working program so far — whatever you have. Do not call any other "
+            "tools. Do not do any more editing or testing. Submit now."
+        )
+        messages.append({"role": "user", "content": [{"type": "text", "text": nudge_text}]})
+        turns.append(TurnRecord(
+            index=len(turns),
+            role="user",
+            blocks=[ContentBlock(type="text", text=nudge_text)],
+            worker_type="anthropic_tool_runner",
+        ))
+        try:
+            final_resp = await self._call_with_retry(
+                model=model,
+                system_prompt=system_prompt,
+                messages=messages,
+                tools=tool_schemas,
+                is_reasoning=is_reasoning,
+                container=container_id,
+            )
+        except WorkerError as we:
+            return self._fail(we, turns, usage_total, t0)
+
+        self._accumulate_usage(usage_total, final_resp.usage)
+        final_blocks_turn = [self._raw_block_to_content_block(r) for r in final_resp.content]
+        turns.append(TurnRecord(
+            index=len(turns),
+            role="assistant",
+            blocks=final_blocks_turn,
+            model_id=model,
+            usage=self._snapshot_usage(final_resp.usage),
+            stop_reason=final_resp.stop_reason,
+            worker_type="anthropic_tool_runner",
+        ))
+        # Extract submit_child call from the final response, if present.
+        for raw in final_resp.content:
+            if getattr(raw, "type", None) == "tool_use" and raw.name == "submit_child":
+                code = (raw.input or {}).get("code", "")
+                desc = (raw.input or {}).get("changes_description", "")
+                try:
+                    compile(code, "<submitted>", "exec")
+                except SyntaxError as se:
+                    return self._fail(
+                        WorkerError(kind="PARSE_ERROR", detail=f"final submit SyntaxError: {se}"),
+                        turns, usage_total, t0,
+                    )
+                applied = (
+                    serialize_diff_blocks(edit_accumulator)
+                    if edit_accumulator
+                    else self._compute_applied_edit(code, request)
+                )
+                return WorkerResult(
+                    child_code=code,
+                    changes_description=desc,
+                    changes_summary=(desc or "")[:120],
+                    applied_edit=applied,
+                    turns=turns,
+                    turn_count=len(turns),
+                    usage=usage_total,
+                    wall_clock_seconds=time.monotonic() - t0,
+                    error=None,
+                )
+        # Final nudge still didn't yield a submit_child.
         return self._fail(
-            WorkerError(kind="MAX_TURNS_HIT", detail=f"max_turns={self.config.max_turns}"),
+            WorkerError(kind="MAX_TURNS_HIT", detail=f"max_turns={self.config.max_turns} + final nudge ignored"),
             turns, usage_total, t0,
         )
 

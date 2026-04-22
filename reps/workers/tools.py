@@ -20,7 +20,9 @@ def submit_child_schema() -> ToolSchema:
         "name": "submit_child",
         "description": (
             "Submit the final child program. Call exactly once to end the "
-            "iteration. `code` must be a complete program in the target language."
+            "iteration. `code` must be a complete program in the target language. "
+            "Callable directly (for one-shot full rewrites) or from inside a "
+            "code_execution block (the common chaining pattern)."
         ),
         "input_schema": {
             "type": "object",
@@ -33,6 +35,7 @@ def submit_child_schema() -> ToolSchema:
             },
             "required": ["code", "changes_description"],
         },
+        "allowed_callers": ["direct", "code_execution_20260120"],
     }
 
 
@@ -54,7 +57,7 @@ def edit_file_schema() -> ToolSchema:
             },
             "required": ["search", "replace"],
         },
-        "allowed_callers": ["direct", "code_execution_20260120"],
+        "allowed_callers": ["code_execution_20260120"],
     }
 
 
@@ -63,7 +66,7 @@ def view_parent_schema() -> ToolSchema:
         "name": "view_parent",
         "description": "Return the parent program's current source code (returns a string).",
         "input_schema": {"type": "object", "properties": {}, "required": []},
-        "allowed_callers": ["direct", "code_execution_20260120"],
+        "allowed_callers": ["code_execution_20260120"],
     }
 
 
@@ -76,7 +79,7 @@ def view_program_schema() -> ToolSchema:
             "properties": {"program_id": {"type": "string"}},
             "required": ["program_id"],
         },
-        "allowed_callers": ["direct", "code_execution_20260120"],
+        "allowed_callers": ["code_execution_20260120"],
     }
 
 
@@ -94,7 +97,7 @@ def run_tests_schema() -> ToolSchema:
             "properties": {"code": {"type": "string"}},
             "required": ["code"],
         },
-        "allowed_callers": ["direct", "code_execution_20260120"],
+        "allowed_callers": ["code_execution_20260120"],
     }
 
 
