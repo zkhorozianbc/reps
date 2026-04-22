@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import anthropic
+import httpx
 from anthropic import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
 from reps.llm.anthropic import REASONING_MODEL_PATTERNS
@@ -40,14 +41,17 @@ class AnthropicToolRunnerWorker:
     def __init__(self, config: WorkerConfig):
         self.config = config
         api_key = config.impl_options.get("api_key") or os.environ.get("ANTHROPIC_API_KEY")
-        timeout = float(config.impl_options.get("timeout", 300.0))
+        # httpx per-chunk read timeout. Opus 4.7 with thinking_effort=high +
+        # code_execution can go ~5min between chunks during silent computation;
+        # bump to 900s to avoid false positives.
+        timeout = float(config.impl_options.get("timeout", 900.0))
         self.client = anthropic.AsyncAnthropic(api_key=api_key, timeout=timeout, max_retries=0)
         self.retries = int(config.impl_options.get("retries", 3))
         self.retry_base_delay = float(config.impl_options.get("retry_base_delay", 1.0))
         # Hard wall-clock ceiling per API call. Guards against the httpx
         # per-chunk timeout (which resets every byte) — a stalled stream
         # would otherwise block forever.
-        self.wall_clock_timeout = float(config.impl_options.get("wall_clock_timeout", 600.0))
+        self.wall_clock_timeout = float(config.impl_options.get("wall_clock_timeout", 1800.0))
         # Opus 4.7 coding/agentic sweet spot is "xhigh" (per claude-api skill).
         self.thinking_effort = str(config.impl_options.get("thinking_effort", "xhigh"))
         # Opus 4.7 omits thinking content by default; set "summarized" to see reasoning text.
@@ -439,8 +443,18 @@ class AnthropicToolRunnerWorker:
                 if attempt == self.retries:
                     break
                 await asyncio.sleep(self.retry_base_delay * (2 ** attempt))
-            except (APIConnectionError, APITimeoutError, RateLimitError) as e:
+            except (
+                APIConnectionError,
+                APITimeoutError,
+                RateLimitError,
+                httpx.TimeoutException,
+                httpx.TransportError,
+            ) as e:
                 last_exc = e
+                logger.warning(
+                    "messages.stream transport error on attempt %d/%d: %s",
+                    attempt + 1, self.retries + 1, type(e).__name__,
+                )
                 if attempt == self.retries:
                     break
                 await asyncio.sleep(self.retry_base_delay * (2 ** attempt))
@@ -454,7 +468,10 @@ class AnthropicToolRunnerWorker:
                 ) from e
         kind = (
             "TIMEOUT"
-            if isinstance(last_exc, (APITimeoutError, asyncio.TimeoutError))
+            if isinstance(
+                last_exc,
+                (APITimeoutError, asyncio.TimeoutError, httpx.TimeoutException),
+            )
             else "INTERNAL"
         )
         raise WorkerError(kind=kind, detail=repr(last_exc))
