@@ -10,7 +10,7 @@ Original file is located at
 
 Given a positive integer $n$, the problem is to pack $n$ disjoint circles inside a unit square so as to maximize the sum of their radii. The state of the art can be found on [Erich Friedman's homepage](https://erich-friedman.github.io/packing/cirRsqu/).
 
-* For $n=26$, the SOTA was $2.634$, and AlphaEvolve improved it to $2.635983$ (Construction 1; paper rounds to $2.635$, per algorithmicsuperintelligence/openevolve#156).
+* For $n=26$, the SOTA was $2.634$, and AlphaEvolve improved it to $2.635983$ (Construction 1; paper rounds to $2.635$, per algorithmicsuperintelligence/openevolve#156). We target $2.6361$ to push beyond the current baseline.
 * For $n=32$, the SOTA was $2.936$, and AlphaEvolve improved it to $2.937$ (Construction 2).
 
 The constructions found by AlphaEvolve are shown below.
