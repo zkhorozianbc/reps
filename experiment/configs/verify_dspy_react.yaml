@@ -1,6 +1,6 @@
 # experiment/configs/verify_dspy_react.yaml
 # Verification Run C: DSPy ReAct worker with cache=False.
-max_iterations: 40
+max_iterations: 15
 checkpoint_interval: 20
 log_level: INFO
 random_seed: 42

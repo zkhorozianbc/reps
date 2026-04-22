@@ -1,6 +1,6 @@
 # experiment/configs/verify_anthropic_tool_runner.yaml
 # Verification Run B: native Anthropic tool-use worker with extended thinking.
-max_iterations: 40
+max_iterations: 15
 checkpoint_interval: 20
 log_level: INFO
 random_seed: 42
