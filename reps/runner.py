@@ -2,8 +2,18 @@
 
 Entry point for running experiments with either the REPS harness or vanilla OpenEvolve.
 
-Usage:
-    reps-run <initial_program> <evaluator> --config <config.yaml> [--output <dir>] [--iterations N]
+Usage (preferred — everything in the YAML):
+    uv run reps-run --config ./path/to/config.yaml
+
+Optional CLI overrides (take precedence over YAML):
+    --initial-program <path>
+    --evaluator <path>
+    --output <dir>
+    --iterations N
+
+Automatically loads a sibling `.env` file (via python-dotenv) so env-var
+references like `${ANTHROPIC_API_KEY}` in the YAML resolve without manual
+sourcing.
 
 Output directories are auto-versioned: <output>/run_001, run_002, etc.
 """
@@ -15,6 +25,8 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 from reps.config import Config, load_config
 
@@ -145,29 +157,51 @@ def run_openevolve(config_path: str, initial_program: str, evaluator: str, outpu
 
 
 def main():
+    # Load .env before parsing (so env-var refs in YAML resolve).
+    load_dotenv()
+
     parser = argparse.ArgumentParser(description="REPS Experiment Runner")
-    parser.add_argument("initial_program", help="Path to initial program")
-    parser.add_argument("evaluator", help="Path to evaluator script")
     parser.add_argument("--config", required=True, help="Path to YAML config")
-    parser.add_argument("--output", default="reps_output", help="Output base directory")
-    parser.add_argument("--iterations", type=int, default=None, help="Override max_iterations")
+    parser.add_argument("initial_program", nargs="?", default=None,
+                        help="Path to initial program (overrides config.initial_program)")
+    parser.add_argument("evaluator", nargs="?", default=None,
+                        help="Path to evaluator script (overrides config.evaluator)")
+    parser.add_argument("--initial-program", dest="initial_program_flag", default=None,
+                        help="Alternative flag form of initial program path")
+    parser.add_argument("--evaluator", dest="evaluator_flag", default=None,
+                        help="Alternative flag form of evaluator path")
+    parser.add_argument("--output", default=None,
+                        help="Output base directory (overrides config.output)")
+    parser.add_argument("--iterations", type=int, default=None,
+                        help="Override config.max_iterations")
     args = parser.parse_args()
 
     config = load_experiment_config(args.config)
+
+    # Merge CLI overrides > config > error. CLI positional and --flag forms are equivalent.
+    initial_program = args.initial_program or args.initial_program_flag or config.initial_program
+    evaluator = args.evaluator or args.evaluator_flag or config.evaluator_path
+    output = args.output or config.output or "reps_output"
+
+    if not initial_program:
+        parser.error("initial_program is required (positional, --initial-program, or config.initial_program)")
+    if not evaluator:
+        parser.error("evaluator is required (positional, --evaluator, or config.evaluator)")
+
     if args.iterations:
         config.max_iterations = args.iterations
 
     # Auto-version the output directory
-    run_dir = _next_run_dir(args.output)
+    run_dir = _next_run_dir(output)
     print(f"Output: {run_dir}")
 
     # Make run_dir visible to benchmark evaluators (for persisting arrays etc.)
     os.environ["REPS_RUN_DIR"] = run_dir
 
     if config.harness == "openevolve":
-        run_openevolve(args.config, args.initial_program, args.evaluator, run_dir, config.max_iterations)
+        run_openevolve(args.config, initial_program, evaluator, run_dir, config.max_iterations)
     else:
-        asyncio.run(run_reps(config, args.initial_program, args.evaluator, run_dir))
+        asyncio.run(run_reps(config, initial_program, evaluator, run_dir))
 
 
 if __name__ == "__main__":

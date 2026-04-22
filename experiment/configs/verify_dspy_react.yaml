@@ -1,5 +1,10 @@
 # experiment/configs/verify_dspy_react.yaml
 # Verification Run C: DSPy ReAct worker with cache=False.
+# Defaults (CLI args override):
+initial_program: experiment/benchmarks/circle_packing/initial_program.py
+evaluator_path: experiment/benchmarks/circle_packing/evaluator.py
+output: experiment/results/verify_dspy_react
+
 max_iterations: 15
 checkpoint_interval: 20
 log_level: INFO

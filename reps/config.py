@@ -451,6 +451,12 @@ class REPSConfig:
 class Config:
     """Master configuration for REPS / OpenEvolve"""
 
+    # Experiment inputs — can be specified in YAML or overridden on CLI.
+    # Named `..._path` to avoid collision with the `evaluator:` EvaluatorConfig section.
+    initial_program: Optional[str] = None
+    evaluator_path: Optional[str] = None
+    output: Optional[str] = None  # base output dir; runs auto-version to <output>/run_NNN
+
     # General settings
     max_iterations: int = 10000
     checkpoint_interval: int = 100
