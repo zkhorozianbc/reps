@@ -14,6 +14,10 @@ import yaml
 if TYPE_CHECKING:
     from reps.llm.base import LLMInterface
 
+# Imported here (not under TYPE_CHECKING) so dacite can deserialize it from YAML.
+# workers/base.py only imports Config under TYPE_CHECKING, so no circular import.
+from reps.workers.base import WorkerConfig  # noqa: E402
+
 
 _ENV_VAR_PATTERN = re.compile(r"^\$\{([^}]+)\}$")  # ${VAR}
 
@@ -380,12 +384,16 @@ class REPSRevisitationConfig:
 @dataclass
 class REPSWorkersConfig:
     """F3: Worker Type Diversity config"""
-    types: List[str] = field(default_factory=lambda: ["exploiter", "explorer", "crossover"])
+    # Legacy fields — retained for backward compat, renamed from `types`.
+    types_legacy: List[str] = field(default_factory=lambda: ["exploiter", "explorer", "crossover"])
     initial_allocation: Dict[str, float] = field(
         default_factory=lambda: {"exploiter": 0.6, "explorer": 0.25, "crossover": 0.15}
     )
     exploiter_temperature: float = 0.3
     explorer_temperature: float = 1.0
+
+    # New — preferred surface. When non-empty, overrides types_legacy.
+    types: List[WorkerConfig] = field(default_factory=list)
 
 
 @dataclass

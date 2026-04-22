@@ -150,9 +150,11 @@ class ProcessParallelController:
 
             reps = config.reps
 
-            workers_cfg = asdict(reps.workers)
-            workers_cfg["random_seed"] = config.random_seed
-            self._reps_worker_pool = WorkerPool(workers_cfg)
+            primary_model = config.llm.models[0].name if config.llm.models else ""
+            self._reps_worker_pool = WorkerPool(
+                reps.workers,
+                default_model_id=primary_model,
+            )
             self._reps_convergence = ConvergenceMonitor(asdict(reps.convergence))
             contracts_cfg = asdict(reps.contracts)
             contracts_cfg["random_seed"] = config.random_seed
@@ -164,9 +166,10 @@ class ProcessParallelController:
             self._reps_reflection = None
             self._reps_reflection_config = asdict(reps.reflection)
 
+            worker_names = list(self._reps_worker_pool._configs.keys())
             logger.info(
                 f"REPS enabled: batch_size={self._reps_batch_size}, "
-                f"workers={reps.workers.types}, "
+                f"workers={worker_names}, "
                 f"ε={reps.revisitation.epsilon_start}"
             )
         else:
@@ -226,15 +229,16 @@ class ProcessParallelController:
 
         self._dspy_lm_factory = dspy_lm_factory
 
-        # Reuse the existing REPS WorkerPool (it already carries Task 15 config);
-        # the temp get_worker_config shim is attached below if missing.
+        # Reuse the existing REPS WorkerPool if enabled; otherwise build a minimal one.
         if self._reps_enabled:
             self.worker_pool = self._reps_worker_pool
         else:
             # Minimal pool so _run_iteration has something to consult.
-            self.worker_pool = WorkerPool({"types": ["exploiter"]})
-
-        _attach_get_worker_config_shim(self.worker_pool, self.config)
+            primary_model = self.config.llm.models[0].name if self.config.llm.models else ""
+            self.worker_pool = WorkerPool(
+                {"types": ["exploiter"]},
+                default_model_id=primary_model,
+            )
 
         logger.info(
             "AsyncController started (asyncio-only, max_concurrent_iterations=%d)",
@@ -1006,13 +1010,14 @@ class ProcessParallelController:
         ):
             target = self._reps_select_revisitation_target()
             if target is not None:
-                alt_type = self._reps_worker_pool.get_alternative_worker_type(
-                    target.metadata.get("reps_worker_type", "exploiter")
+                alt_name = self._reps_worker_pool.get_alternative_worker_name(
+                    target.metadata.get("reps_worker_name",
+                        target.metadata.get("reps_worker_type", "exploiter"))
                 )
                 config = self._reps_worker_pool.build_iteration_config(
                     self.database,
                     prompt_extras,
-                    override_type=alt_type,
+                    override_name=alt_name,
                     target_island=island_id,
                 )
                 config.parent_id = target.id
@@ -1208,29 +1213,3 @@ class ProcessParallelController:
                     prog.metadata["reps_batch_found"] = self._reps_batch_count
 
 
-def _attach_get_worker_config_shim(worker_pool, config: "Config") -> None:
-    """TEMP: attach a minimal get_worker_config(name) to the legacy WorkerPool.
-
-    Task 15 rewrites WorkerPool to own a list of WorkerConfig entries indexed
-    by name; until then, map the three legacy role names to the default
-    SingleCallWorker impl with config.llm.models[0] as model_id.
-    """
-    if hasattr(worker_pool, "get_worker_config"):
-        return
-
-    def get_worker_config(name: str):
-        from reps.workers.base import WorkerConfig
-
-        default_model = (
-            config.llm.models[0].name if config.llm.models else ""
-        )
-        return WorkerConfig(
-            name=name,
-            impl="single_call",
-            role=name,
-            model_id=default_model,
-            temperature=0.7,
-            generation_mode="diff",
-        )
-
-    worker_pool.get_worker_config = get_worker_config  # type: ignore[attr-defined]
