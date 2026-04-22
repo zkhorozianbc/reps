@@ -1,0 +1,75 @@
+# experiment/configs/verify_anthropic_tool_runner.yaml
+# Verification Run B: native Anthropic tool-use worker with extended thinking.
+max_iterations: 40
+checkpoint_interval: 20
+log_level: INFO
+random_seed: 42
+language: python
+file_suffix: .py
+provider: anthropic
+harness: reps
+
+llm:
+  api_key: "${ANTHROPIC_API_KEY}"
+  temperature: 0.7
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+  models:
+    - name: claude-opus-4-7-20250514
+      provider: anthropic
+      weight: 1.0
+
+prompt:
+  num_top_programs: 3
+  num_diverse_programs: 2
+
+database:
+  population_size: 200
+  archive_size: 50
+  num_islands: 3
+  log_prompts: true
+  random_seed: 42
+  max_turns_persisted: 24
+
+evaluator:
+  timeout: 600
+  max_retries: 2
+  parallel_evaluations: 2
+  max_concurrent_iterations: 2
+  cascade_evaluation: true
+
+diff_based_evolution: true
+
+reps:
+  enabled: true
+  batch_size: 6
+  workers:
+    types:
+      - name: atr_explorer
+        impl: anthropic_tool_runner
+        role: explorer
+        model_id: claude-opus-4-7-20250514
+        generation_mode: full
+        tools: [view_parent, view_program, edit_file, run_tests, submit_child]
+        max_turns: 10
+        uses_evaluator: true
+        expected_wall_clock_s: 180
+        impl_options:
+          thinking_budget: 8000
+          retries: 3
+          max_tokens: 16000
+        weight: 1.0
+  reflection:
+    enabled: true
+    top_k: 3
+    bottom_k: 2
+  revisitation:
+    enabled: true
+  convergence:
+    enabled: true
+  contracts:
+    enabled: false
+  annotations:
+    enabled: true
