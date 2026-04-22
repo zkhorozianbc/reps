@@ -118,7 +118,7 @@ class WorkerPool:
 
         config = IterationConfig(
             parent_id=None,
-            worker_type=worker_type,
+            worker_name=worker_type,
             model_id=None,
             temperature=wconf["temperature"],
             prompt_extras=dict(prompt_extras),

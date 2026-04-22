@@ -22,7 +22,12 @@ class IterationConfig:
     parent_id: Optional[str] = None  # If set, use this parent; if None, sample from DB snapshot
 
     # Worker type (F3)
-    worker_type: str = "exploiter"  # "exploiter", "explorer", "crossover"
+    worker_name: str = "exploiter"  # "exploiter", "explorer", "crossover"
+
+    # Backward-compat alias. Remove in a future release.
+    @property
+    def worker_type(self) -> str:
+        return self.worker_name
 
     # Model/generation params (F5 intelligence contracts)
     model_id: Optional[str] = None  # Override model selection; None = use default
@@ -64,7 +69,7 @@ class IterationResult:
 
     # REPS fields
     diff: str = ""  # Raw LLM output (for convergence monitor edit entropy)
-    worker_type: str = "exploiter"
+    worker_name: str = "exploiter"
     is_revisitation: bool = False
     model_id: Optional[str] = None
     temperature: Optional[float] = None
@@ -72,8 +77,16 @@ class IterationResult:
     child_score: float = 0.0
     improved: bool = False
 
+    # Turn records for tool-calling workers (Task 8+)
+    turns: List[Dict[str, Any]] = field(default_factory=list)
+
     # Compute signature fields
     tokens_in: int = 0
     tokens_out: int = 0
     wall_clock_seconds: float = 0.0
     iteration_time: float = 0.0
+
+    # Backward-compat alias. Remove in a future release.
+    @property
+    def worker_type(self) -> str:
+        return self.worker_name

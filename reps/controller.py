@@ -1228,7 +1228,7 @@ class ProcessParallelController:
                 llm_response=r.llm_response,
                 artifacts=r.artifacts,
                 diff=meta.get("diff", ""),
-                worker_type=meta.get("worker_type", "exploiter"),
+                worker_name=meta.get("worker_type", "exploiter"),
                 is_revisitation=meta.get("is_revisitation", False),
                 model_id=meta.get("model_id"),
                 temperature=meta.get("temperature"),
