@@ -111,9 +111,16 @@ class AnthropicToolRunnerWorker:
                 return self._fail(we, turns, usage_total, t0)
 
             # Capture container id for reuse across turns (code-execution sessions).
-            resp_container = getattr(response, "container", None)
-            if resp_container is not None:
-                container_id = getattr(resp_container, "id", None) or container_id
+            # _stream_to_final stashes it on the Message when the streaming path
+            # captures it from message_start; also check the standard `container`
+            # field in case the non-streaming shape is present.
+            new_cid = (
+                getattr(response, "_captured_container_id", None)
+                or self._extract_container_id(response)
+            )
+            if new_cid and new_cid != container_id:
+                logger.info("captured container_id=%s", new_cid)
+                container_id = new_cid
 
             self._accumulate_usage(usage_total, response.usage)
 
@@ -457,16 +464,49 @@ class AnthropicToolRunnerWorker:
         completes, then return the aggregated final Message (same shape as a
         non-streaming .create()). The SDK internally accumulates deltas into
         blocks; we tap content_block_stop events for block-level visibility
-        without handling raw chunks ourselves."""
+        without handling raw chunks ourselves.
+
+        Also captures the code-execution container id robustly: the final
+        Message may not carry `container` in the streaming path, but the
+        `message_start` event does. We stash it on the returned message for
+        the caller to read.
+        """
+        container_id_seen: Optional[str] = None
         async with self.client.messages.stream(**params) as stream:
             async for event in stream:
                 et = getattr(event, "type", None)
                 if et == "content_block_stop":
                     self._log_completed_block(getattr(event, "content_block", None))
-                elif et == "message_stop":
-                    # final stop; let the loop exit
-                    pass
-            return await stream.get_final_message()
+                elif et == "message_start":
+                    msg = getattr(event, "message", None)
+                    cid = self._extract_container_id(msg)
+                    if cid:
+                        container_id_seen = cid
+            final = await stream.get_final_message()
+        # Prefer container id from final Message if present; fall back to what
+        # we saw on message_start.
+        cid_final = self._extract_container_id(final)
+        resolved = cid_final or container_id_seen
+        if resolved is not None:
+            try:
+                object.__setattr__(final, "_captured_container_id", resolved)
+            except Exception:
+                pass
+        return final
+
+    @staticmethod
+    def _extract_container_id(obj) -> Optional[str]:
+        if obj is None:
+            return None
+        c = getattr(obj, "container", None)
+        if c is None and isinstance(obj, dict):
+            c = obj.get("container")
+        if c is None:
+            return None
+        cid = getattr(c, "id", None)
+        if not cid and isinstance(c, dict):
+            cid = c.get("id")
+        return cid
 
     def _log_completed_block(self, block) -> None:
         if block is None:
