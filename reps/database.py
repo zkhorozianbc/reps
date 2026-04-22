@@ -39,6 +39,22 @@ def _safe_avg_metrics(metrics: Dict[str, Any]) -> float:
     return sum(numeric_values) / max(1, len(numeric_values)) if numeric_values else 0.0
 
 
+def _truncate_turns(turns: list, max_turns: Optional[int]) -> list:
+    """Return turns list, optionally capped to first-N/2 + marker + last-N/2 structure."""
+    if max_turns is None or len(turns) <= max_turns:
+        return turns
+    half = max_turns // 2
+    dropped = len(turns) - 2 * half
+    marker = {
+        "index": -1,
+        "role": "system",
+        "blocks": [{"type": "text", "text": f"[truncated {dropped} turns]"}],
+        "impl_specific": {"truncated": True, "truncated_count": dropped},
+        "schema_version": 1,
+    }
+    return list(turns[:half]) + [marker] + list(turns[-half:])
+
+
 @dataclass
 class Program:
     """Represents a program in the database"""
@@ -829,6 +845,22 @@ class ProgramDatabase:
 
         with open(program_path, "w") as f:
             json.dump(program_dict, f)
+
+        # Sidecar: TurnRecord trace, if present and log_prompts enabled.
+        turns = program_dict.get("metadata", {}).get("turns") or []
+        if turns and self.config.log_prompts:
+            turns = _truncate_turns(turns, self.config.max_turns_persisted)
+            trace_path = os.path.join(programs_dir, f"{program.id}.trace.json")
+            with open(trace_path, "w") as f:
+                json.dump(
+                    {
+                        "schema_version": 1,
+                        "worker_type": program_dict.get("metadata", {}).get("reps_worker_name"),
+                        "turns": turns,
+                    },
+                    f,
+                    default=str,
+                )
 
     def _calculate_feature_coords(self, program: Program) -> List[int]:
         """

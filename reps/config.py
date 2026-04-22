@@ -313,6 +313,9 @@ class DatabaseConfig:
     embedding_model: Optional[str] = None
     similarity_threshold: float = 0.99
 
+    # Trace sidecar: TurnRecord persistence (Task 17)
+    max_turns_persisted: Optional[int] = None  # None = unlimited
+
 
 @dataclass
 class EvaluatorConfig:
@@ -357,6 +360,7 @@ class EvolutionTraceConfig:
     format: str = "jsonl"  # Options: "jsonl", "json", "hdf5"
     include_code: bool = False
     include_prompts: bool = True
+    include_turns: bool = False  # Include TurnRecord turns in evolution trace (Task 17)
     output_path: Optional[str] = None
     buffer_size: int = 10
     compress: bool = False

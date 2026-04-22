@@ -391,6 +391,7 @@ class ProcessParallelController:
         }
         if iteration_config.model_id:
             child_metadata["reps_model_id"] = iteration_config.model_id
+        child_metadata["turns"] = [_turn_to_dict(t) for t in result.turns]
 
         child = Program(
             id=final_child_id,
