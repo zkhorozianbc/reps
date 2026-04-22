@@ -223,9 +223,8 @@ class ProcessParallelController:
         self._llm_factory = llm_factory
 
         def dspy_lm_factory(wc):
-            raise NotImplementedError(
-                "DSPy LM factory not yet wired; requires Task 14 (DSPyReActWorker)."
-            )
+            from reps.workers.dspy_react import make_dspy_lm
+            return make_dspy_lm(self.config, wc)
 
         self._dspy_lm_factory = dspy_lm_factory
 
