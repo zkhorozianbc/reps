@@ -1184,9 +1184,9 @@ class ProcessParallelController:
 
         # F8: Annotate candidates
         if self.config.reps.annotations.enabled and self._reps_current_reflection:
-            self._reps_annotate_candidates(reps_results)
+            await self._reps_annotate_candidates(reps_results)
 
-    def _reps_annotate_candidates(self, reps_results: List):
+    async def _reps_annotate_candidates(self, reps_results: List):
         """F8: Annotate candidates with reflection-derived metadata."""
         reflection = self._reps_current_reflection or {}
         working = reflection.get("working_patterns", [])
@@ -1214,5 +1214,41 @@ class ProcessParallelController:
                 prog.metadata["reps_annotations"] = annotations
                 if "reps_batch_found" not in prog.metadata:
                     prog.metadata["reps_batch_found"] = self._reps_batch_count
+
+        # New: per-program summaries, concurrent.
+        if not reps_results:
+            return
+        sem = asyncio.Semaphore(3)
+        llm = self._reps_reflection.llm if self._reps_reflection else None
+        if llm is None:
+            return
+
+        from reps.program_summarizer import summarize_program
+
+        async def _one(rr):
+            async with sem:
+                if rr.child_program_dict is None:
+                    return
+                pid = rr.child_program_dict.get("id")
+                if not pid or pid not in self.database.programs:
+                    return
+                prog = self.database.programs[pid]
+                turns = prog.metadata.get("turns") or []
+                if not turns:
+                    return
+                summary = await summarize_program(
+                    program_id=pid,
+                    code=prog.code,
+                    turns=turns,
+                    parent_score=rr.parent_score,
+                    child_score=rr.child_score,
+                    improved=rr.improved,
+                    llm_ensemble=llm,
+                )
+                if summary:
+                    ann = prog.metadata.setdefault("reps_annotations", {})
+                    ann["summary"] = summary
+
+        await asyncio.gather(*[_one(rr) for rr in reps_results], return_exceptions=True)
 
 

@@ -18,6 +18,7 @@ import httpx
 from anthropic import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
 from reps.llm.anthropic import REASONING_MODEL_PATTERNS
+from reps.program_summarizer import format_summary_for_prompt
 from reps.workers.base import (
     ContentBlock,
     TurnRecord,
@@ -417,7 +418,19 @@ class AnthropicToolRunnerWorker:
             system_text = (_TEMPLATE_DIR / f"{template_key}.txt").read_text()
         except Exception:
             system_text = prompt.get("system", "")
-        return system_text, prompt.get("user", "")
+
+        # Prepend parent's per-program summary if available.
+        user_text = prompt.get("user", "")
+        parent_summary = (
+            request.parent.metadata.get("reps_annotations", {}).get("summary")
+            if request.parent and request.parent.metadata
+            else None
+        )
+        if parent_summary:
+            insights_text = format_summary_for_prompt(parent_summary, label="Parent's notebook")
+            user_text = insights_text + "\n\n" + user_text
+
+        return system_text, user_text
 
     async def _call_with_retry(self, *, model, system_prompt, messages, tools, is_reasoning, container=None):
         params: Dict[str, Any] = {

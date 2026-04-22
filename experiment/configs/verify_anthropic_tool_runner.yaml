@@ -48,7 +48,7 @@ diff_based_evolution: true
 
 reps:
   enabled: true
-  batch_size: 6
+  batch_size: 2
   workers:
     types:
       - name: atr_explorer

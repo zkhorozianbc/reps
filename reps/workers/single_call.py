@@ -6,6 +6,7 @@ from __future__ import annotations
 import time
 from typing import Dict, List
 
+from reps.program_summarizer import format_summary_for_prompt
 from reps.utils import (
     apply_diff,
     apply_diff_blocks,
@@ -65,6 +66,16 @@ class SingleCallWorker:
             current_changes_description=changes_description_text,
             **request.prompt_extras,
         )
+
+        # Prepend parent's per-program summary if available.
+        parent_summary = (
+            request.parent.metadata.get("reps_annotations", {}).get("summary")
+            if request.parent and request.parent.metadata
+            else None
+        )
+        if parent_summary:
+            insights_text = format_summary_for_prompt(parent_summary, label="Parent's notebook")
+            prompt["user"] = insights_text + "\n\n" + prompt["user"]
 
         # Append un-consumed prompt_extras (existing behavior from controller.py:287)
         for key in ("reflection", "sota_injection", "dead_end_warnings"):
