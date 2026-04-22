@@ -59,6 +59,17 @@ class AnthropicToolRunnerWorker:
         self.max_tokens = int(config.impl_options.get("max_tokens", 16000))
         # Opt-in code execution server tool → enables programmatic tool calling.
         self.use_code_execution = bool(config.impl_options.get("code_execution", False))
+        # Task Budgets (beta, Opus 4.7 only): total token budget for the full agentic loop.
+        # The model sees a running countdown and self-moderates. Minimum per Anthropic docs
+        # is 20,000 tokens; we clamp silently rather than hard-fail.
+        _raw_budget = int(config.impl_options.get("task_budget_total", 0))
+        if _raw_budget > 0 and _raw_budget < 20000:
+            logger.warning(
+                "task_budget_total=%d is below Anthropic minimum (20000); clamping to 20000",
+                _raw_budget,
+            )
+            _raw_budget = 20000
+        self.task_budget_total: int = _raw_budget  # 0 = disabled
 
     @classmethod
     def from_config(cls, config: WorkerConfig) -> "AnthropicToolRunnerWorker":
@@ -422,7 +433,16 @@ class AnthropicToolRunnerWorker:
             # Opus 4.7+ uses adaptive thinking + output_config.effort (not budget_tokens).
             # display="summarized" restores reasoning text (Opus 4.7 defaults to omitted).
             params["thinking"] = {"type": "adaptive", "display": self.thinking_display}
-            params["output_config"] = {"effort": self.thinking_effort}
+            output_config: Dict[str, Any] = {"effort": self.thinking_effort}
+            if self.task_budget_total > 0:
+                # Task Budgets: tell the model how many total tokens it has for this
+                # agentic iteration; it sees a countdown and self-moderates.
+                # Distinct from max_tokens (per-response ceiling, model unaware).
+                output_config["task_budget"] = {
+                    "type": "tokens",
+                    "total": self.task_budget_total,
+                }
+            params["output_config"] = output_config
         else:
             if self.config.temperature is not None:
                 params["temperature"] = self.config.temperature
@@ -489,7 +509,19 @@ class AnthropicToolRunnerWorker:
         the caller to read.
         """
         container_id_seen: Optional[str] = None
-        async with self.client.messages.stream(**params) as stream:
+        # Task Budgets requires the beta namespace + beta header. When the feature
+        # is disabled we use the regular messages.stream to avoid any beta header
+        # side-effects on non-reasoning models or when the feature isn't needed.
+        use_beta_stream = self.task_budget_total > 0
+        stream_ctx = (
+            self.client.beta.messages.stream(
+                **params,
+                betas=["task-budgets-2026-03-13"],
+            )
+            if use_beta_stream
+            else self.client.messages.stream(**params)
+        )
+        async with stream_ctx as stream:
             async for event in stream:
                 et = getattr(event, "type", None)
                 if et == "content_block_stop":

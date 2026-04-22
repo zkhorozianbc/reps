@@ -66,6 +66,7 @@ reps:
           code_execution: true   # server-side code execution + programmatic tool calling
           retries: 3
           max_tokens: 32000
+          task_budget_total: 80000  # Task Budgets (beta, Opus 4.7): model sees countdown, self-moderates
         weight: 1.0
   reflection:
     enabled: true
