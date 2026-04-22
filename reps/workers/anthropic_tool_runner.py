@@ -44,7 +44,8 @@ class AnthropicToolRunnerWorker:
         self.client = anthropic.AsyncAnthropic(api_key=api_key, timeout=timeout, max_retries=0)
         self.retries = int(config.impl_options.get("retries", 3))
         self.retry_base_delay = float(config.impl_options.get("retry_base_delay", 1.0))
-        self.thinking_effort = str(config.impl_options.get("thinking_effort", "medium"))
+        # Opus 4.7 coding/agentic sweet spot is "xhigh" (per claude-api skill).
+        self.thinking_effort = str(config.impl_options.get("thinking_effort", "xhigh"))
         # Opus 4.7 omits thinking content by default; set "summarized" to see reasoning text.
         self.thinking_display = str(config.impl_options.get("thinking_display", "summarized"))
         self.max_tokens = int(config.impl_options.get("max_tokens", 16000))
@@ -166,10 +167,19 @@ class AnthropicToolRunnerWorker:
                 )
 
             if stop_reason == "end_turn":
-                return self._fail(
-                    WorkerError(kind="PARSE_ERROR", detail="end_turn without submit_child"),
-                    turns, usage_total, t0,
+                # Defensive: if submit_child was called (e.g. from inside a
+                # code_execution block) and the final stop_reason wraps up as
+                # end_turn, let the tool_use dispatch path below process it.
+                has_submit = any(
+                    getattr(raw, "type", None) == "tool_use" and raw.name == "submit_child"
+                    for raw in response.content
                 )
+                if not has_submit:
+                    return self._fail(
+                        WorkerError(kind="PARSE_ERROR", detail="end_turn without submit_child"),
+                        turns, usage_total, t0,
+                    )
+                # Fall through into the tool_use dispatch block below.
 
             if stop_reason != "tool_use":
                 return self._fail(
