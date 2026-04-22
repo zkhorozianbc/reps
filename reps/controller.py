@@ -392,6 +392,40 @@ class ProcessParallelController:
             child_metadata["reps_model_id"] = iteration_config.model_id
         child_metadata["turns"] = [_turn_to_dict(t) for t in result.turns]
 
+        parent_score = (
+            parent.metrics.get("combined_score", safe_numeric_average(parent.metrics))
+            if parent.metrics
+            else 0.0
+        )
+        child_score = outcome.metrics.get(
+            "combined_score", safe_numeric_average(outcome.metrics)
+        )
+
+        # Per-iteration summarization: run BEFORE the child enters the DB so
+        # descendants that start concurrently see the summary. Bounded by the
+        # reflection LLM ensemble; best-effort — failures don't block the child.
+        if self._reps_enabled and self._reps_reflection is not None:
+            try:
+                from reps.program_summarizer import summarize_program
+
+                turns_dicts = [_turn_to_dict(t) for t in result.turns]
+                summary = await summarize_program(
+                    program_id=final_child_id,
+                    code=result.child_code,
+                    turns=turns_dicts,
+                    parent_score=parent_score,
+                    child_score=child_score,
+                    improved=child_score > parent_score,
+                    llm_ensemble=self._reps_reflection.llm,
+                )
+                if summary:
+                    ann = child_metadata.setdefault("reps_annotations", {})
+                    ann["summary"] = summary
+            except Exception as e:
+                logger.warning(
+                    "per-iteration summarizer failed for %s: %s", final_child_id[:8], e
+                )
+
         child = Program(
             id=final_child_id,
             code=result.child_code,
@@ -402,12 +436,6 @@ class ProcessParallelController:
             metrics=outcome.metrics,
             iteration_found=iteration,
             metadata=child_metadata,
-        )
-
-        parent_score = (
-            parent.metrics.get("combined_score", safe_numeric_average(parent.metrics))
-            if parent.metrics
-            else 0.0
         )
 
         prompt_dict = _derive_prompt_from_turns(result.turns)
@@ -1215,40 +1243,7 @@ class ProcessParallelController:
                 if "reps_batch_found" not in prog.metadata:
                     prog.metadata["reps_batch_found"] = self._reps_batch_count
 
-        # New: per-program summaries, concurrent.
-        if not reps_results:
-            return
-        sem = asyncio.Semaphore(3)
-        llm = self._reps_reflection.llm if self._reps_reflection else None
-        if llm is None:
-            return
-
-        from reps.program_summarizer import summarize_program
-
-        async def _one(rr):
-            async with sem:
-                if rr.child_program_dict is None:
-                    return
-                pid = rr.child_program_dict.get("id")
-                if not pid or pid not in self.database.programs:
-                    return
-                prog = self.database.programs[pid]
-                turns = prog.metadata.get("turns") or []
-                if not turns:
-                    return
-                summary = await summarize_program(
-                    program_id=pid,
-                    code=prog.code,
-                    turns=turns,
-                    parent_score=rr.parent_score,
-                    child_score=rr.child_score,
-                    improved=rr.improved,
-                    llm_ensemble=llm,
-                )
-                if summary:
-                    ann = prog.metadata.setdefault("reps_annotations", {})
-                    ann["summary"] = summary
-
-        await asyncio.gather(*[_one(rr) for rr in reps_results], return_exceptions=True)
+        # Per-program summaries moved to per-iteration path (see
+        # _summarize_child_inline). Batch annotation only adds tags now.
 
 
