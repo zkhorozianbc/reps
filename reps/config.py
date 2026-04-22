@@ -340,6 +340,14 @@ class EvaluatorConfig:
     enable_artifacts: bool = True
     max_artifact_storage: int = 100 * 1024 * 1024  # 100MB per program
 
+    # Asyncio-era concurrency
+    max_concurrent_iterations: int = 4   # asyncio-era concurrency bound
+
+    def __post_init__(self):
+        # If user set only parallel_evaluations, mirror it to the iteration cap.
+        if self.max_concurrent_iterations == 4 and self.parallel_evaluations not in (None, 1):
+            self.max_concurrent_iterations = int(self.parallel_evaluations)
+
 
 @dataclass
 class EvolutionTraceConfig:
