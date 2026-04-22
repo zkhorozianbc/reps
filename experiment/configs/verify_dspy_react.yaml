@@ -58,7 +58,7 @@ reps:
         temperature: 0.6
         generation_mode: full
         tools: [view_parent, run_tests]
-        max_turns: 6
+        max_turns: 30
         uses_evaluator: true
         expected_wall_clock_s: 120
         weight: 1.0
