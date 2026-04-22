@@ -17,7 +17,7 @@ llm:
   retries: 3
   retry_delay: 5
   models:
-    - name: claude-sonnet-4-5-20250929
+    - name: claude-sonnet-4-6
       provider: anthropic
       weight: 1.0
 
@@ -50,7 +50,7 @@ reps:
       - name: dspy_exploiter
         impl: dspy_react
         role: exploiter
-        model_id: claude-sonnet-4-5-20250929
+        model_id: claude-sonnet-4-6
         temperature: 0.6
         generation_mode: full
         tools: [view_parent, run_tests]
