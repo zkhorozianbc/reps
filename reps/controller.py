@@ -404,7 +404,12 @@ class ProcessParallelController:
         # Per-iteration summarization: run BEFORE the child enters the DB so
         # descendants that start concurrently see the summary. Bounded by the
         # reflection LLM ensemble; best-effort — failures don't block the child.
-        if self._reps_enabled and self._reps_reflection is not None:
+        summarizer_cfg = getattr(self.config.reps, "summarizer", None)
+        if (
+            self._reps_enabled
+            and self._reps_reflection is not None
+            and (summarizer_cfg is None or summarizer_cfg.enabled)
+        ):
             try:
                 from reps.program_summarizer import summarize_program
 
@@ -417,6 +422,14 @@ class ProcessParallelController:
                     child_score=child_score,
                     improved=child_score > parent_score,
                     llm_ensemble=self._reps_reflection.llm,
+                    model_id=(
+                        summarizer_cfg.model_id
+                        if summarizer_cfg
+                        else "claude-sonnet-4-6"
+                    ),
+                    task_instructions=(
+                        summarizer_cfg.task_instructions if summarizer_cfg else None
+                    ),
                 )
                 if summary:
                     ann = child_metadata.setdefault("reps_annotations", {})

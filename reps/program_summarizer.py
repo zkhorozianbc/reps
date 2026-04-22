@@ -1,5 +1,19 @@
 """Per-program reasoning summarizer — Sonnet 4.6 call that distills a
-program's full trace into structured JSON insight for F8 Annotations."""
+program's full trace into structured JSON insight for F8 Annotations.
+
+Prompt architecture:
+  system:  general summarizer role + strict output rules (generalizes to ANY
+           benchmark — same across the whole REPS deployment)
+  user:    optional task-specific instructions (per-benchmark guardrails)
+           followed by the data to summarize (trace + code + metrics)
+
+Benchmark authors should supply their task-specific instructions via
+`config.reps.summarizer.task_instructions` (or pass directly to
+`summarize_program(task_instructions=...)`) — this keeps the general
+summarizer prompt stable and cache-friendly while letting each benchmark
+correct for its own failure modes (e.g. "score=0 means overlap, not
+broken validator").
+"""
 from __future__ import annotations
 import json
 import logging
@@ -11,33 +25,59 @@ logger = logging.getLogger(__name__)
 
 _MAX_REASONING_CHARS = 12000  # truncate very long traces before sending
 
-_SYSTEM_PROMPT = (
-    "You are a technical analyst extracting actionable insights from code "
-    "mutation attempts in an evolutionary search. You output STRICT JSON only."
-)
+# General role + strict rules. Generalizes to any benchmark. Cache-stable.
+_SYSTEM_PROMPT = """You are a technical analyst extracting actionable insights from code mutation attempts in an evolutionary search.
 
-_USER_TEMPLATE = """Analyze this mutation attempt.
+Your role is to read an agent's full reasoning + tool trace from one iteration of evolution — along with the code it submitted and its score — and produce a structured JSON summary that helps subsequent iterations learn from this attempt.
 
-Parent score (combined_score): {parent_score:.6f}
-Child score (combined_score): {child_score:.6f}
-Improved: {improved}
+STRICT RULES:
+1. Output ONLY a JSON object. No prose before or after. No markdown fences.
+2. Do NOT speculate that the scoring / validator / evaluator system itself is broken. If a score is 0 or low, assume the code failed to meet the benchmark's constraints (invalid output, runtime error, constraint violation) — the evaluator is working as designed.
+3. Be SPECIFIC. "The code failed" is useless; "the sort key returned None for empty inputs" is useful. Cite line-of-reasoning or concrete numbers when possible.
+4. Pitfalls must be OBSERVED in the trace — bugs the agent actually hit, error messages it actually saw. Do not invent plausible-sounding bugs. If the trace shows no explicit failure, set pitfalls to [].
+5. `next_directions` must be grounded: directions the parent CONSIDERED but did not pursue, or direct extensions of what demonstrably worked. Do not emit generic programming advice.
+6. `avoid` must reference approaches the parent EXPLICITLY tried and found worse. Do not pre-emptively blacklist entire technique families based on one data point.
+7. `key_insight` is one line capturing the most transferable lesson from this attempt. If nothing notable, use "none".
 
-Child code (first 3000 chars):
-```python
-{code_head}
-```
+OUTPUT SCHEMA (exactly these keys, no others):
+{
+  "approach": "string, one line describing the mutation attempted",
+  "pitfalls": ["up to 5 strings, each a specific observed failure"],
+  "key_insight": "one line or \\"none\\"",
+  "next_directions": ["up to 3 unexplored directions, grounded in the trace"],
+  "avoid": ["up to 3 approaches the parent explicitly tried and found inferior"]
+}"""
 
-Agent's reasoning + tool trace (reasoning blocks, tool calls, results):
-{reasoning}
 
-Output JSON with exactly these keys (no other fields, no prose):
-- "approach": string, one line describing the mutation attempted
-- "pitfalls": list of up to 5 strings, each a specific bug/failure/dead-end observed
-- "key_insight": string, one line capturing what was learned (or "none" if nothing notable)
-- "next_directions": list of up to 3 strings, unexplored directions worth trying
-- "avoid": list of up to 3 strings, approaches to NOT retry (because they failed or are clearly inferior)
-
-Respond with ONLY the JSON object, nothing else."""
+def _build_user_message(
+    *,
+    task_instructions: Optional[str],
+    parent_score: float,
+    child_score: float,
+    improved: bool,
+    code: str,
+    reasoning: str,
+) -> str:
+    parts: list[str] = []
+    if task_instructions:
+        # Task-specific guardrails appear BEFORE the data so the model reads
+        # them first when constructing its summary.
+        parts.append("## Benchmark-specific guidance")
+        parts.append(task_instructions.strip())
+        parts.append("")
+    parts.append("## Attempt data")
+    parts.append(f"Parent score (combined_score): {parent_score:.6f}")
+    parts.append(f"Child score (combined_score): {child_score:.6f}")
+    parts.append(f"Improved: {improved}")
+    parts.append("")
+    parts.append("Child code (first 3000 chars):")
+    parts.append("```python")
+    parts.append(code[:3000])
+    parts.append("```")
+    parts.append("")
+    parts.append("Agent's reasoning + tool trace:")
+    parts.append(reasoning)
+    return "\n".join(parts)
 
 
 async def summarize_program(
@@ -50,11 +90,18 @@ async def summarize_program(
     improved: bool,
     llm_ensemble,
     model_id: str = "claude-sonnet-4-6",
+    task_instructions: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Call Sonnet 4.6 to produce a structured per-program summary.
 
     Returns None on failure; callers should treat it as best-effort and
     continue without a summary.
+
+    Args:
+        task_instructions: Optional per-benchmark guardrails to append to
+            the user message before the attempt data. Use this to inject
+            correction guidance (e.g. "score=0 means overlap, not a broken
+            validator") without touching the general system prompt.
     """
     if not turns:
         return None
@@ -64,18 +111,19 @@ async def summarize_program(
         tail = reasoning[-_MAX_REASONING_CHARS // 2 :]
         reasoning = f"{head}\n\n... [truncated {len(reasoning) - _MAX_REASONING_CHARS} chars] ...\n\n{tail}"
 
-    prompt = _USER_TEMPLATE.format(
+    user_text = _build_user_message(
+        task_instructions=task_instructions,
         parent_score=parent_score,
         child_score=child_score,
         improved=improved,
-        code_head=code[:3000],
+        code=code,
         reasoning=reasoning,
     )
 
     try:
         resp_text = await llm_ensemble.generate_with_context(
             system_message=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": user_text}],
             model=model_id,
             temperature=0.2,
         )
@@ -86,7 +134,6 @@ async def summarize_program(
     # Strip common wrapper patterns (```json ... ```)
     s = (resp_text or "").strip()
     if s.startswith("```"):
-        # strip ```json ... ```
         s = s.strip("`")
         if s.lower().startswith("json"):
             s = s[4:].lstrip()
@@ -99,7 +146,6 @@ async def summarize_program(
         logger.warning(f"program summarizer JSON parse failed for {program_id[:8]}: {e}")
         return None
 
-    # Sanity-coerce the expected shape
     out = {
         "approach": str(data.get("approach", ""))[:500],
         "pitfalls": [str(p)[:300] for p in (data.get("pitfalls") or [])[:5]],

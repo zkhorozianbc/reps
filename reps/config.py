@@ -433,6 +433,20 @@ class REPSAnnotationsConfig:
 
 
 @dataclass
+class REPSSummarizerConfig:
+    """Per-program Sonnet 4.6 summarizer (runs inline per iteration).
+
+    General role + output rules live in the module's fixed system prompt.
+    `task_instructions` is the benchmark-specific guidance appended to the
+    summarizer's user message (before the trace data) — use it to correct
+    common hallucinations or enforce domain-specific framing.
+    """
+    enabled: bool = True
+    model_id: str = "claude-sonnet-4-6"
+    task_instructions: Optional[str] = None
+
+
+@dataclass
 class REPSConfig:
     """Master REPS configuration -- all features toggled and tuned here."""
     enabled: bool = False  # Master switch: set True to activate REPS features
@@ -445,6 +459,7 @@ class REPSConfig:
     contracts: REPSContractsConfig = field(default_factory=REPSContractsConfig)
     sota: REPSSOTAConfig = field(default_factory=REPSSOTAConfig)
     annotations: REPSAnnotationsConfig = field(default_factory=REPSAnnotationsConfig)
+    summarizer: REPSSummarizerConfig = field(default_factory=REPSSummarizerConfig)
 
 
 @dataclass

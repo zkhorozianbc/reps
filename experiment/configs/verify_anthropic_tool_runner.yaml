@@ -80,3 +80,15 @@ reps:
     enabled: false
   annotations:
     enabled: true
+  summarizer:
+    enabled: true
+    model_id: claude-sonnet-4-6
+    task_instructions: |
+      Benchmark: circle packing n=26 in the unit square. validity=0 / score=0
+      means the code produced circles that either overlap one another or
+      extend outside [0,1]x[0,1]. The DeepMind strict verifier is correct —
+      NEVER speculate that it is broken. Attribute validity failures to
+      concrete geometric issues (overlap between two rows, radius exceeds
+      boundary slack, floating-point cascade from chained margin shrinks,
+      wrong row-offset constant, etc.). Reference specific row/column
+      indices or constants from the code when possible.
