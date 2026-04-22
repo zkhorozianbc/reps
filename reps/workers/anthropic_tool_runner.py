@@ -44,6 +44,10 @@ class AnthropicToolRunnerWorker:
         self.client = anthropic.AsyncAnthropic(api_key=api_key, timeout=timeout, max_retries=0)
         self.retries = int(config.impl_options.get("retries", 3))
         self.retry_base_delay = float(config.impl_options.get("retry_base_delay", 1.0))
+        # Hard wall-clock ceiling per API call. Guards against the httpx
+        # per-chunk timeout (which resets every byte) — a stalled stream
+        # would otherwise block forever.
+        self.wall_clock_timeout = float(config.impl_options.get("wall_clock_timeout", 600.0))
         # Opus 4.7 coding/agentic sweet spot is "xhigh" (per claude-api skill).
         self.thinking_effort = str(config.impl_options.get("thinking_effort", "xhigh"))
         # Opus 4.7 omits thinking content by default; set "summarized" to see reasoning text.
@@ -415,7 +419,19 @@ class AnthropicToolRunnerWorker:
         last_exc: Optional[BaseException] = None
         for attempt in range(self.retries + 1):
             try:
-                return await self.client.messages.create(**params)
+                return await asyncio.wait_for(
+                    self._stream_to_final(params),
+                    timeout=self.wall_clock_timeout,
+                )
+            except asyncio.TimeoutError as e:
+                last_exc = e
+                logger.warning(
+                    "messages.stream wall-clock timeout after %.0fs (attempt %d/%d)",
+                    self.wall_clock_timeout, attempt + 1, self.retries + 1,
+                )
+                if attempt == self.retries:
+                    break
+                await asyncio.sleep(self.retry_base_delay * (2 ** attempt))
             except (APIConnectionError, APITimeoutError, RateLimitError) as e:
                 last_exc = e
                 if attempt == self.retries:
@@ -429,8 +445,53 @@ class AnthropicToolRunnerWorker:
                 raise WorkerError(
                     kind="INTERNAL", detail=f"{e.status_code}: {e.message}"
                 ) from e
-        kind = "TIMEOUT" if isinstance(last_exc, APITimeoutError) else "INTERNAL"
+        kind = (
+            "TIMEOUT"
+            if isinstance(last_exc, (APITimeoutError, asyncio.TimeoutError))
+            else "INTERNAL"
+        )
         raise WorkerError(kind=kind, detail=repr(last_exc))
+
+    async def _stream_to_final(self, params: Dict[str, Any]):
+        """Open a streaming messages.create, log each content block as it
+        completes, then return the aggregated final Message (same shape as a
+        non-streaming .create()). The SDK internally accumulates deltas into
+        blocks; we tap content_block_stop events for block-level visibility
+        without handling raw chunks ourselves."""
+        async with self.client.messages.stream(**params) as stream:
+            async for event in stream:
+                et = getattr(event, "type", None)
+                if et == "content_block_stop":
+                    self._log_completed_block(getattr(event, "content_block", None))
+                elif et == "message_stop":
+                    # final stop; let the loop exit
+                    pass
+            return await stream.get_final_message()
+
+    def _log_completed_block(self, block) -> None:
+        if block is None:
+            return
+        bt = getattr(block, "type", None)
+        if bt == "text":
+            txt = getattr(block, "text", "") or ""
+            logger.info("block: text (%d chars)", len(txt))
+        elif bt == "thinking":
+            txt = getattr(block, "thinking", "") or ""
+            signed = bool(getattr(block, "signature", None))
+            logger.info("block: thinking %s (%d chars)", "signed" if signed else "unsigned", len(txt))
+        elif bt == "redacted_thinking":
+            logger.info("block: redacted_thinking")
+        elif bt == "tool_use":
+            name = getattr(block, "name", "?")
+            caller = getattr(block, "caller", None)
+            ctype = getattr(caller, "type", None) if caller is not None else None
+            logger.info("block: tool_use name=%s caller=%s", name, ctype or "direct")
+        elif bt == "server_tool_use":
+            logger.info("block: server_tool_use name=%s", getattr(block, "name", "?"))
+        elif bt == "code_execution_tool_result":
+            logger.info("block: code_execution_tool_result")
+        else:
+            logger.info("block: type=%s", bt)
 
     def _raw_block_to_message_dict(self, raw) -> Dict[str, Any]:
         """Canonicalize a response content block into the dict shape Anthropic
