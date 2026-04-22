@@ -329,6 +329,10 @@ class EvaluatorConfig:
 
     # Parallel evaluation
     parallel_evaluations: int = 1
+    # Maximum concurrent in-flight iterations (bounds asyncio semaphore).
+    # Defaults to parallel_evaluations when unset. Controls how many worker
+    # iterations the async controller dispatches concurrently.
+    max_concurrent_iterations: Optional[int] = None
     # Note: distributed evaluation not implemented
     distributed: bool = False
 
