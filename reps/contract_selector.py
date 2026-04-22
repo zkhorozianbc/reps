@@ -20,6 +20,7 @@ class Contract:
     """A selected contract: model + temperature to use for an iteration."""
     model_id: str
     temperature: float
+    worker_name: Optional[str] = None  # May be None for legacy arms
 
 
 class ContractSelector:

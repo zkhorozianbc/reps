@@ -1030,12 +1030,15 @@ class ProcessParallelController:
             target_island=island_id,
         )
 
-        # F5: Intelligence Contracts override
+        # F5: Intelligence Contracts override — respect axis ownership
         if self._reps_contracts.enabled:
             contract = self._reps_contracts.select()
             if contract:
-                config.model_id = contract.model_id
-                config.temperature = contract.temperature
+                worker_cfg = self._reps_worker_pool.get_worker_config(config.worker_name)
+                if contract.model_id and not worker_cfg.owns_model:
+                    config.model_id = contract.model_id
+                if contract.temperature is not None and not worker_cfg.owns_temperature:
+                    config.temperature = contract.temperature
 
         return config
 
