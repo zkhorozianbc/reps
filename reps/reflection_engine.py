@@ -43,6 +43,32 @@ Respond with ONLY the JSON object, no other text.
 """
 
 
+def _extract_reasoning(turns) -> str:
+    """Concatenate model reasoning from an IterationResult.turns list.
+
+    Pulls `thinking` block text (Anthropic extended thinking) and the final
+    assistant text. Ignores tool_use / tool_result payloads. Returns empty
+    string if no reasoning present.
+    """
+    if not turns:
+        return ""
+    parts: list[str] = []
+    for t in turns:
+        if not isinstance(t, dict) or t.get("role") != "assistant":
+            continue
+        for b in t.get("blocks", []) or []:
+            btype = b.get("type") if isinstance(b, dict) else None
+            if btype == "thinking":
+                tx = (b.get("text") or "").strip()
+                if tx:
+                    parts.append(f"[thinking] {tx}")
+            elif btype == "text":
+                tx = (b.get("text") or "").strip()
+                if tx:
+                    parts.append(f"[text] {tx}")
+    return "\n\n".join(parts)
+
+
 def _format_candidate(result, rank: int) -> str:
     """Format a single candidate for the reflection prompt."""
     lines = [f"### Candidate {rank}"]
@@ -56,6 +82,12 @@ def _format_candidate(result, rank: int) -> str:
         if len(result.diff) > 1500:
             diff_preview += "\n... (truncated)"
         lines.append(f"Diff:\n```\n{diff_preview}\n```")
+    reasoning = _extract_reasoning(getattr(result, "turns", None))
+    if reasoning:
+        reasoning_preview = reasoning[:2000]
+        if len(reasoning) > 2000:
+            reasoning_preview += "\n... (truncated)"
+        lines.append(f"Reasoning:\n{reasoning_preview}")
     return "\n".join(lines)
 
 
