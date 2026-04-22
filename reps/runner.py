@@ -181,7 +181,10 @@ def main():
     # Merge CLI overrides > config > error. CLI positional and --flag forms are equivalent.
     initial_program = args.initial_program or args.initial_program_flag or config.initial_program
     evaluator = args.evaluator or args.evaluator_flag or config.evaluator_path
-    output = args.output or config.output or "reps_output"
+    # Output dir default: experiment/results/<config-stem>/ so each config has its own
+    # folder and runs auto-version as run_001/run_002/... inside it.
+    default_output = f"experiment/results/{Path(args.config).stem}"
+    output = args.output or config.output or default_output
 
     if not initial_program:
         parser.error("initial_program is required (positional, --initial-program, or config.initial_program)")

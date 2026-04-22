@@ -3,7 +3,6 @@
 # Defaults (CLI args override):
 initial_program: experiment/benchmarks/circle_packing/initial_program.py
 evaluator_path: experiment/benchmarks/circle_packing/evaluator.py
-output: experiment/results/verify_single_call
 
 max_iterations: 40
 checkpoint_interval: 20
