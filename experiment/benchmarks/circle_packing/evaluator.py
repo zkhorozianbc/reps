@@ -242,7 +242,7 @@ def _dump_packing_markdown(
 # OpenEvolve-compatible evaluate interface
 # ---------------------------------------------------------------------------
 
-TARGET_VALUE = 2.635  # AlphaEvolve result for n=26
+TARGET_VALUE = 2.635983  # OpenEvolve-achieved baseline for n=26 (paper rounds to 2.635; see algorithmicsuperintelligence/openevolve#156)
 
 
 def evaluate(program_path, env=None):
