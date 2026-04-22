@@ -61,7 +61,7 @@ reps:
         uses_evaluator: true
         expected_wall_clock_s: 180
         impl_options:
-          thinking_effort: high
+          thinking_effort: xhigh
           thinking_display: summarized
           code_execution: true   # server-side code execution + programmatic tool calling
           retries: 3
