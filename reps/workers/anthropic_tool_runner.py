@@ -44,7 +44,7 @@ class AnthropicToolRunnerWorker:
         self.client = anthropic.AsyncAnthropic(api_key=api_key, timeout=timeout, max_retries=0)
         self.retries = int(config.impl_options.get("retries", 3))
         self.retry_base_delay = float(config.impl_options.get("retry_base_delay", 1.0))
-        self.thinking_budget = int(config.impl_options.get("thinking_budget", 8000))
+        self.thinking_effort = str(config.impl_options.get("thinking_effort", "medium"))
         self.max_tokens = int(config.impl_options.get("max_tokens", 16000))
 
     @classmethod
@@ -277,7 +277,9 @@ class AnthropicToolRunnerWorker:
             "tools": tools,
         }
         if is_reasoning:
-            params["thinking"] = {"type": "enabled", "budget_tokens": self.thinking_budget}
+            # Opus 4.7+ uses adaptive thinking + output_config.effort (not budget_tokens).
+            params["thinking"] = {"type": "adaptive"}
+            params["output_config"] = {"effort": self.thinking_effort}
         else:
             if self.config.temperature is not None:
                 params["temperature"] = self.config.temperature
