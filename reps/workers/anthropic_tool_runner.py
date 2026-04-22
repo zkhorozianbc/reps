@@ -499,6 +499,13 @@ class AnthropicToolRunnerWorker:
                     cid = self._extract_container_id(msg)
                     if cid:
                         container_id_seen = cid
+                elif et == "message_delta":
+                    # Container id lands here in the streaming path — the
+                    # SDK does NOT aggregate it onto the final Message.
+                    delta = getattr(event, "delta", None)
+                    cid = self._extract_container_id(delta)
+                    if cid:
+                        container_id_seen = cid
             final = await stream.get_final_message()
         # Prefer container id from final Message if present; fall back to what
         # we saw on message_start.
