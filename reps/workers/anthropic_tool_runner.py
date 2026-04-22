@@ -580,10 +580,20 @@ class AnthropicToolRunnerWorker:
             return d
         if t == "server_tool_use":
             return {"type": "server_tool_use", "id": raw.id, "name": raw.name, "input": raw.input}
-        if t == "code_execution_tool_result":
-            if hasattr(raw, "model_dump"):
-                return raw.model_dump()
-            return {"type": "code_execution_tool_result", "tool_use_id": getattr(raw, "tool_use_id", None)}
+        if t in ("code_execution_tool_result", "bash_code_execution_tool_result"):
+            # Allowlist only the fields Anthropic accepts on input. model_dump()
+            # leaks extras (e.g. `citations`) that the request schema rejects.
+            out: Dict[str, Any] = {"type": t}
+            tid = getattr(raw, "tool_use_id", None)
+            if tid is not None:
+                out["tool_use_id"] = tid
+            content = getattr(raw, "content", None)
+            if content is not None:
+                if hasattr(content, "model_dump"):
+                    out["content"] = content.model_dump(exclude_none=True)
+                else:
+                    out["content"] = content
+            return out
         # fallback: best-effort dict
         if hasattr(raw, "model_dump"):
             return raw.model_dump()
