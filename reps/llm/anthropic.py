@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 _logged_models: set = set()
 
+# Reasoning models reject the temperature param.
+REASONING_MODEL_PATTERNS = ("opus-4-7", "opus-4-8", "opus-4-9", "opus-5")
+
 
 def _to_int(v: Any) -> int:
     return v if isinstance(v, int) else 0
@@ -21,9 +24,6 @@ def _to_int(v: Any) -> int:
 
 class AnthropicLLM(LLMInterface):
     """LLM interface using the native Anthropic Python SDK"""
-
-    # Reasoning models reject the temperature param.
-    REASONING_MODEL_PATTERNS = ("opus-4-7", "opus-4-8", "opus-4-9", "opus-5")
 
     def __init__(self, model_cfg: Optional[dict] = None):
         raw_name = model_cfg.name
@@ -60,7 +60,7 @@ class AnthropicLLM(LLMInterface):
         self, system_message: str, messages: List[Dict[str, str]], **kwargs
     ) -> str:
         model_name = kwargs.get("model") or self.model
-        is_reasoning = any(p in model_name.lower() for p in self.REASONING_MODEL_PATTERNS)
+        is_reasoning = any(p in model_name.lower() for p in REASONING_MODEL_PATTERNS)
 
         params = {
             "model": model_name,
