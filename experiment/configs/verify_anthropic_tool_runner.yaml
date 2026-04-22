@@ -17,7 +17,7 @@ llm:
   retries: 3
   retry_delay: 5
   models:
-    - name: claude-opus-4-7-20250514
+    - name: claude-opus-4-7
       provider: anthropic
       weight: 1.0
 
@@ -50,7 +50,7 @@ reps:
       - name: atr_explorer
         impl: anthropic_tool_runner
         role: explorer
-        model_id: claude-opus-4-7-20250514
+        model_id: claude-opus-4-7
         generation_mode: full
         tools: [view_parent, view_program, edit_file, run_tests, submit_child]
         max_turns: 10
