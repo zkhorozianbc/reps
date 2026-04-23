@@ -111,7 +111,7 @@ reps:
     enabled: true
   summarizer:
     enabled: true
-    model_id: claude-sonnet-4-6
+    model_id: claude-opus-4-7
     task_instructions: |
       Benchmark: circle packing n=26 in the unit square. validity=0 /
       score=0 means the code produced circles that either overlap one

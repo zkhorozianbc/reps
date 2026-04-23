@@ -454,7 +454,7 @@ class REPSSummarizerConfig:
     common hallucinations or enforce domain-specific framing.
     """
     enabled: bool = True
-    model_id: str = "claude-sonnet-4-6"
+    model_id: str = "claude-opus-4-7"
     task_instructions: Optional[str] = None
     # Optional overrides. When None, derived from `model_id` at init time.
     provider: Optional[str] = None
