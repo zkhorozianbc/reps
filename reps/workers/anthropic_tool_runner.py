@@ -45,6 +45,17 @@ logger = logging.getLogger(__name__)
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "prompt_templates"
 
+# Anthropic server-tool result block types. All share the same shape
+# (type + tool_use_id + content) and must be echoed back in the next user
+# turn with the allowlisted fields; leaking extras (e.g. `citations`) fails
+# with 400. When Anthropic introduces a new server tool, add its result
+# type here so the echo-back + trace conversion paths cover it.
+_CODE_EXECUTION_RESULT_TYPES = (
+    "code_execution_tool_result",
+    "bash_code_execution_tool_result",
+    "text_editor_code_execution_tool_result",
+)
+
 
 def _strip_full_rewrite_tail(user_text: str) -> str:
     """Remove the full-rewrite task framing that the sampler's
@@ -781,8 +792,8 @@ class AnthropicToolRunnerWorker:
             logger.info("block: tool_use name=%s caller=%s", name, ctype or "direct")
         elif bt == "server_tool_use":
             logger.info("block: server_tool_use name=%s", getattr(block, "name", "?"))
-        elif bt == "code_execution_tool_result":
-            logger.info("block: code_execution_tool_result")
+        elif bt in _CODE_EXECUTION_RESULT_TYPES:
+            logger.info("block: %s", bt)
         else:
             logger.info("block: type=%s", bt)
 
@@ -809,7 +820,7 @@ class AnthropicToolRunnerWorker:
             return d
         if t == "server_tool_use":
             return {"type": "server_tool_use", "id": raw.id, "name": raw.name, "input": raw.input}
-        if t in ("code_execution_tool_result", "bash_code_execution_tool_result"):
+        if t in _CODE_EXECUTION_RESULT_TYPES:
             # Allowlist only the fields Anthropic accepts on input. model_dump()
             # leaks extras (e.g. `citations`) that the request schema rejects.
             out: Dict[str, Any] = {"type": t}
@@ -867,14 +878,14 @@ class AnthropicToolRunnerWorker:
                 tool_input=dict(getattr(raw, "input", {}) or {}),
                 provider_extras={"server_tool_use": True},
             )
-        if t == "code_execution_tool_result":
+        if t in _CODE_EXECUTION_RESULT_TYPES:
             content_payload = getattr(raw, "content", None)
             body = content_payload.model_dump() if hasattr(content_payload, "model_dump") else content_payload
             return ContentBlock(
                 type="tool_result",
                 tool_result_for_id=getattr(raw, "tool_use_id", None),
                 tool_result_content=body if isinstance(body, (str, list)) else str(body),
-                provider_extras={"code_execution_tool_result": True},
+                provider_extras={t: True},
             )
         return ContentBlock(type="text", text=str(raw))
 
