@@ -86,12 +86,25 @@ class LLMEnsemble:
         # Capture token usage from the model that just ran
         if hasattr(model, "last_usage"):
             self._last_usage = model.last_usage
+        # Capture reasoning output if the provider surfaced any
+        self._last_reasoning = getattr(model, "last_reasoning", None)
+        self._last_model_name = getattr(model, "model", None)
         return result
 
     @property
     def last_usage(self) -> Dict[str, int]:
         """Token usage from the last API call across any model in the ensemble."""
         return getattr(self, "_last_usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
+
+    @property
+    def last_reasoning(self) -> Optional[str]:
+        """Reasoning output (if any) from the last API call."""
+        return getattr(self, "_last_reasoning", None)
+
+    @property
+    def last_model_name(self) -> Optional[str]:
+        """Name of the model actually selected for the last API call."""
+        return getattr(self, "_last_model_name", None)
 
     def _select_model(self, **kwargs) -> LLMInterface:
         """Select a model -- by name override if provided, otherwise by weighted sampling."""

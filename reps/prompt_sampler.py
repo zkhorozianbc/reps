@@ -108,6 +108,51 @@ class PromptSampler:
             if system_message in self.template_manager.templates:
                 system_message = self.template_manager.get_template(system_message)
 
+        # Inject task instructions + feature dimensions note into the system message.
+        # This keeps all stable-per-run instructional content on the system side so it
+        # benefits from prompt caching. Per-iteration dynamic content stays in user.
+        task_instructions_key = (
+            "task_instructions_diff" if diff_based_evolution else "task_instructions_full"
+        )
+        task_instructions = self.template_manager.get_template(task_instructions_key).rstrip()
+
+        feature_dimensions_list = feature_dimensions or []
+        feature_dimensions_str = (
+            ", ".join(feature_dimensions_list) if feature_dimensions_list else "None"
+        )
+        feature_dimensions_note = (
+            f"The system maintains diversity across these dimensions: {feature_dimensions_str}. "
+            f"Different solutions with similar fitness but different features are valuable."
+        )
+
+        # If the resolved system_message contains the placeholders, format it directly.
+        # Otherwise (e.g. a user-provided system_message from YAML that has no placeholders),
+        # append the sections to the end.
+        has_task_placeholder = "{task_instructions}" in system_message
+        has_fd_placeholder = "{feature_dimensions_note}" in system_message
+        if has_task_placeholder or has_fd_placeholder:
+            format_kwargs = {}
+            if has_task_placeholder:
+                format_kwargs["task_instructions"] = task_instructions
+            if has_fd_placeholder:
+                format_kwargs["feature_dimensions_note"] = feature_dimensions_note
+            system_message = system_message.format(**format_kwargs)
+            # If only one placeholder was present, append the other as a trailing section.
+            if not has_task_placeholder:
+                system_message = system_message.rstrip() + "\n\n## Task\n\n" + task_instructions
+            if not has_fd_placeholder:
+                system_message = (
+                    system_message.rstrip() + "\n\n## Diversity\n\n" + feature_dimensions_note
+                )
+        else:
+            system_message = (
+                system_message.rstrip()
+                + "\n\n## Task\n\n"
+                + task_instructions
+                + "\n\n## Diversity\n\n"
+                + feature_dimensions_note
+            )
+
         if self.config.programs_as_changes_description:
             if self.config.system_message_changes_description:
                 system_message_changes_description = self.config.system_message_changes_description.strip()
@@ -146,19 +191,30 @@ class PromptSampler:
         fitness_score = get_fitness_score(program_metrics, feature_dimensions)
         feature_coords = format_feature_coordinates(program_metrics, feature_dimensions)
 
+        # Build format kwargs for the user template. Default crossover_context to "" so
+        # the placeholder renders to empty when callers (e.g. non-crossover workers) do
+        # not provide it. Callers can override by passing crossover_context=... in kwargs.
+        format_kwargs: Dict[str, Any] = {
+            "metrics": metrics_str,
+            "fitness_score": f"{fitness_score:.4f}",
+            "feature_coords": feature_coords,
+            "feature_dimensions": ", ".join(feature_dimensions) if feature_dimensions else "None",
+            "improvement_areas": improvement_areas,
+            "evolution_history": evolution_history,
+            "current_program": current_program,
+            "language": language,
+            "artifacts": artifacts_section,
+            "crossover_context": "",
+            # Current-best score seen so far across the whole population.
+            # Filled in by the controller; defaults to "—" so the placeholder
+            # renders cleanly when no best exists yet.
+            "current_best": "—",
+        }
+        # Caller-supplied kwargs override defaults (e.g. crossover_context, reflection, ...)
+        format_kwargs.update(kwargs)
+
         # Format the final user message
-        user_message = user_template.format(
-            metrics=metrics_str,
-            fitness_score=f"{fitness_score:.4f}",
-            feature_coords=feature_coords,
-            feature_dimensions=", ".join(feature_dimensions) if feature_dimensions else "None",
-            improvement_areas=improvement_areas,
-            evolution_history=evolution_history,
-            current_program=current_program,
-            language=language,
-            artifacts=artifacts_section,
-            **kwargs,
-        )
+        user_message = user_template.format(**format_kwargs)
 
         if self.config.programs_as_changes_description:
             user_message = self.template_manager.get_template("user_message_with_changes_description").format(

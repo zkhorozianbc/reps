@@ -70,8 +70,13 @@ class OpenRouterLLM(LLMInterface):
     async def generate_with_context(
         self, system_message: str, messages: List[Dict[str, str]], **kwargs
     ) -> str:
-        formatted_messages = [{"role": "system", "content": system_message}]
-        formatted_messages.extend(messages)
+        # Only prepend the system role when we actually have a system message.
+        # Some providers reject {"role": "system", "content": null/""}.
+        if system_message:
+            formatted_messages = [{"role": "system", "content": system_message}]
+            formatted_messages.extend(messages)
+        else:
+            formatted_messages = list(messages)
 
         model_base = str(self.model).lower().split("/")[-1]
         is_reasoning = model_base.startswith(self.OPENAI_REASONING_MODEL_PREFIXES)
@@ -117,20 +122,123 @@ class OpenRouterLLM(LLMInterface):
         )
 
     async def _call_api(self, params: Dict[str, Any]) -> str:
+        """Call the Chat Completions endpoint, streaming so we can live-log
+        reasoning and content as they arrive. Full message is still returned
+        to the caller as a single string once the stream completes.
+
+        Output is written to stderr with an `[or pid=NNNN think]` or
+        `[or pid=NNNN answer]` prefix, line-buffered so parallel workers
+        interleave cleanly. The run.log file-handler does NOT get these
+        chunks — we use `print(..., file=sys.stderr)` directly to keep the
+        structured log readable.
+        """
+        stream_params = {
+            **params,
+            "stream": True,
+            # Usage only arrives in the final chunk when this is set.
+            "stream_options": {"include_usage": True},
+        }
         loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(
-            None, lambda: self.client.chat.completions.create(**params)
+        content, reasoning, usage = await loop.run_in_executor(
+            None, lambda: self._stream_and_collect(stream_params)
         )
-        usage = getattr(response, "usage", None)
+
         if usage is not None:
+            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+            total_tokens = getattr(usage, "total_tokens", 0) or 0
+            ptd = getattr(usage, "prompt_tokens_details", None)
+            cached = getattr(ptd, "cached_tokens", 0) or 0 if ptd is not None else 0
             self.last_usage = {
-                "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
-                "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
-                "total_tokens": getattr(usage, "total_tokens", 0) or 0,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "cache_read_input_tokens": cached,
+                "cache_creation_input_tokens": 0,
             }
+            if cached:
+                logger.info(f"Cache: {cached} read, {prompt_tokens - cached} uncached")
         else:
-            self.last_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            self.last_usage = {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            }
+
+        self.last_reasoning = reasoning or None
+        self.last_reasoning_details = None  # deltas only expose .reasoning strings
 
         logger.debug(f"API parameters: {params}")
-        logger.debug(f"API response: {response.choices[0].message.content}")
-        return response.choices[0].message.content
+        return content
+
+    def _stream_and_collect(self, params: Dict[str, Any]):
+        """Blocking: iterate the SSE stream, print paragraphs live as they
+        complete, return the accumulated (answer, reasoning, usage) at end.
+
+        Flush triggers:
+        - paragraph boundary (`\\n\\n` in the current buffer) — natural
+          'completed thought' unit, usually every few sentences
+        - mode switch (thinking → answer or vice versa) — flush remaining
+          partial of the completed mode
+        - stream end — flush whatever is left
+
+        This gives the user visible progress every few seconds instead of a
+        silent 3-minute wait for a long reasoning block to fully accumulate.
+        """
+        from reps.llm.stream_print import emit_block, emit_status
+
+        emit_status(params.get("model", "?"))
+        stream = self.client.chat.completions.create(**params)
+        content_parts: List[str] = []
+        reasoning_parts: List[str] = []
+        usage = None
+
+        mode: Optional[str] = None   # "answer" | "thinking"
+        buf = ""
+
+        def flush_paragraphs():
+            """Emit complete paragraphs from buf, leave partial tail in buf."""
+            nonlocal buf
+            while "\n\n" in buf:
+                para, _, buf = buf.partition("\n\n")
+                if para.strip():
+                    emit_block(mode, para)
+
+        def flush_remaining():
+            """Emit whatever's in buf as a final block for this mode."""
+            nonlocal buf
+            if buf.strip():
+                emit_block(mode, buf)
+            buf = ""
+
+        for chunk in stream:
+            u = getattr(chunk, "usage", None)
+            if u is not None:
+                usage = u
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            delta = choices[0].delta
+
+            r_piece = getattr(delta, "reasoning", None) or ""
+            if r_piece:
+                if mode != "thinking":
+                    flush_remaining()
+                    mode = "thinking"
+                buf += r_piece
+                reasoning_parts.append(r_piece)
+                flush_paragraphs()
+
+            c_piece = getattr(delta, "content", None) or ""
+            if c_piece:
+                if mode != "answer":
+                    flush_remaining()
+                    mode = "answer"
+                buf += c_piece
+                content_parts.append(c_piece)
+                flush_paragraphs()
+
+        flush_remaining()
+        return "".join(content_parts), "".join(reasoning_parts), usage

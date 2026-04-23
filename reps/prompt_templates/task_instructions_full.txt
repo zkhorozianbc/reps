@@ -1,0 +1,11 @@
+Rewrite the program to improve its FITNESS SCORE.
+Provide the complete new program code.
+
+IMPORTANT: Make sure your rewritten program maintains the same inputs and outputs
+as the original program, but with improved internal implementation.
+
+Produce your full rewrite in a fenced code block using the target programming language, e.g.:
+
+```
+# Your rewritten program here
+```

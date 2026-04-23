@@ -286,6 +286,10 @@ def evaluate(program_path):
             "combined_score": combined_score,
             "strict_pass": 1.0 if strict_pass else 0.0,
             "tolerant_pass": 1.0 if tolerant_pass else 0.0,
+            # Keep the pre-strict-check number so logs can surface near-misses
+            # ("strict FAIL but program reported 2.54"). This isn't used for
+            # scoring — combined_score still comes from the strict checker.
+            "reported_sum_radii": float(reported_sum) if reported_sum is not None else float("nan"),
         }
 
     except Exception as e:

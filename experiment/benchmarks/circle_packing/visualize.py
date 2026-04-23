@@ -9,6 +9,12 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import matplotlib
+
+# Force a non-GUI backend — we only save PNGs, never open a window. This
+# avoids a hard failure on systems where Tk/Qt aren't available (e.g. stock
+# uv-managed Python).
+matplotlib.use("Agg")
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np

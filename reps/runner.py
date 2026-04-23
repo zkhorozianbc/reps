@@ -15,6 +15,9 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
+
+import yaml
 
 from reps.config import Config, load_config
 
@@ -47,13 +50,58 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
     from reps.database import Program, ProgramDatabase
     from reps.llm.ensemble import LLMEnsemble
 
-    logging.basicConfig(level=getattr(logging, config.log_level, logging.INFO))
+    level = getattr(logging, config.log_level, logging.INFO)
+    logging.basicConfig(level=level)
+
+    # Also write logs to <output_dir>/run.log so runs are grep-able after the
+    # fact and can be tail -f'd live from another terminal.
+    log_path = Path(output_dir) / "run.log"
+    file_handler = logging.FileHandler(log_path, mode="w")
+    file_handler.setLevel(level)
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    root = logging.getLogger()
+    root.addHandler(file_handler)
+    # Line-buffer so `tail -f` picks up output immediately.
+    file_handler.stream.reconfigure(line_buffering=True)
+
     logger = logging.getLogger(__name__)
+    logger.info(f"Log file: {log_path}")
+
+    # Task-specific system prompt lives with the benchmark, not the config:
+    # auto-load <evaluator_dir>/system_prompt.md when the config hasn't set
+    # prompt.system_message to something custom. An explicit override in the
+    # config still wins.
+    task_prompt_path = Path(evaluator).parent / "system_prompt.md"
+    if (
+        config.prompt.system_message in ("system_message", None, "")
+        and task_prompt_path.exists()
+    ):
+        config.prompt.system_message = task_prompt_path.read_text()
+        logger.info(f"Loaded task system prompt from {task_prompt_path}")
 
     if config.provider == "anthropic":
         for model in (*config.llm.models, *config.llm.evaluator_models):
             if getattr(model, "provider", None) is None:
                 model.provider = "anthropic"
+
+    # Top-level `reasoning:` propagates to every model unless that model
+    # explicitly set its own `reasoning_effort`. This lets configs say
+    # `reasoning: high` once instead of repeating the effort on each model.
+    # Accepted levels track Anthropic's effort scale (low|medium|high|xhigh|max).
+    # `xhigh` and `max` are Claude-Opus-4.7-only; other providers/models may
+    # reject them — the non-retryable classifier surfaces such 400s cleanly.
+    if config.reasoning:
+        effort = None if config.reasoning == "off" else config.reasoning
+        allowed = {None, "low", "medium", "high", "xhigh", "max"}
+        if effort not in allowed:
+            raise ValueError(
+                f"reasoning must be one of: low, medium, high, xhigh, max, off — got {config.reasoning!r}"
+            )
+        for model in (*config.llm.models, *config.llm.evaluator_models):
+            if model.reasoning_effort is None:
+                model.reasoning_effort = effort
 
     # Initialize database
     db = ProgramDatabase(config.database)
@@ -144,18 +192,97 @@ def run_openevolve(config_path: str, initial_program: str, evaluator: str, outpu
     subprocess.run(cmd, check=True)
 
 
+def _load_dotenv() -> Optional[Path]:
+    """Walk up from CWD looking for .env; export non-overriding vars into environ.
+
+    Saves users from having to run `set -a && source .env && set +a`. Shell-exported
+    vars always win over .env values (we don't overwrite os.environ).
+    """
+    d = Path.cwd().resolve()
+    for _ in range(6):
+        p = d / ".env"
+        if p.exists():
+            for raw in p.read_text().splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+            return p
+        if d.parent == d:
+            break
+        d = d.parent
+    return None
+
+
+def _apply_overrides(config, overrides):
+    """Apply `-o dotted.path=value` overrides to a nested dataclass config.
+
+    Value is parsed as YAML so numbers, booleans, strings, lists all work
+    without extra quoting: `-o reps.batch_size=10`, `-o llm.temperature=0.9`,
+    `-o reps.workers.types='[exploiter, explorer]'`.
+    """
+    for expr in overrides:
+        if "=" not in expr:
+            raise ValueError(f"--override must be key=value, got {expr!r}")
+        path, _, raw = expr.partition("=")
+        value = yaml.safe_load(raw)
+        parts = path.strip().split(".")
+        obj = config
+        for p in parts[:-1]:
+            obj = getattr(obj, p)
+        setattr(obj, parts[-1], value)
+
+
 def main():
-    parser = argparse.ArgumentParser(description="REPS Experiment Runner")
-    parser.add_argument("initial_program", help="Path to initial program")
-    parser.add_argument("evaluator", help="Path to evaluator script")
+    _load_dotenv()
+
+    parser = argparse.ArgumentParser(
+        description="REPS Experiment Runner",
+        epilog=(
+            "Override any config field with -o / --override dotted.path=value.\n"
+            "Examples: -o max_iterations=50  -o llm.temperature=0.9  -o reps.batch_size=10"
+        ),
+    )
+    parser.add_argument(
+        "initial_program", nargs="?", default=None,
+        help="Path to initial program (optional if config sets task:)",
+    )
+    parser.add_argument(
+        "evaluator", nargs="?", default=None,
+        help="Path to evaluator script (optional if config sets task:)",
+    )
     parser.add_argument("--config", required=True, help="Path to YAML config")
     parser.add_argument("--output", default="reps_output", help="Output base directory")
-    parser.add_argument("--iterations", type=int, default=None, help="Override max_iterations")
+    parser.add_argument("--iterations", type=int, default=None,
+                        help="Shortcut for -o max_iterations=N")
+    parser.add_argument(
+        "-o", "--override", action="append", default=[], metavar="KEY=VALUE",
+        help="Override any config field (repeatable). Value parsed as YAML.",
+    )
     args = parser.parse_args()
 
     config = load_experiment_config(args.config)
+
+    # Apply generic overrides first, then honor the --iterations shortcut (so
+    # it still wins if both are given).
+    _apply_overrides(config, args.override)
     if args.iterations:
         config.max_iterations = args.iterations
+
+    # If positional args weren't passed, derive them from config.task.
+    if args.initial_program is None or args.evaluator is None:
+        if not config.task:
+            parser.error(
+                "Must provide `initial_program` and `evaluator` as positional args "
+                "or set `task:` in the config to the benchmark directory."
+            )
+        task_dir = Path(config.task)
+        args.initial_program = args.initial_program or str(task_dir / "initial_program.py")
+        args.evaluator = args.evaluator or str(task_dir / "evaluator.py")
 
     # Auto-version the output directory
     run_dir = _next_run_dir(args.output)

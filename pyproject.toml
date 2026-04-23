@@ -16,6 +16,7 @@ dependencies = [
     "tqdm>=4.64.0",
     "flask",
     "scipy>=1.10.0",
+    "matplotlib>=3.5.0",
 ]
 
 [project.optional-dependencies]

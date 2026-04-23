@@ -19,8 +19,9 @@ import pickle
 import random
 import signal
 import time
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from concurrent.futures import wait as cf_wait
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -30,6 +31,33 @@ from reps.database import Program, ProgramDatabase
 from reps.utils import safe_numeric_average
 
 logger = logging.getLogger(__name__)
+
+
+def _classify_outcome(metrics: Dict[str, Any], child_score: float, parent_score: float) -> str:
+    """Produce a short verdict tag for the iteration log.
+
+    Distinguishes genuine crashes from strict-vs-tolerant edge cases that
+    otherwise look identical (both score 0) so the log inspires confidence.
+    """
+    if not metrics:
+        return "NO_METRICS"
+    if metrics.get("error"):
+        return "EVAL_ERROR"
+    validity = metrics.get("validity")
+    strict = metrics.get("strict_pass")
+    tolerant = metrics.get("tolerant_pass")
+    if validity == 0.0 and tolerant == 1.0 and strict == 0.0:
+        reported = metrics.get("reported_sum_radii")
+        if isinstance(reported, (int, float)) and reported == reported:  # NaN-safe
+            return f"STRICT_FAIL (tolerant OK, reported≈{reported:.3f})"
+        return "STRICT_FAIL (tolerant OK)"
+    if validity == 0.0:
+        return "INVALID"
+    if child_score > parent_score:
+        return "IMPROVED"
+    if child_score < parent_score:
+        return "REGRESSED"
+    return "UNCHANGED"
 
 
 @dataclass
@@ -252,6 +280,25 @@ def _run_iteration_worker(
             second_parent = programs[second_parent_id]
             # Add second parent as first inspiration for crossover context
             inspirations = [second_parent] + inspirations
+            # Populate an explicit crossover instruction for the prompt template.
+            # The prompt template exposes a {crossover_context} placeholder; if
+            # the template does not yet include it (companion agent WIP) the
+            # fallback-append loop below will still inject this text into the
+            # user prompt so the model knows to merge, not just to exploit.
+            prompt_extras = dict(prompt_extras)  # avoid mutating caller's dict
+            prompt_extras["crossover_context"] = (
+                "# Crossover Merge Task\n"
+                "This iteration is a CROSSOVER operation. Your goal is to "
+                "synthesize a new program that combines successful ideas from "
+                "BOTH:\n"
+                "1. The Current Program (shown below)\n"
+                "2. Inspiration Program #1 (shown in the Evolution History, "
+                "marked as the first inspiration)\n\n"
+                "Identify what each program does well, then produce a hybrid "
+                "that inherits the best aspects of both. This is not an "
+                "incremental improvement — it's a deliberate fusion of two "
+                "distinct approaches."
+            )
 
         # Build prompt
         if _worker_config.prompt.programs_as_changes_description:
@@ -263,6 +310,15 @@ def _run_iteration_worker(
             parent_changes_desc = None
             child_changes_desc = None
 
+        # Compute the best score across the whole population so the prompt can
+        # anchor the model on the current target-to-beat (not the stale seed).
+        best_so_far = 0.0
+        for prog in programs.values():
+            if prog.metrics:
+                s = prog.metrics.get("combined_score", safe_numeric_average(prog.metrics))
+                if isinstance(s, (int, float)) and s > best_so_far:
+                    best_so_far = s
+
         # --- REPS: Build prompt with extras (reflection, SOTA, dead-end warnings) ---
         prompt = _worker_prompt_sampler.build_prompt(
             current_program=parent.code,
@@ -273,6 +329,7 @@ def _run_iteration_worker(
             inspirations=[p.to_dict() for p in inspirations],
             language=_worker_config.language,
             evolution_round=iteration,
+            current_best=f"{best_so_far:.4f}",
             diff_based_evolution=use_diff,
             program_artifacts=parent_artifacts,
             feature_dimensions=db_snapshot.get("feature_dimensions", []),
@@ -283,7 +340,7 @@ def _run_iteration_worker(
 
         # --- REPS: Inject extras into prompt if template didn't consume them ---
         # Append any REPS context that wasn't consumed by template placeholders
-        for key in ("reflection", "sota_injection", "dead_end_warnings"):
+        for key in ("reflection", "sota_injection", "dead_end_warnings", "crossover_context"):
             text = prompt_extras.get(key, "")
             if text and "{" + key + "}" not in prompt.get("user", ""):
                 # Template didn't have a placeholder for this key, append to user prompt
@@ -444,11 +501,16 @@ def _run_iteration_worker(
                 "worker_type": reps_worker_type,
                 "is_revisitation": is_revisitation,
                 "model_id": reps_model_id,
+                "model_actual": getattr(_worker_llm_ensemble, "last_model_name", None),
                 "temperature": reps_temperature,
                 "parent_score": parent_score,
                 "diff": llm_response or "",
+                "reasoning": getattr(_worker_llm_ensemble, "last_reasoning", None),
                 "tokens_in": getattr(_worker_llm_ensemble, "last_usage", {}).get("prompt_tokens", 0),
                 "tokens_out": getattr(_worker_llm_ensemble, "last_usage", {}).get("completion_tokens", 0),
+                "cache_read": getattr(_worker_llm_ensemble, "last_usage", {}).get(
+                    "cache_read_input_tokens", 0
+                ),
             },
         )
 
@@ -729,7 +791,21 @@ class ProcessParallelController:
             and completed_iterations < max_iterations
             and not self.shutdown_event.is_set()
         ):
-            # Find completed futures
+            # Block (via a worker thread so the event loop stays responsive)
+            # until at least one future completes, with a short timeout so the
+            # shutdown flag is still checked in a timely manner.
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: cf_wait(
+                    list(pending_futures.values()),
+                    timeout=0.5,
+                    return_when=FIRST_COMPLETED,
+                ),
+            )
+
+            # Find the first completed future (process one per outer loop
+            # iteration; if more are ready they will be picked up on the next
+            # pass, which keeps the submission/island-balancing logic simple).
             completed_iteration = None
             for iteration, future in list(pending_futures.items()):
                 if future.done():
@@ -737,7 +813,8 @@ class ProcessParallelController:
                     break
 
             if completed_iteration is None:
-                await asyncio.sleep(0.01)
+                # Timeout fired without any future completing; loop and re-check
+                # the shutdown event / max_iterations guard.
                 continue
 
             # Process completed result
@@ -818,35 +895,68 @@ class ProcessParallelController:
                         self.database.migrate_programs()
                         self.database.log_island_status()
 
-                    # Log progress
+                    # Log progress — header line with iteration context
+                    meta = result.reps_meta or {}
+                    parent_score = meta.get("parent_score", 0.0) or 0.0
+                    metrics = child_program.metrics or {}
+                    child_score = (
+                        metrics.get("combined_score", safe_numeric_average(metrics))
+                        if metrics else 0.0
+                    )
+                    delta = child_score - parent_score
+                    arrow = "↑" if delta > 0 else ("↓" if delta < 0 else "=")
+                    revis = " [REVISIT]" if meta.get("is_revisitation") else ""
+                    model_actual = meta.get("model_actual") or meta.get("model_id") or "default"
+                    temp = meta.get("temperature")
+                    temp_str = f"t={temp:.2f}" if isinstance(temp, (int, float)) else "t=auto"
+                    worker = meta.get("worker_type", "?")
+
+                    # Classify outcome so the log tells the real story instead
+                    # of just "score = 0". Handles eval errors, strict/tolerant
+                    # splits, and pure improvements.
+                    verdict = _classify_outcome(metrics, child_score, parent_score)
+
                     logger.info(
-                        f"Iteration {completed_iteration}: "
-                        f"Program {child_program.id} "
-                        f"(parent: {result.parent_id}) "
-                        f"completed in {result.iteration_time:.2f}s"
+                        f"[iter {completed_iteration}]{revis} "
+                        f"{worker}/{temp_str}/{model_actual} "
+                        f"{verdict} "
+                        f"score {parent_score:.4f} {arrow} {child_score:.4f} "
+                        f"(Δ{delta:+.4f}) "
+                        f"in {result.iteration_time:.2f}s "
+                        f"| program={child_program.id[:8]} parent={str(result.parent_id)[:8]}"
                     )
 
-                    if child_program.metrics:
+                    if metrics:
                         metrics_str = ", ".join(
-                            [
-                                f"{k}={v}" if isinstance(v, (int, float)) else f"{k}={v}"
-                                for k, v in child_program.metrics.items()
-                            ]
+                            f"{k}={v:.4f}" if isinstance(v, (int, float)) else f"{k}={v}"
+                            for k, v in metrics.items()
                         )
-                        logger.info(f"Metrics: {metrics_str}")
+                        logger.info(f"    metrics: {metrics_str}")
+                    if metrics.get("error"):
+                        logger.info(f"    eval error: {metrics['error']}")
 
-                    # Log token usage from REPS metadata
+                    # Log token usage and cache hits from REPS metadata
                     if result.reps_meta:
-                        t_in = result.reps_meta.get("tokens_in", 0)
-                        t_out = result.reps_meta.get("tokens_out", 0)
+                        t_in = meta.get("tokens_in", 0)
+                        t_out = meta.get("tokens_out", 0)
+                        cache_r = meta.get("cache_read", 0)
                         if t_in or t_out:
                             self._cumulative_tokens["in"] += t_in
                             self._cumulative_tokens["out"] += t_out
+                            cache_part = f" cached={cache_r}" if cache_r else ""
                             logger.info(
-                                f"Tokens: in={t_in}, out={t_out}, "
-                                f"cumulative_in={self._cumulative_tokens['in']}, "
-                                f"cumulative_out={self._cumulative_tokens['out']}"
+                                f"    tokens: in={t_in} out={t_out}{cache_part} "
+                                f"| cumulative in={self._cumulative_tokens['in']} "
+                                f"out={self._cumulative_tokens['out']}"
                             )
+
+                        # Log reasoning output if the model produced any
+                        reasoning = meta.get("reasoning")
+                        if reasoning:
+                            snippet = reasoning.strip().replace("\n", " ")
+                            if len(snippet) > 400:
+                                snippet = snippet[:400] + "…"
+                            logger.info(f"    reasoning: {snippet}")
 
                         if (
                             "combined_score" not in child_program.metrics
@@ -933,8 +1043,13 @@ class ProcessParallelController:
                                     break
 
                             else:
-                                # Event-based early stopping
-                                if current_score == self.config.convergence_threshold:
+                                # Event-based early stopping (patience <= 0).
+                                # patience == 0 and patience < 0 both land here
+                                # and are treated identically: stop as soon as
+                                # the metric reaches the convergence threshold.
+                                # Use >= rather than == to avoid fragile float
+                                # equality comparisons.
+                                if current_score >= self.config.convergence_threshold:
                                     best_score = current_score
                                     logger.info(
                                         f"🛑 Early stopping (event-based) triggered at iteration {completed_iteration}: "

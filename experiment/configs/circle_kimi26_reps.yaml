@@ -1,19 +1,24 @@
-# Circle packing n=26 — Opus 4.7 via native Anthropic API
-# Starting from REPS best (2.6359831), attempting to push further
+# Circle packing with Kimi K2.6 via OpenRouter — REPS enabled
+# Cheap ($0.60/$2.80 per Mtok) + 262k context + reasoning-capable, so a
+# good mid-budget model for longer runs.
 harness: reps
-provider: anthropic
+provider: openrouter
+reasoning: medium
 task: ../benchmarks/circle_packing
-max_iterations: 50
-log_level: INFO
-random_seed: 42
+
+max_iterations: 100
+checkpoint_interval: 10
+log_level: "INFO"
 
 llm:
-  primary_model: "anthropic/claude-opus-4-7"
+  primary_model: "moonshotai/kimi-k2.6"
   primary_model_weight: 1.0
-  api_key: "${ANTHROPIC_API_KEY}"
+  api_base: "https://openrouter.ai/api/v1"
+  api_key: "${OPENROUTER_API_KEY}"
   temperature: 0.7
-  max_tokens: 16384
-  timeout: 300
+  top_p: 0.95
+  max_tokens: 64000
+  timeout: 900
 
 prompt:
   num_top_programs: 3
@@ -27,11 +32,14 @@ database:
   exploitation_ratio: 0.7
 
 evaluator:
-  timeout: 300
-  cascade_evaluation: false
-  parallel_evaluations: 2
+  timeout: 120
+  cascade_evaluation: true
+  cascade_thresholds: [0.5, 0.75]
+  parallel_evaluations: 4
+  use_llm_feedback: false
 
 diff_based_evolution: false
+allow_full_rewrites: true
 
 reps:
   enabled: true
@@ -66,11 +74,13 @@ reps:
     entropy_threshold_severe: 0.15
 
   contracts:
-    enabled: false
+    enabled: true
+    models: ["moonshotai/kimi-k2.6"]
+    temperatures: [0.3, 0.7, 1.0]
 
   sota:
     enabled: true
-    target_score: 2.636
+    target_score: 2.635
 
   annotations:
     enabled: true
