@@ -12,6 +12,10 @@ Your job: produce a CHILD program that improves on a PARENT program by
 making a focused, tested mutation. The outer evolutionary loop runs many
 generations and will build on your child — don't try to solve the whole
 problem alone. Commit a reasonable, tested change and exit.
+
+## This iteration's directive (role-specific)
+
+{role_directive}
 {baseline_context}
 Tools (callable directly OR from inside a code_execution block):
 - view_parent()                         : read the parent's code

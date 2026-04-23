@@ -16,6 +16,7 @@ from reps.utils import (
     split_diffs_by_target,
 )
 from reps.workers.base import (
+    apply_template_variations,
     ContentBlock,
     TurnRecord,
     WorkerConfig,
@@ -66,6 +67,23 @@ class SingleCallWorker:
             current_changes_description=changes_description_text,
             **request.prompt_extras,
         )
+
+        # Apply per-worker template_variations (role_directive, etc.) to
+        # both system and user prompts. Seeded by iteration so the same
+        # iteration picks the same variant (reproducibility). Slots present
+        # in the template but absent from the configured variations dict
+        # are left untouched.
+        if self.config.template_variations:
+            prompt["system"] = apply_template_variations(
+                prompt.get("system", ""),
+                self.config.template_variations,
+                request.iteration,
+            )
+            prompt["user"] = apply_template_variations(
+                prompt.get("user", ""),
+                self.config.template_variations,
+                request.iteration,
+            )
 
         # Prepend parent's per-program summary if available.
         parent_summary = (

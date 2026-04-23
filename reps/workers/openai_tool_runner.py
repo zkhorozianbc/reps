@@ -35,6 +35,7 @@ from openai import (
 from reps.program_summarizer import format_summary_for_prompt
 from reps.prompt_sampler import build_budget_block, build_siblings_block
 from reps.workers.base import (
+    apply_template_variations,
     ContentBlock,
     TurnRecord,
     WorkerConfig,
@@ -498,7 +499,17 @@ class OpenAIToolRunnerWorker:
         elif bc_block:
             system_text = system_text.rstrip() + "\n" + bc_block
 
+        # Apply per-worker template_variations (role_directive, etc.),
+        # seeded by iteration for reproducibility. Mirrors the Anthropic
+        # tool-runner wiring.
+        system_text = apply_template_variations(
+            system_text, self.config.template_variations, request.iteration
+        )
+
         user_text = prompt.get("user", "")
+        user_text = apply_template_variations(
+            user_text, self.config.template_variations, request.iteration
+        )
 
         # Drop the sampler's full-rewrite task framing; the tool-runner uses
         # edit_file. See _strip_full_rewrite_tail docstring for rationale.

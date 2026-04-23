@@ -25,6 +25,7 @@ _MSG_DEBUG = os.environ.get("REPS_ATR_MSG_DEBUG") == "1"
 from reps.program_summarizer import format_summary_for_prompt
 from reps.prompt_sampler import build_budget_block, build_siblings_block
 from reps.workers.base import (
+    apply_template_variations,
     ContentBlock,
     TurnRecord,
     WorkerConfig,
@@ -544,7 +545,20 @@ class AnthropicToolRunnerWorker:
             # Template doesn't have a slot — append at end.
             system_text = system_text.rstrip() + "\n" + bc_block
 
+        # Apply per-worker template_variations (role_directive, etc.). Seeded
+        # by iteration so the same iteration number always picks the same
+        # variant (reproducibility). Runs AFTER baseline_context substitution
+        # so `{baseline_context}` is not accidentally treated as a variation
+        # slot. Slots present in the template but absent from the
+        # configured variations dict are left untouched by design.
+        system_text = apply_template_variations(
+            system_text, self.config.template_variations, request.iteration
+        )
+
         user_text = prompt.get("user", "")
+        user_text = apply_template_variations(
+            user_text, self.config.template_variations, request.iteration
+        )
 
         # Post-process: the sampler rendered full_rewrite_user.txt (because we
         # pass diff_based_evolution=False), which ends with a "# Task / Provide

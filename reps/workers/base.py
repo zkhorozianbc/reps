@@ -10,6 +10,7 @@ See docs/superpowers/specs/2026-04-21-tool-calling-worker-primitive-design.md.
 """
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
@@ -75,6 +76,15 @@ class WorkerConfig:
     # prompt (e.g. "target score ≥ X; margins are small — a 0.001
     # absolute gain is a big improvement"). Optional.
     baseline_context: Optional[str] = None
+    # Per-worker stochastic placeholder substitutions. Keys are slot names
+    # (e.g. "role_directive"); values are lists of variants. At prompt-build
+    # time, if the system/user template contains "{slot}" and the slot name
+    # is a key here, one variant is chosen via random.Random seeded by the
+    # iteration number — so the same iteration always selects the same
+    # variant (reproducibility) while different iterations explore different
+    # instructions. A slot present in the template but NOT listed here is
+    # left untouched (no error, no empty replacement).
+    template_variations: Dict[str, List[str]] = field(default_factory=dict)
     impl_options: Dict[str, Any] = field(default_factory=dict)
     owns_model: bool = True                # if True, ContractSelector does NOT override model
     owns_temperature: bool = False         # if True, ContractSelector does NOT override temperature
@@ -189,6 +199,43 @@ class WorkerResult:
     # but metadata (reason, cost) is recorded. `child_code` will be empty.
     converged: bool = False
     converged_reason: Optional[str] = None
+
+
+def apply_template_variations(
+    text: str,
+    variations: Dict[str, List[str]],
+    iteration: int,
+) -> str:
+    """Substitute `{slot}` placeholders in `text` using `variations[slot]`.
+
+    For each key `k` in `variations`, if `text` contains `{k}` and the value
+    list is non-empty, pick one variant via a Random instance seeded by
+    `iteration` (per-slot subseed so different slots pick independently but
+    both are reproducible for the same iteration). Placeholders lacking a
+    matching key are left untouched — this lets the caller leave
+    `{role_directive}` alone when no variations are configured rather than
+    erroring or replacing with an empty string.
+
+    Keeps the substitution local to worker prompt assembly; avoids touching
+    PromptSampler._apply_template_variations which is driven by the
+    run-wide `PromptConfig.template_variations` and is applied only to
+    user templates (we need to vary the system template too).
+    """
+    if not variations:
+        return text
+    result = text
+    for key, variants in variations.items():
+        if not variants:
+            continue
+        placeholder = "{" + key + "}"
+        if placeholder not in result:
+            continue
+        # Subseed per slot so two slots don't co-vary with each other just
+        # because they share the same iteration number.
+        rng = random.Random(f"{iteration}:{key}")
+        choice = rng.choice(variants)
+        result = result.replace(placeholder, choice)
+    return result
 
 
 class Worker(Protocol):
