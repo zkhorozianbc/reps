@@ -1,0 +1,22 @@
+2026-04-23 10:13:56,836 INFO reps.runner: Log file: experiment/results/verify_openai_tool_runner/run_003/run.log
+2026-04-23 10:13:56,842 INFO reps.runner: Loaded task system prompt from experiment/benchmarks/circle_packing/system_prompt.md
+2026-04-23 10:13:56,842 INFO reps.database: Initialized program database with 0 programs
+2026-04-23 10:13:56,853 INFO reps.evaluator: Successfully loaded evaluation function from experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 10:13:56,853 INFO reps.evaluator: Initialized evaluator with experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 10:13:57,042 INFO reps.evaluator: Evaluated program initial in 0.19s: validity=1.00000000, sum_radii=2.05833333, target_ratio=0.78082521, combined_score=0.78082521, eval_time=0.08285022, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.05833333
+2026-04-23 10:13:57,043 INFO reps.runner: Seed program metrics: {'validity': 1.0, 'sum_radii': 2.058333333333333, 'target_ratio': 0.7808252089576774, 'combined_score': 0.7808252089576774, 'eval_time': 0.08285021781921387, 'strict_pass': 1.0, 'tolerant_pass': 1.0, 'reported_sum_radii': 2.058333333333333}
+2026-04-23 10:13:57,043 INFO reps.database: New MAP-Elites cell occupied in island 0: {'complexity': 5, 'diversity': 0}
+2026-04-23 10:13:57,043 INFO reps.worker_pool: WorkerPool initialized: {'otr_explorer': 1.0}
+2026-04-23 10:13:57,044 INFO reps.metrics_logger: MetricsLogger writing to experiment/results/verify_openai_tool_runner/run_003/metrics
+2026-04-23 10:13:57,044 INFO reps.controller: REPS enabled: batch_size=2, workers=['otr_explorer'], ε=0.15
+2026-04-23 10:13:57,044 INFO reps.controller: Initialized async controller with 2 workers
+2026-04-23 10:13:57,048 INFO reps.llm.openrouter: Initialized OpenRouterLLM with model: gpt-5.4-pro
+2026-04-23 10:13:57,048 INFO reps.llm.ensemble: Initialized LLM ensemble with models: gpt-5.4-pro (weight: 1.00)
+2026-04-23 10:13:57,057 INFO reps.prompt_sampler: Initialized prompt sampler
+2026-04-23 10:13:57,058 INFO reps.prompt_sampler: Set custom templates: system=evaluator_system_message, user=None
+2026-04-23 10:13:57,062 INFO reps.evaluator: Successfully loaded evaluation function from experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 10:13:57,062 INFO reps.evaluator: Initialized evaluator with experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 10:13:57,062 INFO reps.controller: AsyncController started (asyncio-only, max_concurrent_iterations=2)
+2026-04-23 10:13:57,062 INFO reps.controller: Starting async evolution from iteration 1 for 30 iterations (total: 31)
+2026-04-23 10:13:57,062 INFO reps.controller: REPS prompt extras keys: ['dead_end_warnings', 'unexplored_directions', 'recent_avoids']
+2026-04-23 10:13:57,062 INFO reps.controller: Early stopping disabled

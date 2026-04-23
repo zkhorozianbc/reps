@@ -1,0 +1,86 @@
+2026-04-23 10:40:20,965 INFO reps.runner: Log file: experiment/results/verify_openai_tool_runner/run_004/run.log
+2026-04-23 10:40:20,965 INFO reps.runner: Loaded task system prompt from experiment/benchmarks/circle_packing/system_prompt.md
+2026-04-23 10:40:20,965 INFO reps.database: Initialized program database with 0 programs
+2026-04-23 10:40:20,968 INFO reps.evaluator: Successfully loaded evaluation function from experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 10:40:20,968 INFO reps.evaluator: Initialized evaluator with experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 10:40:21,174 INFO reps.evaluator: Evaluated program initial in 0.21s: validity=1.00000000, sum_radii=2.05833333, target_ratio=0.78082521, combined_score=0.78082521, eval_time=0.10477209, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.05833333
+2026-04-23 10:40:21,175 INFO reps.runner: Seed program metrics: {'validity': 1.0, 'sum_radii': 2.058333333333333, 'target_ratio': 0.7808252089576774, 'combined_score': 0.7808252089576774, 'eval_time': 0.10477209091186523, 'strict_pass': 1.0, 'tolerant_pass': 1.0, 'reported_sum_radii': 2.058333333333333}
+2026-04-23 10:40:21,175 INFO reps.database: New MAP-Elites cell occupied in island 0: {'complexity': 5, 'diversity': 0}
+2026-04-23 10:40:21,175 INFO reps.worker_pool: WorkerPool initialized: {'otr_explorer': 1.0}
+2026-04-23 10:40:21,178 INFO reps.metrics_logger: MetricsLogger writing to experiment/results/verify_openai_tool_runner/run_004/metrics
+2026-04-23 10:40:21,178 INFO reps.controller: REPS enabled: batch_size=2, workers=['otr_explorer'], ε=0.15
+2026-04-23 10:40:21,178 INFO reps.controller: Initialized async controller with 2 workers
+2026-04-23 10:40:21,192 INFO reps.llm.openai_compatible: Initialized OpenAICompatibleLLM (custom: https://api.openai.com/v1) with model: gpt-5.4-pro
+2026-04-23 10:40:21,194 INFO reps.llm.ensemble: Initialized LLM ensemble with models: gpt-5.4-pro (weight: 1.00)
+2026-04-23 10:40:21,212 INFO reps.prompt_sampler: Initialized prompt sampler
+2026-04-23 10:40:21,213 INFO reps.prompt_sampler: Set custom templates: system=evaluator_system_message, user=None
+2026-04-23 10:40:21,217 INFO reps.evaluator: Successfully loaded evaluation function from experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 10:40:21,218 INFO reps.evaluator: Initialized evaluator with experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 10:40:21,218 INFO reps.controller: AsyncController started (asyncio-only, max_concurrent_iterations=2)
+2026-04-23 10:40:21,218 INFO reps.controller: Starting async evolution from iteration 1 for 2 iterations (total: 3)
+2026-04-23 10:40:21,218 INFO reps.controller: REPS prompt extras keys: ['dead_end_warnings', 'unexplored_directions', 'recent_avoids']
+2026-04-23 10:40:21,218 INFO reps.controller: Early stopping disabled
+2026-04-23 10:42:00,883 WARNING reps.workers.openai_tool_runner: responses.stream transport error on attempt 1/4: RemoteProtocolError
+2026-04-23 10:46:13,482 INFO reps.workers.openai_tool_runner: item: reasoning (2 summary blocks)
+2026-04-23 10:46:13,490 INFO reps.workers.openai_tool_runner: item: function_call name=view_parent call_id=call_OvwWI06Kl7dA78Z9SIioY603
+2026-04-23 10:46:13,491 INFO reps.workers.openai_tool_runner: item: function_call name=view_program call_id=call_zMCqhyPHdUVbdfhZ3lfxbmTK
+2026-04-23 10:50:35,062 INFO reps.workers.openai_tool_runner: item: reasoning (27 summary blocks)
+2026-04-23 10:50:35,078 INFO reps.workers.openai_tool_runner: item: function_call name=view_parent call_id=call_TLnUCnpUZuGmQaVdz54BHXae
+2026-04-23 10:50:51,220 WARNING reps.controller: No iteration completed within 630s; continuing to wait.
+2026-04-23 10:56:33,497 INFO reps.workers.openai_tool_runner: item: reasoning (21 summary blocks)
+2026-04-23 10:56:33,549 INFO reps.workers.openai_tool_runner: item: function_call name=run_tests call_id=call_XXUykZXrOt21m7NOTWSD0QLa
+2026-04-23 10:56:34,458 INFO reps.evaluator: Evaluated program scratch-f76a11d35bc7 in 0.54s: validity=0.00000000, sum_radii=0.00000000, target_ratio=0.00000000, combined_score=0.00000000
+2026-04-23 11:01:21,222 WARNING reps.controller: No iteration completed within 630s; continuing to wait.
+2026-04-23 11:03:57,867 INFO reps.workers.openai_tool_runner: item: reasoning (2 summary blocks)
+2026-04-23 11:03:57,960 INFO reps.workers.openai_tool_runner: item: function_call name=run_tests call_id=call_S6sf25og0gkJQU9BN3dQOKNb
+2026-04-23 11:03:58,451 INFO reps.evaluator: Evaluated program scratch-b794f18e7243 in 0.30s: validity=1.00000000, sum_radii=2.47420570, target_ratio=0.93858567, combined_score=0.93858567, eval_time=0.07162714, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.47420570
+2026-04-23 11:04:54,811 INFO reps.workers.openai_tool_runner: item: reasoning (3 summary blocks)
+2026-04-23 11:04:54,889 INFO reps.workers.openai_tool_runner: item: function_call name=run_tests call_id=call_8eIUx4weGj4Cs3ER1ytweDoV
+2026-04-23 11:04:55,290 INFO reps.evaluator: Evaluated program scratch-8558fbfba89c in 0.24s: validity=1.00000000, sum_radii=2.53902036, target_ratio=0.96317300, combined_score=0.96317300, eval_time=0.08094716, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.53902036
+2026-04-23 11:11:51,225 WARNING reps.controller: No iteration completed within 630s; continuing to wait.
+2026-04-23 11:20:03,573 INFO reps.workers.openai_tool_runner: item: reasoning (2 summary blocks)
+2026-04-23 11:20:03,604 INFO reps.workers.openai_tool_runner: item: function_call name=run_tests call_id=call_20zj5wXLUoT2ZJcIAKb3i1EF
+2026-04-23 11:20:03,987 INFO reps.evaluator: Evaluated program scratch-d72e80595993 in 0.24s: validity=1.00000000, sum_radii=2.54141886, target_ratio=0.96408287, combined_score=0.96408287, eval_time=0.07660079, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.54141886
+2026-04-23 11:22:17,768 INFO reps.workers.openai_tool_runner: item: reasoning (8 summary blocks)
+2026-04-23 11:22:17,843 INFO reps.workers.openai_tool_runner: item: function_call name=run_tests call_id=call_PczAk1DI1WDdTxW1o6gRH2RY
+2026-04-23 11:22:18,133 INFO reps.evaluator: Evaluated program scratch-5766345e96a1 in 0.13s: validity=0.00000000, sum_radii=0.00000000, target_ratio=0.00000000, combined_score=0.00000000
+2026-04-23 11:22:21,227 WARNING reps.controller: No iteration completed within 630s; continuing to wait.
+2026-04-23 11:26:39,686 INFO reps.workers.openai_tool_runner: item: reasoning (0 summary blocks)
+2026-04-23 11:26:39,763 INFO reps.workers.openai_tool_runner: item: function_call name=run_tests call_id=call_tjlHuULnWYm46EwIfSa0OyXi
+2026-04-23 11:26:40,180 INFO reps.evaluator: Evaluated program scratch-abe3bce24588 in 0.24s: validity=1.00000000, sum_radii=2.54142135, target_ratio=0.96408382, combined_score=0.96408382, eval_time=0.07291794, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.54142135
+2026-04-23 11:30:46,640 INFO reps.workers.openai_tool_runner: item: reasoning (4 summary blocks)
+2026-04-23 11:30:46,730 INFO reps.workers.openai_tool_runner: item: function_call name=run_tests call_id=call_qVB5698sG2i4v0LZeVjbPqv5
+2026-04-23 11:30:47,092 INFO reps.evaluator: Evaluated program scratch-3d08c0db1221 in 0.20s: validity=1.00000000, sum_radii=2.48089405, target_ratio=0.94112289, combined_score=0.94112289, eval_time=0.07620001, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.48089405
+2026-04-23 11:31:14,501 INFO reps.workers.openai_tool_runner: item: reasoning (1 summary blocks)
+2026-04-23 11:31:14,567 INFO reps.workers.openai_tool_runner: item: function_call name=run_tests call_id=call_bFYy0PCi8fTHRY9CtHVdlmT4
+2026-04-23 11:31:14,936 INFO reps.evaluator: Evaluated program scratch-55e4418aa8d7 in 0.20s: validity=1.00000000, sum_radii=2.54142136, target_ratio=0.96408382, combined_score=0.96408382, eval_time=0.07308984, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.54142136
+2026-04-23 11:32:51,229 WARNING reps.controller: No iteration completed within 630s; continuing to wait.
+2026-04-23 11:34:14,538 WARNING reps.workers.openai_tool_runner: responses.stream transport error on attempt 1/4: RemoteProtocolError
+2026-04-23 11:37:51,324 INFO reps.workers.openai_tool_runner: item: reasoning (2 summary blocks)
+2026-04-23 11:37:51,403 INFO reps.workers.openai_tool_runner: item: function_call name=run_tests call_id=call_7V2zbZ34XymgeWHg4FXFywpg
+2026-04-23 11:37:51,770 INFO reps.evaluator: Evaluated program scratch-9d340b54431e in 0.22s: validity=1.00000000, sum_radii=2.48091979, target_ratio=0.94113265, combined_score=0.94113265, eval_time=0.07699394, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.48091979
+2026-04-23 11:43:21,230 WARNING reps.controller: No iteration completed within 630s; continuing to wait.
+2026-04-23 11:45:28,394 INFO reps.workers.openai_tool_runner: item: reasoning (1 summary blocks)
+2026-04-23 11:45:28,486 INFO reps.workers.openai_tool_runner: item: function_call name=run_tests call_id=call_ijfXYlWRDMpgCsEHG3WACRUT
+2026-04-23 11:45:29,101 INFO reps.evaluator: Evaluated program scratch-aaae8d1edfe5 in 0.22s: validity=1.00000000, sum_radii=2.54142136, target_ratio=0.96408382, combined_score=0.96408382, eval_time=0.07390833, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.54142136
+2026-04-23 11:48:12,302 INFO reps.workers.openai_tool_runner: item: reasoning (0 summary blocks)
+2026-04-23 11:48:12,371 INFO reps.workers.openai_tool_runner: item: function_call name=run_tests call_id=call_pvdJNaJ5J6TnB6hMvzVasv9d
+2026-04-23 11:48:12,765 INFO reps.evaluator: Evaluated program scratch-95788a30c474 in 0.24s: validity=1.00000000, sum_radii=2.48092004, target_ratio=0.94113275, combined_score=0.94113275, eval_time=0.07545877, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.48092004
+2026-04-23 11:53:51,232 WARNING reps.controller: No iteration completed within 630s; continuing to wait.
+2026-04-23 11:55:53,052 INFO reps.workers.openai_tool_runner: item: reasoning (0 summary blocks)
+2026-04-23 11:55:53,148 INFO reps.workers.openai_tool_runner: item: function_call name=run_tests call_id=call_yimPYy1Kafp4Bb8Gjqg2ig0N
+2026-04-23 11:55:54,033 INFO reps.evaluator: Evaluated program scratch-0d9dd237999c in 0.74s: validity=1.00000000, sum_radii=2.54142133, target_ratio=0.96408381, combined_score=0.96408381, eval_time=0.08746004, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.54142133
+2026-04-23 11:58:07,375 INFO reps.workers.openai_tool_runner: item: reasoning (2 summary blocks)
+2026-04-23 11:58:07,463 INFO reps.workers.openai_tool_runner: item: function_call name=submit_child call_id=call_FOI2LNDTECbU4F2SqFfq3oy3
+2026-04-23 11:58:07,875 INFO reps.evaluator: Evaluated program scratch-823dd002c7bd in 0.21s: validity=1.00000000, sum_radii=2.48092004, target_ratio=0.94113275, combined_score=0.94113275, eval_time=0.07317138, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.48092004
+2026-04-23 11:58:08,032 INFO reps.evaluator: Evaluated program f319309a-765e-4df8-be27-8e92410bb601 in 0.16s: validity=1.00000000, sum_radii=2.48092004, target_ratio=0.94113275, combined_score=0.94113275, eval_time=0.07554388, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.48092004
+2026-04-23 11:58:08,033 WARNING reps.llm.ensemble: Model override 'claude-sonnet-4-6' not found in ensemble, falling back to weighted sampling
+2026-04-23 11:58:08,033 INFO reps.llm.ensemble: Sampled model: gpt-5.4-pro
+2026-04-23 11:58:09,390 ERROR reps.llm.base: Non-retryable error, failing immediately: Error code: 404 - {'error': {'message': 'This is not a chat model and thus not supported in the v1/chat/completions endpoint. Did you mean to use v1/completions?', 'type': 'invalid_request_error', 'param': 'model', 'code': None}}
+2026-04-23 11:58:09,390 WARNING reps.program_summarizer: program summarizer call failed for f319309a: Error code: 404 - {'error': {'message': 'This is not a chat model and thus not supported in the v1/chat/completions endpoint. Did you mean to use v1/completions?', 'type': 'invalid_request_error', 'param': 'model', 'code': None}}
+2026-04-23 11:58:09,391 INFO reps.database: New MAP-Elites cell occupied in island 0: {'complexity': 0, 'diversity': 5}
+2026-04-23 11:58:09,392 INFO reps.database: New best program f319309a-765e-4df8-be27-8e92410bb601 replaces initial (combined_score: 0.7808 → 0.9411, +0.1603)
+2026-04-23 11:58:09,398 INFO reps.controller: Iteration 1: Program f319309a-765e-4df8-be27-8e92410bb601 (parent: initial) completed in 4666.65s
+2026-04-23 11:58:09,398 INFO reps.controller: Metrics: validity=1.0, sum_radii=2.48092004284635, target_ratio=0.9411327502167406, combined_score=0.9411327502167406, eval_time=0.07554388046264648, strict_pass=1.0, tolerant_pass=1.0, reported_sum_radii=2.48092004284635
+2026-04-23 11:58:09,398 INFO reps.controller: Tokens: in=86264, out=14618, cumulative_in=86264, cumulative_out=14618
+2026-04-23 11:58:09,398 INFO reps.controller: New best at iteration 1: f319309a-765e-4df8-be27-8e92410bb601

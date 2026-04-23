@@ -7,6 +7,10 @@ max_iterations: 50
 log_level: INFO
 random_seed: 42
 
+# Opus produces long hardcoded coord-table programs; default 10k cap is too
+# tight (default rejects legit submissions outright). 30k matches push_sota_*.
+max_code_length: 30000
+
 llm:
   primary_model: "anthropic/claude-opus-4-7"
   primary_model_weight: 1.0

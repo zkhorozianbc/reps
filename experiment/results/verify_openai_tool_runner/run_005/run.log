@@ -1,0 +1,40 @@
+2026-04-23 13:06:25,038 INFO reps.runner: Log file: experiment/results/verify_openai_tool_runner/run_005/run.log
+2026-04-23 13:06:25,039 INFO reps.runner: Loaded task system prompt from experiment/benchmarks/circle_packing/system_prompt.md
+2026-04-23 13:06:25,039 INFO reps.database: Initialized program database with 0 programs
+2026-04-23 13:06:25,042 INFO reps.evaluator: Successfully loaded evaluation function from experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 13:06:25,042 INFO reps.evaluator: Initialized evaluator with experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 13:06:25,217 INFO reps.evaluator: Evaluated program initial in 0.18s: validity=1.00000000, sum_radii=2.05833333, target_ratio=0.78082521, combined_score=0.78082521, eval_time=0.07440591, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.05833333
+2026-04-23 13:06:25,217 INFO reps.runner: Seed program metrics: {'validity': 1.0, 'sum_radii': 2.058333333333333, 'target_ratio': 0.7808252089576774, 'combined_score': 0.7808252089576774, 'eval_time': 0.07440590858459473, 'strict_pass': 1.0, 'tolerant_pass': 1.0, 'reported_sum_radii': 2.058333333333333}
+2026-04-23 13:06:25,217 INFO reps.database: New MAP-Elites cell occupied in island 0: {'complexity': 5, 'diversity': 0}
+2026-04-23 13:06:25,218 INFO reps.worker_pool: WorkerPool initialized: {'otr_explorer': 1.0}
+2026-04-23 13:06:25,219 INFO reps.metrics_logger: MetricsLogger writing to experiment/results/verify_openai_tool_runner/run_005/metrics
+2026-04-23 13:06:25,223 INFO reps.llm.anthropic: Initialized AnthropicLLM with model: claude-sonnet-4-6
+2026-04-23 13:06:25,223 INFO reps.controller: Summarizer LLM: model=claude-sonnet-4-6 provider=anthropic
+2026-04-23 13:06:25,224 INFO reps.controller: REPS enabled: batch_size=2, workers=['otr_explorer'], ε=0.15
+2026-04-23 13:06:25,224 INFO reps.controller: Initialized async controller with 2 workers
+2026-04-23 13:06:25,227 INFO reps.llm.openai_compatible: Initialized OpenAICompatibleLLM (openai-direct) with model: gpt-5.4-pro
+2026-04-23 13:06:25,227 INFO reps.llm.ensemble: Initialized LLM ensemble with models: gpt-5.4-pro (weight: 1.00)
+2026-04-23 13:06:25,234 INFO reps.prompt_sampler: Initialized prompt sampler
+2026-04-23 13:06:25,235 INFO reps.prompt_sampler: Set custom templates: system=evaluator_system_message, user=None
+2026-04-23 13:06:25,239 INFO reps.evaluator: Successfully loaded evaluation function from experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 13:06:25,239 INFO reps.evaluator: Initialized evaluator with experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 13:06:25,239 INFO reps.controller: AsyncController started (asyncio-only, max_concurrent_iterations=2)
+2026-04-23 13:06:25,239 INFO reps.controller: Starting async evolution from iteration 1 for 2 iterations (total: 3)
+2026-04-23 13:06:25,239 INFO reps.controller: REPS prompt extras keys: ['dead_end_warnings', 'unexplored_directions', 'recent_avoids']
+2026-04-23 13:06:25,239 INFO reps.controller: Early stopping disabled
+2026-04-23 13:09:50,543 INFO reps.workers.openai_tool_runner: item: reasoning (0 summary blocks)
+2026-04-23 13:09:50,549 INFO reps.workers.openai_tool_runner: item: function_call name=view_parent call_id=call_OnCBTwIWyRA3A5DhnKnggtNg
+2026-04-23 13:09:50,582 INFO reps.workers.openai_tool_runner: item: function_call name=view_program call_id=call_15WwWlmvcxlYbzosfuCQhLur
+2026-04-23 13:11:53,635 INFO reps.workers.openai_tool_runner: item: reasoning (0 summary blocks)
+2026-04-23 13:11:53,638 INFO reps.workers.openai_tool_runner: item: function_call name=view_parent call_id=call_hNpyNheBNq885Q7A5F7y8p3g
+2026-04-23 13:11:53,640 INFO reps.workers.openai_tool_runner: item: function_call name=view_program call_id=call_buWBO7TY9kFqbCOUC3x4Lswr
+2026-04-23 13:14:38,527 WARNING reps.workers.openai_tool_runner: responses.stream transport error on attempt 1/4: RemoteProtocolError
+2026-04-23 13:16:55,240 WARNING reps.controller: No iteration completed within 630s; continuing to wait.
+2026-04-23 13:17:30,656 WARNING reps.workers.openai_tool_runner: responses.stream transport error on attempt 1/4: RemoteProtocolError
+2026-04-23 13:27:25,245 WARNING reps.controller: No iteration completed within 630s; continuing to wait.
+2026-04-23 13:29:20,776 INFO reps.workers.openai_tool_runner: item: reasoning (22 summary blocks)
+2026-04-23 13:29:20,881 INFO reps.workers.openai_tool_runner: item: function_call name=run_tests call_id=call_Uf68dmMPIKwrYJVO2S6vejtt
+2026-04-23 13:29:21,170 INFO reps.evaluator: Evaluated program scratch-965d625bbbfc in 0.23s: validity=1.00000000, sum_radii=2.54142136, target_ratio=0.96408382, combined_score=0.96408382, eval_time=0.07621193, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.54142136
+2026-04-23 13:34:24,974 INFO reps.workers.openai_tool_runner: item: reasoning (52 summary blocks)
+2026-04-23 13:34:25,236 INFO reps.workers.openai_tool_runner: item: function_call name=run_tests call_id=call_jdzk7iIj9lyx5PK5IYWcwrX7
+2026-04-23 13:34:25,508 INFO reps.evaluator: Evaluated program scratch-265ee4a802a8 in 0.12s: validity=0.00000000, sum_radii=0.00000000, target_ratio=0.00000000, combined_score=0.00000000

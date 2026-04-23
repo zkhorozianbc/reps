@@ -1,0 +1,6 @@
+batch,worker_type,num_candidates,num_improvements,yield_rate
+1,atr_exploiter,4,3,0.7500
+1,atr_explorer,1,1,1.0000
+2,atr_exploiter,2,2,1.0000
+2,atr_crossover,2,2,1.0000
+2,atr_explorer,1,0,0.0000

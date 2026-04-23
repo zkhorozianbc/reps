@@ -1,0 +1,122 @@
+2026-04-23 12:53:38,094 INFO reps.runner: Log file: experiment/results/circle_opus47_anthropic/run_005/run.log
+2026-04-23 12:53:38,100 INFO reps.runner: Loaded task system prompt from /Users/zkhorozian/code/reps/experiment/benchmarks/circle_packing/system_prompt.md
+2026-04-23 12:53:38,100 INFO reps.database: Initialized program database with 0 programs
+2026-04-23 12:53:38,114 INFO reps.evaluator: Successfully loaded evaluation function from /Users/zkhorozian/code/reps/experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 12:53:38,114 INFO reps.evaluator: Initialized evaluator with /Users/zkhorozian/code/reps/experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 12:53:38,215 INFO reps.evaluator: Evaluated program initial in 0.10s: sum_radii=2.05833333, target_ratio=0.78082521, validity=1.00000000, eval_time=0.09698081, combined_score=0.78082521, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.05833333, combined_score_hi_precision_str=0.780825208958, constraint_diagnostics={'n_circles_submitted': 26, 'boundary_violations': [], 'overlap_pairs': [], 'min_pairwise_slack': 0.009999999999999898}
+2026-04-23 12:53:38,215 INFO reps.runner: Seed program metrics: {'sum_radii': 2.058333333333333, 'target_ratio': 0.7808252089576774, 'validity': 1.0, 'eval_time': 0.09698081016540527, 'combined_score': 0.7808252089576774, 'strict_pass': 1.0, 'tolerant_pass': 1.0, 'reported_sum_radii': 2.058333333333333, 'combined_score_hi_precision_str': '0.780825208958', 'constraint_diagnostics': {'n_circles_submitted': 26, 'boundary_violations': [], 'overlap_pairs': [], 'min_pairwise_slack': 0.009999999999999898}}
+2026-04-23 12:53:38,215 INFO reps.database: New MAP-Elites cell occupied in island 0: {'complexity': 5, 'diversity': 0}
+2026-04-23 12:53:38,215 INFO reps.worker_pool: WorkerPool initialized: {'atr_exploiter': 0.6, 'atr_explorer': 0.25, 'atr_crossover': 0.15}
+2026-04-23 12:53:38,215 INFO reps.sota_controller: SOTAController targeting score: 2.6361
+2026-04-23 12:53:38,216 INFO reps.metrics_logger: MetricsLogger writing to experiment/results/circle_opus47_anthropic/run_005/metrics
+2026-04-23 12:53:38,216 INFO reps.controller: REPS enabled: batch_size=5, workers=['atr_exploiter', 'atr_explorer', 'atr_crossover'], ε=0.15
+2026-04-23 12:53:38,217 INFO reps.controller: Initialized async controller with 2 workers
+2026-04-23 12:53:38,220 INFO reps.llm.anthropic: Initialized AnthropicLLM with model: claude-opus-4-7
+2026-04-23 12:53:38,220 INFO reps.llm.ensemble: Initialized LLM ensemble with models: anthropic/claude-opus-4-7 (weight: 1.00)
+2026-04-23 12:53:38,228 INFO reps.prompt_sampler: Initialized prompt sampler
+2026-04-23 12:53:38,229 INFO reps.prompt_sampler: Set custom templates: system=evaluator_system_message, user=None
+2026-04-23 12:53:38,232 INFO reps.evaluator: Successfully loaded evaluation function from /Users/zkhorozian/code/reps/experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 12:53:38,232 INFO reps.evaluator: Initialized evaluator with /Users/zkhorozian/code/reps/experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 12:53:38,232 INFO reps.controller: AsyncController started (asyncio-only, max_concurrent_iterations=2)
+2026-04-23 12:53:38,232 INFO reps.controller: Starting async evolution from iteration 1 for 2 iterations (total: 3)
+2026-04-23 12:53:38,232 INFO reps.controller: REPS prompt extras keys: ['sota_injection', 'dead_end_warnings', 'unexplored_directions', 'recent_avoids']
+2026-04-23 12:53:38,233 INFO reps.controller: Early stopping disabled
+2026-04-23 12:53:52,255 INFO reps.workers.anthropic_tool_runner: block: thinking signed (651 chars)
+2026-04-23 12:53:52,363 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 12:53:54,467 INFO reps.workers.anthropic_tool_runner: block: tool_use name=view_parent caller=code_execution_20260120
+2026-04-23 12:53:54,479 INFO reps.workers.anthropic_tool_runner: captured container_id=container_011CaM3wupKarnjAK4aXJRYK
+2026-04-23 12:53:57,478 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 12:54:28,777 INFO reps.workers.anthropic_tool_runner: block: thinking signed (1375 chars)
+2026-04-23 12:54:28,994 INFO reps.workers.anthropic_tool_runner: block: text (220 chars)
+2026-04-23 12:54:32,517 INFO reps.workers.anthropic_tool_runner: block: thinking signed (2530 chars)
+2026-04-23 12:54:32,545 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 12:54:34,884 INFO reps.workers.anthropic_tool_runner: block: tool_use name=view_parent caller=code_execution_20260120
+2026-04-23 12:54:34,885 INFO reps.workers.anthropic_tool_runner: captured container_id=container_011CaM3wvLZusnPPJ49BQKdz
+2026-04-23 12:54:38,508 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 12:54:38,550 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 12:54:38,977 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 12:54:40,058 INFO reps.workers.anthropic_tool_runner: block: tool_use name=run_tests caller=code_execution_20260120
+2026-04-23 12:54:40,758 INFO reps.workers.anthropic_tool_runner: block: tool_use name=view_parent caller=code_execution_20260120
+2026-04-23 12:54:42,098 INFO reps.evaluator: Evaluated program scratch-c1bbd279e8d8 in 2.04s: sum_radii=2.60427267, target_ratio=0.98792636, validity=1.00000000, eval_time=2.03281689, combined_score=0.98792636, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.60427267, combined_score_hi_precision_str=0.987926355386, constraint_diagnostics={'n_circles_submitted': 26, 'boundary_violations': [], 'overlap_pairs': [], 'min_pairwise_slack': 1.997191384495167e-09}
+2026-04-23 12:54:44,383 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 12:54:45,258 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 12:54:46,204 INFO reps.workers.anthropic_tool_runner: block: thinking signed (147 chars)
+2026-04-23 12:54:49,065 INFO reps.workers.anthropic_tool_runner: block: thinking signed (256 chars)
+2026-04-23 12:54:49,472 INFO reps.workers.anthropic_tool_runner: block: text (138 chars)
+2026-04-23 12:55:08,039 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 12:55:09,202 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=text_editor_code_execution
+2026-04-23 12:55:09,467 INFO reps.workers.anthropic_tool_runner: block: tool_use name=run_tests caller=code_execution_20260120
+2026-04-23 12:55:13,341 INFO reps.workers.anthropic_tool_runner: block: text_editor_code_execution_tool_result
+2026-04-23 12:55:13,752 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=bash_code_execution
+2026-04-23 12:55:14,087 INFO reps.evaluator: Evaluated program scratch-3b1f09192d98 in 4.62s: sum_radii=2.05833333, target_ratio=0.78082521, validity=1.00000000, eval_time=4.61674690, combined_score=0.78082521, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.05833333, combined_score_hi_precision_str=0.780825208958, constraint_diagnostics={'n_circles_submitted': 26, 'boundary_violations': [], 'overlap_pairs': [], 'min_pairwise_slack': 0.009999999999999898}
+2026-04-23 12:55:17,557 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 12:55:17,976 INFO reps.workers.anthropic_tool_runner: block: bash_code_execution_tool_result
+2026-04-23 12:55:19,977 INFO reps.workers.anthropic_tool_runner: block: thinking signed (179 chars)
+2026-04-23 12:55:19,983 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 12:55:21,538 INFO reps.workers.anthropic_tool_runner: block: tool_use name=run_tests caller=code_execution_20260120
+2026-04-23 12:55:22,269 INFO reps.evaluator: Evaluated program scratch-fb6a3eaf9576 in 0.73s: sum_radii=0.00000000, target_ratio=0.00000000, validity=0.00000000, eval_time=0.72497797, combined_score=0.00000000, strict_pass=0.00000000, tolerant_pass=0.00000000, reported_sum_radii=0.00002600, combined_score_hi_precision_str=0, constraint_diagnostics={'n_circles_submitted': 26, 'boundary_violations': [{'circle_index': 0, 'center': [0.0, 0.0], 'radius': 1e-06, 'slack': -1e-06}, {'circle_index': 1, 'center': [0.0, 1.0], 'radius': 1e-06, 'slack': -1e-06}, {'circle_index': 2, 'center': [0.0, 1.0], 'radius': 1e-06, 'slack': -1e-06}, {'circle_index': 3, 'center': [1.0, 1.0], 'radius': 1e-06, 'slack': -1e-06}, {'circle_index': 4, 'center': [1.0, 1.0], 'radius': 1e-06, 'slack': -1e-06}, {'circle_index': 5, 'center': [1.0, 0.0], 'radius': 1e-06, 'slack': -1e-06}, {'circle_index': 6, 'center': [0.0, 0.0], 'radius': 1e-06, 'slack': -1e-06}, {'circle_index': 7, 'center': [0.0, 1.0], 'radius': 1e-06, 'slack': -1e-06}, {'circle_index': 8, 'center': [0.0, 1.0], 'radius': 1e-06, 'slack': -1e-06}, {'circle_index': 9, 'center': [1.0, 1.0], 'radius': 1e-06, 'slack': -1e-06}], 'overlap_pairs': [{'pair': [0, 6], 'center_distance': 0.0, 'radius_sum': 2e-06, 'interpenetration': 2e-06}, {'pair': [0, 16], 'center_distance': 0.0, 'radius_sum': 2e-06, 'interpenetration': 2e-06}, {'pair': [0, 21], 'center_distance': 0.0, 'radius_sum': 2e-06, 'interpenetration': 2e-06}, {'pair': [0, 23], 'center_distance': 0.0, 'radius_sum': 2e-06, 'interpenetration': 2e-06}, {'pair': [1, 2], 'center_distance': 0.0, 'radius_sum': 2e-06, 'interpenetration': 2e-06}, {'pair': [1, 7], 'center_distance': 0.0, 'radius_sum': 2e-06, 'interpenetration': 2e-06}, {'pair': [1, 8], 'center_distance': 0.0, 'radius_sum': 2e-06, 'interpenetration': 2e-06}, {'pair': [1, 14], 'center_distance': 0.0, 'radius_sum': 2e-06, 'interpenetration': 2e-06}, {'pair': [1, 15], 'center_distance': 0.0, 'radius_sum': 2e-06, 'interpenetration': 2e-06}, {'pair': [1, 19], 'center_distance': 0.0, 'radius_sum': 2e-06, 'interpenetration': 2e-06}], 'min_pairwise_slack': -2e-06}
+2026-04-23 12:55:28,334 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 12:55:30,244 INFO reps.workers.anthropic_tool_runner: block: thinking signed (1282 chars)
+2026-04-23 12:55:30,250 INFO reps.workers.anthropic_tool_runner: block: text (140 chars)
+2026-04-23 12:55:36,362 INFO reps.workers.anthropic_tool_runner: block: thinking signed (988 chars)
+2026-04-23 12:55:37,848 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=bash_code_execution
+2026-04-23 12:55:41,875 INFO reps.workers.anthropic_tool_runner: block: bash_code_execution_tool_result
+2026-04-23 12:55:43,723 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=bash_code_execution
+2026-04-23 12:55:47,509 INFO reps.workers.anthropic_tool_runner: block: bash_code_execution_tool_result
+2026-04-23 12:55:48,147 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 12:55:48,299 INFO reps.workers.anthropic_tool_runner: block: thinking signed (24 chars)
+2026-04-23 12:55:49,850 INFO reps.workers.anthropic_tool_runner: block: tool_use name=run_tests caller=code_execution_20260120
+2026-04-23 12:55:51,189 INFO reps.evaluator: Evaluated program scratch-6bce3c5eb0ee in 1.34s: sum_radii=2.59722483, target_ratio=0.98525277, validity=1.00000000, eval_time=1.33581185, combined_score=0.98525277, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.59722483, combined_score_hi_precision_str=0.98525276991, constraint_diagnostics={'n_circles_submitted': 26, 'boundary_violations': [], 'overlap_pairs': [], 'min_pairwise_slack': 2.0000703870870495e-10}
+2026-04-23 12:55:52,464 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=bash_code_execution
+2026-04-23 12:55:54,887 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 12:55:56,345 INFO reps.workers.anthropic_tool_runner: block: bash_code_execution_tool_result
+2026-04-23 12:56:15,053 INFO reps.workers.anthropic_tool_runner: block: thinking signed (878 chars)
+2026-04-23 12:56:15,059 INFO reps.workers.anthropic_tool_runner: block: text (187 chars)
+2026-04-23 12:56:16,166 INFO reps.workers.anthropic_tool_runner: block: thinking signed (1271 chars)
+2026-04-23 12:56:28,434 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 12:56:29,954 INFO reps.workers.anthropic_tool_runner: block: tool_use name=run_tests caller=code_execution_20260120
+2026-04-23 12:56:30,715 INFO reps.evaluator: Evaluated program scratch-cb7cd7b443af in 0.76s: sum_radii=2.60427269, target_ratio=0.98792636, validity=1.00000000, eval_time=0.75741291, combined_score=0.98792636, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.60427269, combined_score_hi_precision_str=0.987926364267, constraint_diagnostics={'n_circles_submitted': 26, 'boundary_violations': [], 'overlap_pairs': [], 'min_pairwise_slack': 1.9998444567015383e-10}
+2026-04-23 12:56:34,950 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 12:56:35,784 INFO reps.workers.anthropic_tool_runner: block: text (61 chars)
+2026-04-23 12:56:36,584 INFO reps.workers.anthropic_tool_runner: block: tool_use name=submit_child caller=direct
+2026-04-23 12:56:46,230 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=text_editor_code_execution
+2026-04-23 12:56:48,324 INFO reps.workers.anthropic_tool_runner: block: text_editor_code_execution_tool_result
+2026-04-23 12:56:48,715 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=bash_code_execution
+2026-04-23 12:56:52,791 INFO reps.workers.anthropic_tool_runner: block: bash_code_execution_tool_result
+2026-04-23 12:56:55,056 INFO reps.workers.anthropic_tool_runner: block: tool_use name=submit_child caller=direct
+2026-04-23 12:56:55,831 INFO reps.evaluator: Evaluated program scratch-b30946355686 in 0.77s: sum_radii=2.60427269, target_ratio=0.98792636, validity=1.00000000, eval_time=0.77075982, combined_score=0.98792636, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.60427269, combined_score_hi_precision_str=0.987926364267, constraint_diagnostics={'n_circles_submitted': 26, 'boundary_violations': [], 'overlap_pairs': [], 'min_pairwise_slack': 1.9998444567015383e-10}
+2026-04-23 12:56:56,285 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 12:56:56,505 INFO reps.evaluator: Evaluated program 87d1a3c3-ae7e-426b-a9a7-be23f13de976 in 0.67s: sum_radii=2.60427269, target_ratio=0.98792636, validity=1.00000000, eval_time=0.67114115, combined_score=0.98792636, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.60427269, combined_score_hi_precision_str=0.987926364267, constraint_diagnostics={'n_circles_submitted': 26, 'boundary_violations': [], 'overlap_pairs': [], 'min_pairwise_slack': 1.9998444567015383e-10}
+2026-04-23 12:56:56,506 WARNING reps.llm.ensemble: Model override 'claude-sonnet-4-6' not found in ensemble, falling back to weighted sampling
+2026-04-23 12:56:56,506 INFO reps.llm.ensemble: Sampled model: claude-opus-4-7
+2026-04-23 12:56:58,222 INFO reps.workers.anthropic_tool_runner: block: tool_use name=run_tests caller=code_execution_20260120
+2026-04-23 12:56:58,961 INFO reps.evaluator: Evaluated program scratch-de63f854eeb5 in 0.74s: sum_radii=2.61232923, target_ratio=0.99098260, validity=1.00000000, eval_time=0.73642898, combined_score=0.99098260, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.61232923, combined_score_hi_precision_str=0.990982598166, constraint_diagnostics={'n_circles_submitted': 26, 'boundary_violations': [], 'overlap_pairs': [], 'min_pairwise_slack': 9.999999994736442e-10}
+2026-04-23 12:57:02,521 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 12:57:04,492 INFO reps.database: New MAP-Elites cell occupied in island 0: {'complexity': 9, 'diversity': 5}
+2026-04-23 12:57:04,493 INFO reps.database: New best program 87d1a3c3-ae7e-426b-a9a7-be23f13de976 replaces initial (combined_score: 0.7808 → 0.9879, +0.2071)
+2026-04-23 12:57:04,495 INFO reps.controller: Iteration 1: Program 87d1a3c3-ae7e-426b-a9a7-be23f13de976 (parent: initial) completed in 197.60s
+2026-04-23 12:57:04,495 INFO reps.controller: Metrics: sum_radii=2.6042726888454366, target_ratio=0.9879263642674545, validity=1.0, eval_time=0.6711411476135254, combined_score=0.9879263642674545, strict_pass=1.0, tolerant_pass=1.0, reported_sum_radii=2.6042726888454366, combined_score_hi_precision_str=0.987926364267, constraint_diagnostics={'n_circles_submitted': 26, 'boundary_violations': [], 'overlap_pairs': [], 'min_pairwise_slack': 1.9998444567015383e-10}
+2026-04-23 12:57:04,495 INFO reps.controller: Tokens: in=126622, out=15678, cumulative_in=126622, cumulative_out=15678
+2026-04-23 12:57:04,495 INFO reps.controller: New best at iteration 1: 87d1a3c3-ae7e-426b-a9a7-be23f13de976
+2026-04-23 12:57:06,502 INFO reps.workers.anthropic_tool_runner: block: thinking signed (270 chars)
+2026-04-23 12:57:06,506 INFO reps.workers.anthropic_tool_runner: block: text (93 chars)
+2026-04-23 12:57:12,573 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 12:57:14,297 INFO reps.workers.anthropic_tool_runner: block: tool_use name=submit_child caller=code_execution_20260120
+2026-04-23 12:57:14,997 INFO reps.evaluator: Evaluated program scratch-2c7fdb028e7d in 0.70s: sum_radii=2.61232923, target_ratio=0.99098260, validity=1.00000000, eval_time=0.69649982, combined_score=0.99098260, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.61232923, combined_score_hi_precision_str=0.990982598166, constraint_diagnostics={'n_circles_submitted': 26, 'boundary_violations': [], 'overlap_pairs': [], 'min_pairwise_slack': 9.999999994736442e-10}
+2026-04-23 12:57:15,686 INFO reps.evaluator: Evaluated program cd141647-c6b4-4265-8350-62b11c72e102 in 0.69s: sum_radii=2.61232923, target_ratio=0.99098260, validity=1.00000000, eval_time=0.68579292, combined_score=0.99098260, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.61232923, combined_score_hi_precision_str=0.990982598166, constraint_diagnostics={'n_circles_submitted': 26, 'boundary_violations': [], 'overlap_pairs': [], 'min_pairwise_slack': 9.999999994736442e-10}
+2026-04-23 12:57:15,687 WARNING reps.llm.ensemble: Model override 'claude-sonnet-4-6' not found in ensemble, falling back to weighted sampling
+2026-04-23 12:57:15,687 INFO reps.llm.ensemble: Sampled model: claude-opus-4-7
+2026-04-23 12:57:24,266 INFO reps.database: New MAP-Elites cell occupied in island 1: {'complexity': 9, 'diversity': 9}
+2026-04-23 12:57:24,266 INFO reps.database: New best program cd141647-c6b4-4265-8350-62b11c72e102 replaces 87d1a3c3-ae7e-426b-a9a7-be23f13de976 (combined_score: 0.9879 → 0.9910, +0.0031)
+2026-04-23 12:57:24,268 INFO reps.controller: Iteration 2: Program cd141647-c6b4-4265-8350-62b11c72e102 (parent: initial) completed in 216.75s
+2026-04-23 12:57:24,268 INFO reps.controller: Metrics: sum_radii=2.612329227026122, target_ratio=0.9909825981662767, validity=1.0, eval_time=0.6857929229736328, combined_score=0.9909825981662767, strict_pass=1.0, tolerant_pass=1.0, reported_sum_radii=2.612329227026122, combined_score_hi_precision_str=0.990982598166, constraint_diagnostics={'n_circles_submitted': 26, 'boundary_violations': [], 'overlap_pairs': [], 'min_pairwise_slack': 9.999999994736442e-10}
+2026-04-23 12:57:24,268 INFO reps.controller: Tokens: in=228240, out=15263, cumulative_in=354862, cumulative_out=30941
+2026-04-23 12:57:24,268 INFO reps.controller: New best at iteration 2: cd141647-c6b4-4265-8350-62b11c72e102
+2026-04-23 12:57:24,269 INFO reps.worker_pool: Worker allocation set to: {'atr_exploiter': 0.6, 'atr_explorer': 0.25, 'atr_crossover': 0.15}
+2026-04-23 12:57:24,269 INFO reps.llm.ensemble: Sampled model: claude-opus-4-7
+2026-04-23 12:57:45,223 INFO reps.controller: Evolution completed: maximum iterations reached
+2026-04-23 12:57:45,223 INFO reps.runner: Best program: cd141647-c6b4-4265-8350-62b11c72e102, metrics: {'sum_radii': 2.612329227026122, 'target_ratio': 0.9909825981662767, 'validity': 1.0, 'eval_time': 0.6857929229736328, 'combined_score': 0.9909825981662767, 'strict_pass': 1.0, 'tolerant_pass': 1.0, 'reported_sum_radii': 2.612329227026122, 'combined_score_hi_precision_str': '0.990982598166', 'constraint_diagnostics': {'n_circles_submitted': 26, 'boundary_violations': [], 'overlap_pairs': [], 'min_pairwise_slack': 9.999999994736442e-10}}
+2026-04-23 12:57:45,223 INFO reps.controller: AsyncController stopping
+2026-04-23 12:57:45,268 INFO reps.database: Saved database with 3 programs to experiment/results/circle_opus47_anthropic/run_005
+2026-04-23 12:57:45,268 INFO reps.runner: Database saved to experiment/results/circle_opus47_anthropic/run_005
+2026-04-23 12:57:45,268 INFO reps.runner: Best program saved to experiment/results/circle_opus47_anthropic/run_005/best_program.py

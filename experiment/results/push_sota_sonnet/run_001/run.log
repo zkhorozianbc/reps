@@ -1,0 +1,62 @@
+2026-04-23 13:53:30,302 INFO reps.runner: Log file: experiment/results/push_sota_sonnet/run_001/run.log
+2026-04-23 13:53:30,309 INFO reps.runner: Loaded task system prompt from experiment/benchmarks/circle_packing/system_prompt.md
+2026-04-23 13:53:30,309 INFO reps.database: Initialized program database with 0 programs
+2026-04-23 13:53:30,341 INFO reps.evaluator: Successfully loaded evaluation function from experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 13:53:30,341 INFO reps.evaluator: Initialized evaluator with experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 13:53:33,123 INFO reps.evaluator: Evaluated program initial in 2.78s: validity=1.00000000, sum_radii=2.63598308, target_ratio=0.99995565, combined_score=0.99995565, eval_time=1.09628916, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.63598308
+2026-04-23 13:53:33,123 INFO reps.runner: Seed program metrics: {'validity': 1.0, 'sum_radii': 2.635983082282041, 'target_ratio': 0.9999556474648311, 'combined_score': 0.9999556474648311, 'eval_time': 1.0962891578674316, 'strict_pass': 1.0, 'tolerant_pass': 1.0, 'reported_sum_radii': 2.635983082282041}
+2026-04-23 13:53:33,123 INFO reps.database: New MAP-Elites cell occupied in island 0: {'complexity': 5, 'diversity': 0}
+2026-04-23 13:53:33,123 INFO reps.worker_pool: WorkerPool initialized: {'atr_explorer': 1.0}
+2026-04-23 13:53:33,125 INFO reps.metrics_logger: MetricsLogger writing to experiment/results/push_sota_sonnet/run_001/metrics
+2026-04-23 13:53:33,134 INFO reps.llm.anthropic: Initialized AnthropicLLM with model: claude-sonnet-4-6
+2026-04-23 13:53:33,134 INFO reps.controller: Summarizer LLM: model=claude-sonnet-4-6 provider=anthropic
+2026-04-23 13:53:33,134 INFO reps.controller: REPS enabled: batch_size=2, workers=['atr_explorer'], ε=0.15
+2026-04-23 13:53:33,134 INFO reps.controller: Initialized async controller with 2 workers
+2026-04-23 13:53:33,138 INFO reps.llm.ensemble: Initialized LLM ensemble with models: claude-sonnet-4-6 (weight: 1.00)
+2026-04-23 13:53:33,183 INFO reps.prompt_sampler: Initialized prompt sampler
+2026-04-23 13:53:33,184 INFO reps.prompt_sampler: Set custom templates: system=evaluator_system_message, user=None
+2026-04-23 13:53:33,188 INFO reps.evaluator: Successfully loaded evaluation function from experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 13:53:33,188 INFO reps.evaluator: Initialized evaluator with experiment/benchmarks/circle_packing/evaluator.py
+2026-04-23 13:53:33,188 INFO reps.controller: AsyncController started (asyncio-only, max_concurrent_iterations=2)
+2026-04-23 13:53:33,188 INFO reps.controller: Starting async evolution from iteration 1 for 30 iterations (total: 31)
+2026-04-23 13:53:33,188 INFO reps.controller: REPS prompt extras keys: ['dead_end_warnings', 'unexplored_directions', 'recent_avoids']
+2026-04-23 13:53:33,188 INFO reps.controller: Early stopping disabled
+2026-04-23 13:53:36,427 INFO reps.workers.anthropic_tool_runner: block: text (229 chars)
+2026-04-23 13:53:38,180 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 13:53:38,272 INFO reps.workers.anthropic_tool_runner: block: text (221 chars)
+2026-04-23 13:53:39,634 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 13:53:40,831 INFO reps.workers.anthropic_tool_runner: block: tool_use name=view_parent caller=code_execution_20260120
+2026-04-23 13:53:40,837 INFO reps.workers.anthropic_tool_runner: captured container_id=container_011CaM8WuufFKw3j1CLDnaP4
+2026-04-23 13:53:42,212 INFO reps.workers.anthropic_tool_runner: block: tool_use name=view_parent caller=code_execution_20260120
+2026-04-23 13:53:42,221 INFO reps.workers.anthropic_tool_runner: captured container_id=container_011CaM8WvcpVTiCamoeSpdYK
+2026-04-23 13:53:43,544 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 13:53:43,945 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 13:53:45,386 INFO reps.workers.anthropic_tool_runner: block: tool_use name=view_parent caller=code_execution_20260120
+2026-04-23 13:53:45,587 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 13:53:46,131 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 13:53:47,902 INFO reps.workers.anthropic_tool_runner: block: tool_use name=view_parent caller=code_execution_20260120
+2026-04-23 13:53:49,546 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 13:53:50,839 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 13:54:18,743 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 13:54:19,683 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 13:54:20,307 INFO reps.workers.anthropic_tool_runner: block: tool_use name=run_tests caller=code_execution_20260120
+2026-04-23 13:54:21,262 INFO reps.workers.anthropic_tool_runner: block: tool_use name=run_tests caller=code_execution_20260120
+2026-04-23 13:54:23,697 INFO reps.evaluator: Evaluated program scratch-a521b9be7e29 in 3.38s: validity=1.00000000, sum_radii=2.60101820, target_ratio=0.98669178, combined_score=0.98669178, eval_time=1.60547400, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.60101820
+2026-04-23 13:54:24,120 INFO reps.evaluator: Evaluated program scratch-da8999d10dc3 in 2.86s: validity=1.00000000, sum_radii=2.61949869, target_ratio=0.99370232, combined_score=0.99370232, eval_time=1.41477704, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.61949869
+2026-04-23 13:54:26,986 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 13:54:27,167 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 13:54:29,379 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 13:54:30,969 INFO reps.workers.anthropic_tool_runner: block: tool_use name=view_program caller=code_execution_20260120
+2026-04-23 13:54:34,081 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 13:54:53,324 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 13:54:55,103 INFO reps.workers.anthropic_tool_runner: block: tool_use name=run_tests caller=code_execution_20260120
+2026-04-23 13:55:11,227 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 13:55:14,913 INFO reps.workers.anthropic_tool_runner: block: tool_use name=run_tests caller=code_execution_20260120
+2026-04-23 13:55:37,031 INFO reps.evaluator: Evaluated program scratch-140700716fe0 in 22.12s: validity=1.00000000, sum_radii=2.61052586, target_ratio=0.99029849, combined_score=0.99029849, eval_time=11.21015811, strict_pass=1.00000000, tolerant_pass=1.00000000, reported_sum_radii=2.61052586
+2026-04-23 13:55:40,689 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 13:55:58,542 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 13:56:01,971 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 13:56:18,224 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 13:56:22,401 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
+2026-04-23 13:56:39,432 INFO reps.workers.anthropic_tool_runner: block: server_tool_use name=code_execution
+2026-04-23 13:56:43,459 INFO reps.workers.anthropic_tool_runner: block: code_execution_tool_result
