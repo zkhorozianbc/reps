@@ -50,13 +50,38 @@ reps:
     recency_window: 20
 
   workers:
-    types: ["exploiter", "explorer", "crossover"]
-    initial_allocation:
-      exploiter: 0.6
-      explorer: 0.25
-      crossover: 0.15
-    exploiter_temperature: 0.3
-    explorer_temperature: 1.0
+    types:
+      - name: atr_exploiter
+        impl: anthropic_tool_runner
+        role: exploiter
+        model_id: claude-opus-4-7
+        temperature: 0.3
+        generation_mode: full
+        tools: [view_parent, view_program, edit_file, run_tests, submit_child, mark_converged]
+        max_turns: 30
+        uses_evaluator: true
+        owns_temperature: true
+        weight: 0.6
+      - name: atr_explorer
+        impl: anthropic_tool_runner
+        role: explorer
+        model_id: claude-opus-4-7
+        temperature: 1.0
+        generation_mode: full
+        tools: [view_parent, view_program, edit_file, run_tests, submit_child, mark_converged]
+        max_turns: 30
+        uses_evaluator: true
+        owns_temperature: true
+        weight: 0.25
+      - name: atr_crossover
+        impl: anthropic_tool_runner
+        role: crossover
+        model_id: claude-opus-4-7
+        generation_mode: full
+        tools: [view_parent, view_program, edit_file, run_tests, submit_child, mark_converged]
+        max_turns: 30
+        uses_evaluator: true
+        weight: 0.15
 
   convergence:
     enabled: true

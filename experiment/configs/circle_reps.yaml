@@ -59,13 +59,35 @@ reps:
     recency_window: 20
 
   workers:
-    types: ["exploiter", "explorer", "crossover"]
-    initial_allocation:
-      exploiter: 0.6
-      explorer: 0.25
-      crossover: 0.15
-    exploiter_temperature: 0.3
-    explorer_temperature: 1.0
+    types:
+      - name: sc_exploiter
+        impl: single_call
+        role: exploiter
+        model_id: google/gemini-2.0-flash-001
+        temperature: 0.3
+        generation_mode: full
+        max_turns: 1
+        uses_evaluator: false
+        owns_temperature: true
+        weight: 0.6
+      - name: sc_explorer
+        impl: single_call
+        role: explorer
+        model_id: google/gemini-2.0-flash-001
+        temperature: 1.0
+        generation_mode: full
+        max_turns: 1
+        uses_evaluator: false
+        owns_temperature: true
+        weight: 0.25
+      - name: sc_crossover
+        impl: single_call
+        role: crossover
+        model_id: google/gemini-2.0-flash-001
+        generation_mode: full
+        max_turns: 1
+        uses_evaluator: false
+        weight: 0.15
 
   convergence:
     enabled: true

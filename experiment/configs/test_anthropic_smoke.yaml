@@ -42,10 +42,29 @@ reps:
     enabled: false
 
   workers:
-    types: ["exploiter", "explorer"]
-    initial_allocation:
-      exploiter: 0.7
-      explorer: 0.3
+    types:
+      - name: atr_exploiter
+        impl: anthropic_tool_runner
+        role: exploiter
+        model_id: claude-sonnet-4-6
+        temperature: 0.5
+        generation_mode: full
+        tools: [view_parent, view_program, edit_file, run_tests, submit_child, mark_converged]
+        max_turns: 30
+        uses_evaluator: true
+        owns_temperature: true
+        weight: 0.7
+      - name: atr_explorer
+        impl: anthropic_tool_runner
+        role: explorer
+        model_id: claude-sonnet-4-6
+        temperature: 0.9
+        generation_mode: full
+        tools: [view_parent, view_program, edit_file, run_tests, submit_child, mark_converged]
+        max_turns: 30
+        uses_evaluator: true
+        owns_temperature: true
+        weight: 0.3
 
   convergence:
     enabled: true
