@@ -1,5 +1,5 @@
 """
-Tests for the REPS LLM layer: base interface, OpenRouter provider, Anthropic provider, and ensemble.
+Tests for the REPS LLM layer: base interface, OpenAI-compatible provider, Anthropic provider, and ensemble.
 """
 
 import asyncio
@@ -9,7 +9,7 @@ import pytest
 from reps.config import LLMModelConfig
 
 from reps.llm.base import LLMInterface
-from reps.llm.openrouter import OpenRouterLLM
+from reps.llm.openai_compatible import OpenAICompatibleLLM
 from reps.llm.anthropic import AnthropicLLM
 from reps.llm.ensemble import LLMEnsemble
 
@@ -34,14 +34,14 @@ def _make_model_cfg(**overrides) -> LLMModelConfig:
 
 
 # ---------------------------------------------------------------------------
-# OpenRouterLLM
+# OpenAICompatibleLLM
 # ---------------------------------------------------------------------------
 
-@patch("reps.llm.openrouter.openai.OpenAI")
+@patch("reps.llm.openai_compatible.openai.OpenAI")
 def test_openrouter_provider_instantiation(mock_openai_cls):
-    """OpenRouterLLM can be created with model config."""
+    """OpenAICompatibleLLM can be created with model config."""
     cfg = _make_model_cfg()
-    provider = OpenRouterLLM(cfg)
+    provider = OpenAICompatibleLLM(cfg)
 
     assert provider.model == "openai/gpt-4o-mini"
     assert provider.api_base == "https://openrouter.ai/api/v1"
@@ -52,11 +52,11 @@ def test_openrouter_provider_instantiation(mock_openai_cls):
     mock_openai_cls.assert_called_once()
 
 
-@patch("reps.llm.openrouter.openai.OpenAI")
+@patch("reps.llm.openai_compatible.openai.OpenAI")
 def test_openrouter_implements_interface(mock_openai_cls):
-    """OpenRouterLLM is a subclass of LLMInterface."""
+    """OpenAICompatibleLLM is a subclass of LLMInterface."""
     cfg = _make_model_cfg()
-    provider = OpenRouterLLM(cfg)
+    provider = OpenAICompatibleLLM(cfg)
 
     assert isinstance(provider, LLMInterface)
     # Verify the abstract methods exist
@@ -70,7 +70,7 @@ def test_openrouter_implements_interface(mock_openai_cls):
 # LLMEnsemble
 # ---------------------------------------------------------------------------
 
-@patch("reps.llm.openrouter.openai.OpenAI")
+@patch("reps.llm.openai_compatible.openai.OpenAI")
 def test_ensemble_instantiation(mock_openai_cls):
     """LLMEnsemble can be created with model configs."""
     cfgs = [
@@ -88,7 +88,7 @@ def test_ensemble_instantiation(mock_openai_cls):
     assert ensemble.last_usage == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
 
-@patch("reps.llm.openrouter.openai.OpenAI")
+@patch("reps.llm.openai_compatible.openai.OpenAI")
 def test_ensemble_model_override_selection(mock_openai_cls):
     """Ensemble selects the right model on override."""
     cfgs = [

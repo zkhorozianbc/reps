@@ -1,5 +1,5 @@
 """
-OpenRouter / OpenAI-compatible API interface for LLMs
+OpenAI-compatible API interface for LLMs (OpenAI Direct, OpenRouter, and others)
 """
 
 import asyncio
@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 _logged_models: set = set()
 
 
-class OpenRouterLLM(LLMInterface):
-    """LLM interface using OpenAI-compatible APIs (including OpenRouter)"""
+class OpenAICompatibleLLM(LLMInterface):
+    """LLM interface using OpenAI-compatible APIs (OpenAI Direct, OpenRouter, etc.)"""
 
     def __init__(
         self,
@@ -49,7 +49,15 @@ class OpenRouterLLM(LLMInterface):
         self.last_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
         if self.model not in _logged_models:
-            logger.info(f"Initialized OpenRouterLLM with model: {self.model}")
+            if not self.api_base:
+                endpoint_label = "openai-direct"
+            elif "openrouter.ai" in self.api_base:
+                endpoint_label = "openrouter"
+            else:
+                endpoint_label = f"custom: {self.api_base}"
+            logger.info(
+                f"Initialized OpenAICompatibleLLM ({endpoint_label}) with model: {self.model}"
+            )
             _logged_models.add(self.model)
 
     async def generate(self, prompt: str, **kwargs) -> str:

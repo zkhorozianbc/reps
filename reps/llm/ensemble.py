@@ -8,7 +8,7 @@ import random
 from typing import Dict, List, Optional, Tuple
 
 from reps.llm.base import LLMInterface
-from reps.llm.openrouter import OpenRouterLLM
+from reps.llm.openai_compatible import OpenAICompatibleLLM
 from reps.llm.anthropic import AnthropicLLM
 from reps.config import LLMModelConfig
 
@@ -60,14 +60,18 @@ class LLMEnsemble:
         Priority:
         1. ``model_cfg.init_client`` callable (fully custom)
         2. ``model_cfg.provider == "anthropic"`` -> AnthropicLLM
-        3. Default -> OpenRouterLLM (OpenAI-compatible)
+        3. ``model_cfg.provider in {"openai", "openrouter", None, ""}`` ->
+           OpenAICompatibleLLM (one class handles both via ``api_base``)
+        4. Anything else raises ``ValueError``.
         """
         if model_cfg.init_client:
             return model_cfg.init_client(model_cfg)
         provider = getattr(model_cfg, "provider", None)
         if provider == "anthropic":
             return AnthropicLLM(model_cfg)
-        return OpenRouterLLM(model_cfg)
+        if provider in ("openai", "openrouter", None, ""):
+            return OpenAICompatibleLLM(model_cfg)
+        raise ValueError(f"Unknown provider: {provider!r}")
 
     async def generate(self, prompt: str, **kwargs) -> str:
         """Generate text using a randomly selected model based on weights"""
