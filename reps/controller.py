@@ -289,9 +289,25 @@ class ProcessParallelController:
             self.worker_pool = self._reps_worker_pool
         else:
             # Minimal pool so _run_iteration has something to consult.
+            from reps.config import REPSWorkersConfig
+            from reps.workers.base import WorkerConfig
+
             primary_model = self.config.llm.models[0].name if self.config.llm.models else ""
+            minimal_cfg = REPSWorkersConfig(
+                types=[
+                    WorkerConfig(
+                        name="exploiter",
+                        impl="single_call",
+                        role="exploiter",
+                        model_id=primary_model,
+                        temperature=0.7,
+                        generation_mode="diff",
+                        weight=1.0,
+                    )
+                ]
+            )
             self.worker_pool = WorkerPool(
-                {"types": ["exploiter"]},
+                minimal_cfg,
                 default_model_id=primary_model,
             )
 

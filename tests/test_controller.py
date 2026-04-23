@@ -14,6 +14,47 @@ os.environ["OPENAI_API_KEY"] = "test"
 from reps.config import Config
 from reps.database import Program, ProgramDatabase
 from reps.controller import ProcessParallelController, SerializableResult
+from reps.workers.base import WorkerConfig
+
+
+def _default_reps_workers():
+    """Minimal WorkerConfig list that keeps REPS-enabled paths runnable.
+
+    Mirrors the three-worker preset exploiter/explorer/crossover that
+    was formerly provided by the deleted ``legacy_default_configs`` shim.
+    """
+    return [
+        WorkerConfig(
+            name="exploiter",
+            impl="single_call",
+            role="exploiter",
+            model_id="",
+            temperature=0.3,
+            generation_mode="diff",
+            weight=0.7,
+            owns_temperature=True,
+        ),
+        WorkerConfig(
+            name="explorer",
+            impl="single_call",
+            role="explorer",
+            model_id="",
+            temperature=1.0,
+            generation_mode="full",
+            weight=0.15,
+            owns_temperature=True,
+        ),
+        WorkerConfig(
+            name="crossover",
+            impl="single_call",
+            role="crossover",
+            model_id="",
+            temperature=0.7,
+            generation_mode="full",
+            weight=0.15,
+            owns_temperature=True,
+        ),
+    ]
 
 
 class TestProcessParallel(unittest.TestCase):
@@ -71,6 +112,7 @@ def evaluate(program_path):
     def test_controller_with_reps_does_not_create_default_output_dir(self):
         """Direct controller construction should not create a fallback output dir."""
         self.config.reps.enabled = True
+        self.config.reps.workers.types = _default_reps_workers()
 
         old_cwd = os.getcwd()
         isolated_cwd = tempfile.mkdtemp()
@@ -171,6 +213,7 @@ def evaluate(program_path):
     def test_sota_steering_uses_same_raw_metric_for_prompt_and_reallocation(self):
         """F6 should use the same score basis across both steering callsites."""
         self.config.reps.enabled = True
+        self.config.reps.workers.types = _default_reps_workers()
         self.config.reps.sota.enabled = True
         self.config.reps.sota.target_score = 2.635
         self.config.reps.convergence.enabled = False

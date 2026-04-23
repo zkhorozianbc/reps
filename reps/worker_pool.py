@@ -2,25 +2,16 @@
 
 Crossover is a role (cfg.role == "crossover"), not a name. Any config with
 role=="crossover" participates in the second-parent sampling path.
-
-Backward compatibility:
-- Dict input (legacy tests/configs) is fully supported; string-type lists in
-  the dict's "types" key trigger the legacy_default_configs() shim.
-- The ``allocation`` attribute mirrors ``_weights`` for old callers.
-- ``build_iteration_config(override_type=...)`` is accepted as an alias for
-  ``override_name=``.
-- ``get_alternative_worker_type`` is an alias for ``get_alternative_worker_name``.
 """
 from __future__ import annotations
 
 import logging
 import random as _random
 from collections import deque
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from reps.iteration_config import IterationConfig
 from reps.workers.base import WorkerConfig
-from reps.workers.defaults import legacy_default_configs
 
 logger = logging.getLogger(__name__)
 
@@ -36,82 +27,28 @@ class WorkerPool:
     ):
         """
         Args:
-            workers_config: Either a ``REPSWorkersConfig`` dataclass or a plain
-                dict (legacy test / CLI path).  When ``types`` is empty or the
-                config is a legacy dict with string type names, the three preset
-                WorkerConfigs are generated via ``legacy_default_configs()``.
-            default_model_id: Model name to inject when building legacy presets.
+            workers_config: A ``REPSWorkersConfig`` dataclass. Its ``types``
+                field must be a non-empty ``List[WorkerConfig]``.
+            default_model_id: Reserved for future use; no longer consumed
+                during pool construction.
         """
-        # --- Normalise dict vs dataclass input ---
-        if isinstance(workers_config, dict):
-            raw_types = workers_config.get("types", [])
-            initial_allocation = workers_config.get(
-                "initial_allocation",
-                {"exploiter": 0.6, "explorer": 0.25, "crossover": 0.15},
-            )
-            exploiter_temperature = workers_config.get("exploiter_temperature", 0.3)
-            explorer_temperature = workers_config.get("explorer_temperature", 1.0)
-            random_seed = workers_config.get("random_seed", None)
-            # A dict's "types" field (if present) is always the legacy list-of-strings
-            # path — dicts don't carry WorkerConfig objects.
-            typed_types: List[WorkerConfig] = []
-        else:
-            raw_types = getattr(workers_config, "types_legacy", [])
-            initial_allocation = getattr(
-                workers_config,
-                "initial_allocation",
-                {"exploiter": 0.6, "explorer": 0.25, "crossover": 0.15},
-            )
-            exploiter_temperature = getattr(workers_config, "exploiter_temperature", 0.3)
-            explorer_temperature = getattr(workers_config, "explorer_temperature", 1.0)
-            random_seed = getattr(workers_config, "random_seed", None)
-            # New preferred surface: List[WorkerConfig]
-            typed_types = list(getattr(workers_config, "types", []) or [])
+        typed_types: List[WorkerConfig] = list(getattr(workers_config, "types", []) or [])
+        random_seed = getattr(workers_config, "random_seed", None)
 
-        # Decide which path to take
-        if typed_types:
-            # New path: explicit WorkerConfig objects
-            types = typed_types
-        elif raw_types:
-            # Legacy path: string names + allocation dict → build presets
-            alloc = {t: initial_allocation.get(t, 1.0 / len(raw_types)) for t in raw_types}
-            types = legacy_default_configs(
-                default_model_id,
-                exploiter_temperature=exploiter_temperature,
-                explorer_temperature=explorer_temperature,
-                allocation=alloc,
-            )
-            # Filter to only the names listed in raw_types
-            types = [c for c in types if c.name in raw_types]
-            # If legacy types listed names not in our preset list, add a generic one
-            preset_names = {c.name for c in types}
-            for name in raw_types:
-                if name not in preset_names:
-                    types.append(WorkerConfig(
-                        name=name,
-                        impl="single_call",
-                        role=name,
-                        model_id=default_model_id,
-                        temperature=0.7,
-                        generation_mode="diff",
-                        weight=alloc.get(name, 1.0),
-                    ))
-        else:
-            # Empty config: fall back to three standard presets
-            types = legacy_default_configs(
-                default_model_id,
-                exploiter_temperature=exploiter_temperature,
-                explorer_temperature=explorer_temperature,
-                allocation=initial_allocation,
+        if not typed_types:
+            raise ValueError(
+                "WorkerPool requires workers_config.types to be a non-empty "
+                "List[WorkerConfig]. Declare workers under reps.workers.types "
+                "in your YAML config."
             )
 
-        self._configs: Dict[str, WorkerConfig] = {c.name: c for c in types}
-        total = sum(max(c.weight, 0.0) for c in types) or 1.0
+        self._configs: Dict[str, WorkerConfig] = {c.name: c for c in typed_types}
+        total = sum(max(c.weight, 0.0) for c in typed_types) or 1.0
         self._weights: Dict[str, float] = {
-            c.name: max(c.weight, 0.0) / total for c in types
+            c.name: max(c.weight, 0.0) / total for c in typed_types
         }
         self.yield_tracker: Dict[str, deque] = {
-            c.name: deque(maxlen=100) for c in types
+            c.name: deque(maxlen=100) for c in typed_types
         }
         self._force_explorer_batches = 0
 

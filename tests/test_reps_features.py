@@ -8,8 +8,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from reps.config import REPSWorkersConfig
 from reps.iteration_config import IterationConfig, IterationResult
 from reps.worker_pool import WorkerPool
+from reps.workers.base import WorkerConfig
 from reps.convergence_monitor import ConvergenceMonitor, ConvergenceAction, classify_edit
 from reps.contract_selector import ContractSelector, Contract
 from reps.sota_controller import SOTAController, SearchRegime
@@ -22,82 +24,119 @@ from reps.metrics_logger import MetricsLogger
 # ---------------------------------------------------------------------------
 
 
+def _make_workers_config(
+    names=("exploiter", "explorer", "crossover"),
+    weights=None,
+    temperatures=None,
+    generation_modes=None,
+    model_id="",
+):
+    """Build a REPSWorkersConfig from simple lists so tests stay terse."""
+    if weights is None:
+        weights = {}
+    if temperatures is None:
+        temperatures = {}
+    if generation_modes is None:
+        generation_modes = {}
+
+    configs = []
+    for name in names:
+        configs.append(
+            WorkerConfig(
+                name=name,
+                impl="single_call",
+                role=name,
+                model_id=model_id,
+                temperature=temperatures.get(name, 0.7),
+                generation_mode=generation_modes.get(name, "diff"),
+                weight=weights.get(name, 1.0),
+                owns_temperature=True,
+            )
+        )
+    return REPSWorkersConfig(types=configs)
+
+
 class TestWorkerPool:
     """Tests for the WorkerPool (F3: Worker Type Diversity)."""
 
     def test_initialization_with_config(self):
-        config = {
-            "types": ["exploiter", "explorer", "crossover"],
-            "initial_allocation": {"exploiter": 0.6, "explorer": 0.25, "crossover": 0.15},
-        }
-        pool = WorkerPool(config)
+        cfg = _make_workers_config(
+            names=("exploiter", "explorer", "crossover"),
+            weights={"exploiter": 0.6, "explorer": 0.25, "crossover": 0.15},
+        )
+        pool = WorkerPool(cfg)
         assert set(pool.allocation.keys()) == {"exploiter", "explorer", "crossover"}
         assert len(pool.yield_tracker) == 3
 
-    def test_initialization_defaults(self):
-        pool = WorkerPool({})
-        assert "exploiter" in pool.allocation
-        assert "explorer" in pool.allocation
-        assert "crossover" in pool.allocation
+    def test_initialization_empty_raises(self):
+        """Empty workers list now raises — no silent fall-back to presets."""
+        with pytest.raises(ValueError, match="non-empty"):
+            WorkerPool(REPSWorkersConfig(types=[]))
 
     def test_build_iteration_config_returns_iteration_config(self):
-        pool = WorkerPool({"types": ["exploiter"], "initial_allocation": {"exploiter": 1.0}})
+        pool = WorkerPool(
+            _make_workers_config(names=("exploiter",), weights={"exploiter": 1.0})
+        )
         db = MagicMock()
         config = pool.build_iteration_config(db, prompt_extras={"reflection": "test"})
         assert isinstance(config, IterationConfig)
         assert config.worker_type == "exploiter"
 
     def test_build_iteration_config_override_type(self):
-        pool = WorkerPool({"types": ["exploiter", "explorer"]})
+        pool = WorkerPool(_make_workers_config(names=("exploiter", "explorer")))
         db = MagicMock()
         config = pool.build_iteration_config(db, prompt_extras={}, override_type="explorer")
         assert config.worker_type == "explorer"
 
     def test_build_iteration_config_temperature_from_worker(self):
-        pool = WorkerPool({
-            "types": ["exploiter"],
-            "initial_allocation": {"exploiter": 1.0},
-            "exploiter_temperature": 0.42,
-        })
+        pool = WorkerPool(
+            _make_workers_config(
+                names=("exploiter",),
+                weights={"exploiter": 1.0},
+                temperatures={"exploiter": 0.42},
+            )
+        )
         db = MagicMock()
         config = pool.build_iteration_config(db, prompt_extras={}, override_type="exploiter")
         assert config.temperature == 0.42
 
     def test_record_result_and_get_yield_rate(self):
-        pool = WorkerPool({"types": ["exploiter"]})
+        pool = WorkerPool(_make_workers_config(names=("exploiter",)))
         pool.record_result("exploiter", True)
         pool.record_result("exploiter", False)
         pool.record_result("exploiter", True)
         assert pool.get_yield_rate("exploiter") == pytest.approx(2 / 3)
 
     def test_get_yield_rate_empty(self):
-        pool = WorkerPool({"types": ["exploiter"]})
+        pool = WorkerPool(_make_workers_config(names=("exploiter",)))
         assert pool.get_yield_rate("exploiter") == 0.0
 
     def test_get_yield_rate_unknown_worker(self):
-        pool = WorkerPool({"types": ["exploiter"]})
+        pool = WorkerPool(_make_workers_config(names=("exploiter",)))
         assert pool.get_yield_rate("nonexistent") == 0.0
 
     def test_allocation_normalization_sums_to_one(self):
-        config = {
-            "types": ["exploiter", "explorer", "crossover"],
-            "initial_allocation": {"exploiter": 3.0, "explorer": 2.0, "crossover": 5.0},
-        }
-        pool = WorkerPool(config)
+        cfg = _make_workers_config(
+            names=("exploiter", "explorer", "crossover"),
+            weights={"exploiter": 3.0, "explorer": 2.0, "crossover": 5.0},
+        )
+        pool = WorkerPool(cfg)
         total = sum(pool.allocation.values())
         assert total == pytest.approx(1.0)
 
     def test_set_allocation_normalizes(self):
-        pool = WorkerPool({"types": ["exploiter", "explorer"]})
+        pool = WorkerPool(_make_workers_config(names=("exploiter", "explorer")))
         pool.set_allocation({"exploiter": 4.0, "explorer": 6.0})
         assert pool.allocation["exploiter"] == pytest.approx(0.4)
         assert pool.allocation["explorer"] == pytest.approx(0.6)
 
     def test_boost_explorer(self):
-        pool = WorkerPool({
-            "types": ["exploiter", "explorer"],
-            "initial_allocation": {"exploiter": 0.7, "explorer": 0.3},
-        })
+        pool = WorkerPool(
+            _make_workers_config(
+                names=("exploiter", "explorer"),
+                weights={"exploiter": 0.7, "explorer": 0.3},
+            )
+        )
         old_explorer = pool.allocation["explorer"]
         pool.boost_explorer(0.2)
         # After boosting and renormalization, explorer share should be higher

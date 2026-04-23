@@ -351,14 +351,6 @@ class EvaluatorConfig:
     enable_artifacts: bool = True
     max_artifact_storage: int = 100 * 1024 * 1024  # 100MB per program
 
-    # Asyncio-era concurrency
-    max_concurrent_iterations: int = 4   # asyncio-era concurrency bound
-
-    def __post_init__(self):
-        # If user set only parallel_evaluations, mirror it to the iteration cap.
-        if self.max_concurrent_iterations == 4 and self.parallel_evaluations not in (None, 1):
-            self.max_concurrent_iterations = int(self.parallel_evaluations)
-
 
 @dataclass
 class EvolutionTraceConfig:
@@ -395,16 +387,12 @@ class REPSRevisitationConfig:
 
 @dataclass
 class REPSWorkersConfig:
-    """F3: Worker Type Diversity config"""
-    # Legacy fields — retained for backward compat, renamed from `types`.
-    types_legacy: List[str] = field(default_factory=lambda: ["exploiter", "explorer", "crossover"])
-    initial_allocation: Dict[str, float] = field(
-        default_factory=lambda: {"exploiter": 0.6, "explorer": 0.25, "crossover": 0.15}
-    )
-    exploiter_temperature: float = 0.3
-    explorer_temperature: float = 1.0
+    """F3: Worker Type Diversity config.
 
-    # New — preferred surface. When non-empty, overrides types_legacy.
+    `types` is a list of explicit WorkerConfig entries declared in YAML under
+    `reps.workers.types`. Empty means "no workers configured" — WorkerPool
+    will raise on construction.
+    """
     types: List[WorkerConfig] = field(default_factory=list)
 
 
@@ -522,9 +510,6 @@ class Config:
     early_stopping_patience: Optional[int] = None
     convergence_threshold: float = 0.001
     early_stopping_metric: str = "combined_score"
-
-    # Parallel controller settings
-    max_tasks_per_child: Optional[int] = None
 
     @classmethod
     def from_yaml(cls, path: Union[str, Path]) -> "Config":
