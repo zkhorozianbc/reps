@@ -285,16 +285,20 @@ def main():
     if args.iterations:
         config.max_iterations = args.iterations
 
-    # If positional args weren't passed, derive them from config.task.
-    if args.initial_program is None or args.evaluator is None:
-        if not config.task:
-            parser.error(
-                "Must provide `initial_program` and `evaluator` as positional args "
-                "or set `task:` in the config to the benchmark directory."
-            )
+    # Resolve initial_program + evaluator: positional CLI args win, then
+    # config.initial_program / config.evaluator_path, then derive from
+    # config.task (convention: <task_dir>/{initial_program.py,evaluator.py}).
+    initial_program = args.initial_program or config.initial_program
+    evaluator = args.evaluator or config.evaluator_path
+    if (initial_program is None or evaluator is None) and config.task:
         task_dir = Path(config.task)
-        args.initial_program = args.initial_program or str(task_dir / "initial_program.py")
-        args.evaluator = args.evaluator or str(task_dir / "evaluator.py")
+        initial_program = initial_program or str(task_dir / "initial_program.py")
+        evaluator = evaluator or str(task_dir / "evaluator.py")
+    if not initial_program or not evaluator:
+        parser.error(
+            "Must provide `initial_program` and `evaluator` as positional args, "
+            "set them in the config, or set `task:` in the config to the benchmark directory."
+        )
 
     # Auto-version the output directory
     run_dir = _next_run_dir(output)
