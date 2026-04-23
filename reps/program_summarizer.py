@@ -182,17 +182,13 @@ STRICT RULES:
 2. Do NOT speculate that the scoring / validator / evaluator system itself is broken. If a score is 0 or low, assume the code failed to meet the benchmark's constraints (invalid output, runtime error, constraint violation) — the evaluator is working as designed.
 3. Be SPECIFIC. "The code failed" is useless; "the sort key returned None for empty inputs" is useful. Cite line-of-reasoning or concrete numbers when possible.
 4. Pitfalls must be OBSERVED in the trace — bugs the agent actually hit, error messages it actually saw. Do not invent plausible-sounding bugs. If the trace shows no explicit failure, set pitfalls to [].
-5. `next_directions` must be grounded: directions the parent CONSIDERED but did not pursue, or direct extensions of what demonstrably worked. Do not emit generic programming advice.
-6. `avoid` must reference approaches the parent EXPLICITLY tried and found worse. Do not pre-emptively blacklist entire technique families based on one data point.
-7. `key_insight` is one line capturing the most transferable lesson from this attempt. If nothing notable, use "none".
+5. `key_insight` is one line capturing the most transferable lesson from this attempt. If nothing notable, use "none".
 
 OUTPUT SCHEMA (exactly these keys, no others):
 {
   "approach": "string, one line describing the mutation attempted",
   "pitfalls": ["up to 5 strings, each a specific observed failure"],
-  "key_insight": "one line or \\"none\\"",
-  "next_directions": ["up to 3 unexplored directions, grounded in the trace"],
-  "avoid": ["up to 3 approaches the parent explicitly tried and found inferior"]
+  "key_insight": "one line or \\"none\\""
 }"""
 
 
@@ -204,7 +200,6 @@ def _build_user_message(
     improved: bool,
     code: str,
     reasoning: str,
-    recent_avoids: Optional[str] = None,
 ) -> str:
     parts: list[str] = []
     if task_instructions:
@@ -212,19 +207,6 @@ def _build_user_message(
         # them first when constructing its summary.
         parts.append("## Benchmark-specific guidance")
         parts.append(task_instructions.strip())
-        parts.append("")
-    if recent_avoids and recent_avoids.strip():
-        # Dead-end cross-reference: surface approaches recent siblings already
-        # explicitly tried and found inferior, so this summary does not
-        # re-suggest them under `next_directions`. Kept in the USER message
-        # (not the system prompt) to preserve prompt-caching stability.
-        parts.append(
-            "IMPORTANT: Do NOT re-suggest approaches that appear in the `avoid` "
-            "lists of recent sibling programs. If the attempt data below "
-            "explores one of these dead ends, note it in `pitfalls` rather "
-            "than `next_directions`."
-        )
-        parts.append(recent_avoids.strip())
         parts.append("")
     parts.append("## Attempt data")
     parts.append(f"Parent score (combined_score): {parent_score:.6f}")
@@ -251,7 +233,6 @@ async def summarize_program(
     improved: bool,
     summarizer_llm: "SummarizerLLM",
     task_instructions: Optional[str] = None,
-    recent_avoids: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Call the configured summarizer model to produce a structured per-program summary.
 
@@ -268,11 +249,6 @@ async def summarize_program(
             the user message before the attempt data. Use this to inject
             correction guidance (e.g. "score=0 means overlap, not a broken
             validator") without touching the general system prompt.
-        recent_avoids: Optional rendered "## Dead ends noted by recent
-            siblings" block. When present it is prepended to the user
-            message so the summarizer does not re-suggest those approaches
-            under `next_directions`. Deliberately NOT routed through the
-            system prompt so prompt caching stays stable.
     """
     if not turns:
         return None
@@ -289,7 +265,6 @@ async def summarize_program(
         improved=improved,
         code=code,
         reasoning=reasoning,
-        recent_avoids=recent_avoids,
     )
 
     try:
@@ -320,70 +295,30 @@ async def summarize_program(
         "approach": str(data.get("approach", ""))[:500],
         "pitfalls": [str(p)[:500] for p in (data.get("pitfalls") or [])[:5]],
         "key_insight": str(data.get("key_insight", ""))[:800],
-        "next_directions": [str(p)[:500] for p in (data.get("next_directions") or [])[:3]],
-        "avoid": [str(p)[:500] for p in (data.get("avoid") or [])[:3]],
     }
     return out
 
 
-def _tokenize_lower(text: str) -> List[str]:
-    """Cheap lowercase word tokenizer for the overlap check. No embeddings,
-    no regex gymnastics — split on whitespace and drop empties."""
-    if not text:
-        return []
-    return [w for w in text.lower().split() if w]
-
-
-def direction_pursued_by_any(
-    direction: str, later_approaches: List[str], ngram: int = 4
-) -> bool:
-    """Return True iff any approach string shares a contiguous `ngram`-word
-    sequence with `direction` (case-insensitive, whitespace-tokenized).
-
-    Deliberately dumb: no stopword filtering, no stemming, no embeddings.
-    The point is to catch the trivial case where a later program's
-    `approach` literally restates a chunk of the suggested direction.
-    False negatives are fine — we'd rather show a direction twice than
-    silently drop one a worker already pursued.
-    """
-    tokens = _tokenize_lower(direction)
-    if len(tokens) < ngram:
-        # Too short to meaningfully match; treat as "not pursued" so it
-        # still has a chance to surface.
-        return False
-    direction_ngrams = {
-        " ".join(tokens[i : i + ngram]) for i in range(len(tokens) - ngram + 1)
-    }
-    if not direction_ngrams:
-        return False
-    for approach in later_approaches:
-        a_tokens = _tokenize_lower(approach)
-        if len(a_tokens) < ngram:
-            continue
-        for i in range(len(a_tokens) - ngram + 1):
-            chunk = " ".join(a_tokens[i : i + ngram])
-            if chunk in direction_ngrams:
-                return True
-    return False
-
-
 def format_summary_for_prompt(summary: Dict[str, Any], label: str = "Parent's notebook") -> str:
     """Render a summary dict into a compact block suitable for injection
-    into the next iteration's user prompt."""
+    into the next iteration's user prompt.
+
+    Emits exactly the three fields in the schema: `approach`, `key_insight`
+    (when present and not "none"), and `pitfalls` (only when non-empty).
+    """
     if not summary:
         return ""
     lines = [f"## {label}"]
     if summary.get("approach"):
         lines.append(f"- Approach: {summary['approach']}")
-    if summary.get("key_insight") and summary["key_insight"].lower() != "none":
-        lines.append(f"- Key insight: {summary['key_insight']}")
+    key_insight = summary.get("key_insight")
+    if (
+        isinstance(key_insight, str)
+        and key_insight.strip()
+        and key_insight.strip().lower() != "none"
+    ):
+        lines.append(f"- Key insight: {key_insight}")
     if summary.get("pitfalls"):
         lines.append("- Pitfalls hit:")
         lines.extend(f"  - {p}" for p in summary["pitfalls"])
-    if summary.get("avoid"):
-        lines.append("- Avoid:")
-        lines.extend(f"  - {p}" for p in summary["avoid"])
-    if summary.get("next_directions"):
-        lines.append("- Unexplored directions:")
-        lines.extend(f"  - {p}" for p in summary["next_directions"])
     return "\n".join(lines)

@@ -122,6 +122,33 @@ def _turn_to_dict(t) -> Dict[str, Any]:
     return asdict(t)
 
 
+def _strip_notebook(program: Optional[Program]) -> Optional[Program]:
+    """Return a shallow-copied Program whose metadata lacks
+    ``reps_annotations.summary`` — so the sampler's ``_extract_notebook``
+    renders to empty and the worker's parent-notebook prepend is skipped.
+
+    The live DB program is NOT mutated — we rebuild the dataclass with a
+    fresh metadata dict so the worker sees a sanitized view while other
+    callers (summarizer, metrics logging) keep the real summary.
+    """
+    if program is None:
+        return None
+    if not program.metadata:
+        return program
+    ann = program.metadata.get("reps_annotations")
+    if not isinstance(ann, dict) or "summary" not in ann:
+        # Nothing to strip — avoid an unnecessary copy.
+        return program
+    new_metadata = dict(program.metadata)
+    new_ann = dict(ann)
+    new_ann.pop("summary", None)
+    new_metadata["reps_annotations"] = new_ann
+    # Rebuild via dataclasses.replace so we keep all other Program fields
+    # (code, metrics, artifacts, etc.) exactly as they were.
+    from dataclasses import replace as _dc_replace
+    return _dc_replace(program, metadata=new_metadata)
+
+
 class ProcessParallelController:
     """Async controller for evolution (single process, single event loop).
 
@@ -416,11 +443,37 @@ class ProcessParallelController:
         except Exception as e:
             logger.debug(f"Failed to load parent artifacts for {parent.id[:8]}: {e}")
 
+        # Plateau-mode notebook hide: when the last K=3 iterations have not
+        # improved best_score, suppress per-program notebooks from the
+        # worker prompt. The siblings block (short-id + one-liner) still
+        # renders because it survives summary absence (it just falls back
+        # to the program's score). `view_program` remains available so the
+        # worker can pull any archive entry on demand.
+        hide_archive = (
+            self._reps_enabled and self._reps_archive_hidden()
+        )
+        if hide_archive:
+            logger.info(
+                "Archive notebooks hidden for iteration %d (plateau detected)",
+                iteration,
+            )
+            parent_for_worker = _strip_notebook(parent)
+            inspirations_for_worker = [_strip_notebook(p) for p in inspirations]
+            best_programs_for_worker = [_strip_notebook(p) for p in best_programs_only]
+            second_parent_for_worker = _strip_notebook(second_parent)
+            recent_iters_for_worker = [_strip_notebook(p) for p in recent_iterations]
+        else:
+            parent_for_worker = parent
+            inspirations_for_worker = inspirations
+            best_programs_for_worker = best_programs_only
+            second_parent_for_worker = second_parent
+            recent_iters_for_worker = recent_iterations
+
         request = WorkerRequest(
-            parent=parent,
-            inspirations=inspirations,
-            top_programs=best_programs_only,
-            second_parent=second_parent,
+            parent=parent_for_worker,
+            inspirations=inspirations_for_worker,
+            top_programs=best_programs_for_worker,
+            second_parent=second_parent_for_worker,
             iteration=iteration,
             language=self.config.language,
             feature_dimensions=self.database.config.feature_dimensions,
@@ -428,7 +481,7 @@ class ProcessParallelController:
             prompt_extras=dict(iteration_config.prompt_extras),
             temperature=iteration_config.temperature,
             model_id=iteration_config.model_id,
-            recent_iterations=recent_iterations,
+            recent_iterations=recent_iters_for_worker,
             parent_artifacts=parent_artifacts,
         )
 
@@ -559,14 +612,6 @@ class ProcessParallelController:
                 from reps.program_summarizer import summarize_program
 
                 turns_dicts = [_turn_to_dict(t) for t in result.turns]
-                # Item #4: surface recent sibling dead-ends to the
-                # summarizer so it does not re-emit them as
-                # `next_directions`. Best-effort — aggregator is cheap but
-                # guarded, since a failure here must not block the child.
-                try:
-                    _, recent_avoids = self._build_recent_directions_extras(k=10)
-                except Exception:
-                    recent_avoids = ""
                 summary = await summarize_program(
                     program_id=final_child_id,
                     code=result.child_code,
@@ -578,7 +623,6 @@ class ProcessParallelController:
                     task_instructions=(
                         summarizer_cfg.task_instructions if summarizer_cfg else None
                     ),
-                    recent_avoids=recent_avoids or None,
                 )
                 if summary:
                     ann = child_metadata.setdefault("reps_annotations", {})
@@ -1251,14 +1295,6 @@ class ProcessParallelController:
         # F8: Dead-end warnings
         extras["dead_end_warnings"] = self._reps_build_dead_end_warnings()
 
-        # Item #3: unexplored directions + recent avoids, aggregated from
-        # the `reps_annotations.summary` blobs of the last K=10 programs.
-        # Empty strings when nothing is available — the prompt template
-        # (PROMPT team) skips empties.
-        unexplored, avoids = self._build_recent_directions_extras(k=10)
-        extras["unexplored_directions"] = unexplored
-        extras["recent_avoids"] = avoids
-
         return extras
 
     # ------------------------------------------------------------------ #
@@ -1345,89 +1381,33 @@ class ProcessParallelController:
         # Plateau <=> no strictly-greater value in `recent` vs. reference.
         return all(r <= reference for r in recent)
 
-    def _build_recent_directions_extras(
-        self, k: int = 10
-    ) -> "tuple[str, str]":
-        """Aggregate `next_directions` and `avoid` entries across the last
-        K programs (newest-first) and return the (unexplored_block,
-        avoids_block) pair for prompt injection.
+    def _reps_archive_hidden(self) -> bool:
+        """Return True when the last K=3 completed iterations' best_score
+        has not improved, i.e. the archive has stalled and its per-program
+        notebooks should be hidden from the worker prompt.
 
-        A `next_direction` is considered *unexplored* when no program newer
-        than the one that suggested it has an `approach` string sharing a
-        4-word contiguous sequence with it (a deliberately dumb keyword
-        check — see program_summarizer.direction_pursued_by_any).
+        Uses ``self._plateau_best_history`` (populated after every
+        completed iteration by ``_update_plateau_history``). Independent
+        of the F4 ``_detect_plateau``/``_plateau_boost_remaining`` pair —
+        those drive exploration-ratio tilts at the sampler layer; this
+        only gates notebook visibility in the worker prompt.
 
-        Gracefully returns two empty strings when: no programs, no
-        summaries, or malformed summary blobs.
+        Contract:
+          * ``len(history) < K`` → False (not enough data to stall).
+          * Else True iff ``max(history[-K:]) <= max(history[:-K]) + eps``
+            with a small floating-point eps tolerance.
         """
-        try:
-            from reps.program_summarizer import direction_pursued_by_any
-        except Exception:  # pragma: no cover - import guard
-            direction_pursued_by_any = None  # type: ignore
-
-        try:
-            entries = self.database.recent_summary_entries(k=k)
-        except Exception as e:
-            logger.debug("recent_summary_entries failed: %s", e)
-            return "", ""
-        if not entries:
-            return "", ""
-
-        # Entries are newest-first. For each direction we want to check
-        # whether any STRICTLY NEWER program's approach already covers it;
-        # build the list of (program, summary) with indexes so we can slice.
-        unexplored: List[str] = []
-        avoid_lines: List[str] = []
-
-        for idx, (prog, summary) in enumerate(entries):
-            iter_n = getattr(prog, "iteration_found", None)
-
-            # --- avoids: collect raw, capped at 5 across all programs ---
-            for a in summary.get("avoid") or []:
-                if not isinstance(a, str) or not a.strip():
-                    continue
-                suffix = f" (iter {iter_n})" if iter_n is not None else ""
-                avoid_lines.append(f"- {a.strip()}{suffix}")
-                if len(avoid_lines) >= 5:
-                    break
-
-            # --- unexplored directions: skip any pursued by a later program ---
-            later_approaches = [
-                (e[1].get("approach") or "")
-                for e in entries[:idx]
-                if isinstance(e[1], dict)
-            ]
-            for d in summary.get("next_directions") or []:
-                if not isinstance(d, str) or not d.strip():
-                    continue
-                pursued = False
-                if direction_pursued_by_any is not None:
-                    try:
-                        pursued = direction_pursued_by_any(d, later_approaches)
-                    except Exception:
-                        pursued = False
-                if pursued:
-                    continue
-                suffix = f" (suggested by iter {iter_n})" if iter_n is not None else ""
-                unexplored.append(f"- {d.strip()}{suffix}")
-                if len(unexplored) >= 5:
-                    break
-            if len(unexplored) >= 5 and len(avoid_lines) >= 5:
-                break
-
-        unexplored_block = (
-            "## Unexplored directions from recent archive\n"
-            + "\n".join(unexplored[:5])
-            if unexplored
-            else ""
-        )
-        avoids_block = (
-            "## Dead ends noted by recent siblings\n"
-            + "\n".join(avoid_lines[:5])
-            if avoid_lines
-            else ""
-        )
-        return unexplored_block, avoids_block
+        K = 3
+        history = self._plateau_best_history
+        if len(history) < K:
+            return False
+        # Split into pre-window reference vs. the window itself.
+        pre = history[:-K]
+        window = history[-K:]
+        if not pre:
+            return False
+        eps = 1e-9
+        return max(window) <= max(pre) + eps
 
     def _reps_build_dead_end_warnings(self) -> str:
         """Build dead-end warning text from annotated programs."""
