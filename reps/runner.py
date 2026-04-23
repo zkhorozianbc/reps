@@ -2,8 +2,18 @@
 
 Entry point for running experiments with either the REPS harness or vanilla OpenEvolve.
 
-Usage:
-    reps-run <initial_program> <evaluator> --config <config.yaml> [--output <dir>] [--iterations N]
+Usage (preferred — everything in the YAML):
+    uv run reps-run --config ./path/to/config.yaml
+
+Optional CLI overrides (take precedence over YAML):
+    --initial-program <path>
+    --evaluator <path>
+    --output <dir>
+    --iterations N
+
+Automatically loads a sibling `.env` file (via python-dotenv) so env-var
+references like `${ANTHROPIC_API_KEY}` in the YAML resolve without manual
+sourcing.
 
 Output directories are auto-versioned: <output>/run_001, run_002, etc.
 """
@@ -256,7 +266,8 @@ def main():
         help="Path to evaluator script (optional if config sets task:)",
     )
     parser.add_argument("--config", required=True, help="Path to YAML config")
-    parser.add_argument("--output", default="reps_output", help="Output base directory")
+    parser.add_argument("--output", default=None,
+                        help="Output base directory (defaults to experiment/results/<config-stem>/)")
     parser.add_argument("--iterations", type=int, default=None,
                         help="Shortcut for -o max_iterations=N")
     parser.add_argument(
@@ -267,9 +278,10 @@ def main():
 
     config = load_experiment_config(args.config)
 
-    # Apply generic overrides first, then honor the --iterations shortcut (so
-    # it still wins if both are given).
     _apply_overrides(config, args.override)
+
+    output = args.output or f"experiment/results/{Path(args.config).stem}"
+
     if args.iterations:
         config.max_iterations = args.iterations
 
@@ -285,16 +297,16 @@ def main():
         args.evaluator = args.evaluator or str(task_dir / "evaluator.py")
 
     # Auto-version the output directory
-    run_dir = _next_run_dir(args.output)
+    run_dir = _next_run_dir(output)
     print(f"Output: {run_dir}")
 
     # Make run_dir visible to benchmark evaluators (for persisting arrays etc.)
     os.environ["REPS_RUN_DIR"] = run_dir
 
     if config.harness == "openevolve":
-        run_openevolve(args.config, args.initial_program, args.evaluator, run_dir, config.max_iterations)
+        run_openevolve(args.config, initial_program, evaluator, run_dir, config.max_iterations)
     else:
-        asyncio.run(run_reps(config, args.initial_program, args.evaluator, run_dir))
+        asyncio.run(run_reps(config, initial_program, evaluator, run_dir))
 
 
 if __name__ == "__main__":

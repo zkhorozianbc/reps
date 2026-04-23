@@ -1,0 +1,76 @@
+# experiment/configs/verify_dspy_react.yaml
+# Verification Run C: DSPy ReAct worker with cache=False.
+# Defaults (CLI args override):
+initial_program: experiment/benchmarks/circle_packing/initial_program.py
+evaluator_path: experiment/benchmarks/circle_packing/evaluator.py
+
+max_iterations: 15
+checkpoint_interval: 20
+log_level: INFO
+random_seed: 42
+language: python
+file_suffix: .py
+provider: anthropic
+harness: reps
+
+llm:
+  api_key: "${ANTHROPIC_API_KEY}"
+  temperature: 0.6
+  max_tokens: 32000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+  models:
+    - name: claude-sonnet-4-6
+      provider: anthropic
+      weight: 1.0
+
+prompt:
+  num_top_programs: 3
+  num_diverse_programs: 2
+
+database:
+  population_size: 200
+  archive_size: 50
+  num_islands: 3
+  log_prompts: true
+  random_seed: 42
+  max_turns_persisted: 20
+
+evaluator:
+  timeout: 600
+  max_retries: 2
+  parallel_evaluations: 2
+  max_concurrent_iterations: 2
+  cascade_evaluation: true
+
+diff_based_evolution: false
+
+reps:
+  enabled: true
+  batch_size: 6
+  workers:
+    types:
+      - name: dspy_exploiter
+        impl: dspy_react
+        role: exploiter
+        model_id: claude-sonnet-4-6
+        temperature: 0.6
+        generation_mode: full
+        tools: [view_parent, run_tests]
+        max_turns: 30
+        uses_evaluator: true
+        expected_wall_clock_s: 120
+        weight: 1.0
+  reflection:
+    enabled: true
+    top_k: 3
+    bottom_k: 2
+  revisitation:
+    enabled: true
+  convergence:
+    enabled: true
+  contracts:
+    enabled: false
+  annotations:
+    enabled: true

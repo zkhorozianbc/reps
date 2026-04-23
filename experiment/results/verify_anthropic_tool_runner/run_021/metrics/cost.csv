@@ -1,0 +1,16 @@
+batch,model,tokens_in,tokens_out,wall_clock_seconds
+1,claude-opus-4-7,141213,13812,194.57
+2,claude-opus-4-7,66434,8963,141.24
+3,claude-opus-4-7,57513,11668,143.25
+4,claude-opus-4-7,59369,10006,119.02
+5,claude-opus-4-7,69867,9906,123.81
+6,claude-opus-4-7,98421,7903,108.59
+7,claude-opus-4-7,142492,9466,129.29
+8,claude-opus-4-7,125918,9254,198.10
+9,claude-opus-4-7,127982,10593,146.39
+10,claude-opus-4-7,289082,10462,225.90
+11,claude-opus-4-7,263419,10020,241.27
+12,claude-opus-4-7,368510,9583,330.61
+13,claude-opus-4-7,177066,7135,95.57
+14,claude-opus-4-7,132986,7597,91.48
+15,claude-opus-4-7,141390,9852,181.77

@@ -39,6 +39,22 @@ def _safe_avg_metrics(metrics: Dict[str, Any]) -> float:
     return sum(numeric_values) / max(1, len(numeric_values)) if numeric_values else 0.0
 
 
+def _truncate_turns(turns: list, max_turns: Optional[int]) -> list:
+    """Return turns list, optionally capped to first-N/2 + marker + last-N/2 structure."""
+    if max_turns is None or len(turns) <= max_turns:
+        return turns
+    half = max_turns // 2
+    dropped = len(turns) - 2 * half
+    marker = {
+        "index": -1,
+        "role": "system",
+        "blocks": [{"type": "text", "text": f"[truncated {dropped} turns]"}],
+        "impl_specific": {"truncated": True, "truncated_count": dropped},
+        "schema_version": 1,
+    }
+    return list(turns[:half]) + [marker] + list(turns[-half:])
+
+
 @dataclass
 class Program:
     """Represents a program in the database"""
@@ -829,6 +845,22 @@ class ProgramDatabase:
 
         with open(program_path, "w") as f:
             json.dump(program_dict, f)
+
+        # Sidecar: TurnRecord trace, if present and log_prompts enabled.
+        turns = program_dict.get("metadata", {}).get("turns") or []
+        if turns and self.config.log_prompts:
+            turns = _truncate_turns(turns, self.config.max_turns_persisted)
+            trace_path = os.path.join(programs_dir, f"{program.id}.trace.json")
+            with open(trace_path, "w") as f:
+                json.dump(
+                    {
+                        "schema_version": 1,
+                        "worker_type": program_dict.get("metadata", {}).get("reps_worker_name"),
+                        "turns": turns,
+                    },
+                    f,
+                    default=str,
+                )
 
     def _calculate_feature_coords(self, program: Program) -> List[int]:
         """
@@ -2560,3 +2592,32 @@ class ProgramDatabase:
         if program_id not in self.prompts_by_program:
             self.prompts_by_program[program_id] = {}
         self.prompts_by_program[program_id][template_key] = prompt
+
+    # ------------------------------------------------------------------ #
+    # REPS: recent-programs summary aggregator
+    # ------------------------------------------------------------------ #
+
+    def recent_summary_entries(
+        self, k: int = 10
+    ) -> List[Tuple[Program, Dict[str, Any]]]:
+        """Return up to K most-recent programs (newest-first) paired with
+        their `reps_annotations.summary` dict. Programs without a summary
+        are skipped. Used by the controller to aggregate unexplored
+        directions and dead-end avoids for prompt injection.
+        """
+        if not self.programs:
+            return []
+        all_progs = list(self.programs.values())
+        # Newest-first by timestamp, break ties with iteration_found.
+        all_progs.sort(
+            key=lambda p: (getattr(p, "timestamp", 0.0), getattr(p, "iteration_found", 0)),
+            reverse=True,
+        )
+        out: List[Tuple[Program, Dict[str, Any]]] = []
+        for prog in all_progs[:k]:
+            meta = prog.metadata or {}
+            ann = meta.get("reps_annotations") or {}
+            summary = ann.get("summary")
+            if isinstance(summary, dict):
+                out.append((prog, summary))
+        return out

@@ -161,7 +161,7 @@ class TestConvergenceMonitor:
     def _make_result(self, diff="", worker_type="exploiter", improved=False):
         return IterationResult(
             diff=diff,
-            worker_type=worker_type,
+            worker_name=worker_type,
             improved=improved,
             error=None,
         )
@@ -534,7 +534,7 @@ class TestMetricsLogger:
             # Create mock results
             r1 = IterationResult(
                 child_score=0.85,
-                worker_type="exploiter",
+                worker_name="exploiter",
                 improved=True,
                 error=None,
                 tokens_in=100,
@@ -543,7 +543,7 @@ class TestMetricsLogger:
             )
             r2 = IterationResult(
                 child_score=0.72,
-                worker_type="explorer",
+                worker_name="explorer",
                 improved=False,
                 error=None,
                 tokens_in=200,
@@ -565,7 +565,7 @@ class TestMetricsLogger:
             ml = MetricsLogger(tmpdir)
             r1 = IterationResult(
                 child_score=0.9,
-                worker_type="exploiter",
+                worker_name="exploiter",
                 improved=True,
                 error=None,
                 tokens_in=100,

@@ -1,0 +1,5 @@
+batch,model,tokens_in,tokens_out,wall_clock_seconds
+1,default,0,0,243.18
+1,claude-sonnet-4-6,238823,12425,235.76
+2,claude-sonnet-4-6,932693,37532,736.63
+3,claude-sonnet-4-6,301343,18133,317.25

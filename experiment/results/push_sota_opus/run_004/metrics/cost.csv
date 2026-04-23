@@ -1,0 +1,9 @@
+batch,model,tokens_in,tokens_out,wall_clock_seconds
+1,claude-opus-4-7,70548,16600,187.71
+2,claude-opus-4-7,250997,16217,509.02
+3,claude-opus-4-7,374310,12586,205.08
+4,claude-opus-4-7,332437,15900,237.16
+5,claude-opus-4-7,187621,4319,65.28
+5,default,0,0,58.57
+6,claude-opus-4-7,149041,1843,48.11
+6,default,0,0,72.65

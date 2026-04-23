@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 _logged_models: set = set()
 
+# Reasoning models reject the temperature param.
+REASONING_MODEL_PATTERNS = ("opus-4-7", "opus-4-8", "opus-4-9", "opus-5")
+
 
 def _to_int(v: Any) -> int:
     return v if isinstance(v, int) else 0
@@ -22,10 +25,13 @@ def _to_int(v: Any) -> int:
 class AnthropicLLM(LLMInterface):
     """LLM interface using the native Anthropic Python SDK"""
 
-    # Reasoning models reject the temperature param.
-    # No current Anthropic Claude models fall in this category — they all
-    # accept `temperature` via the standard Messages API. This tuple is kept
-    # (empty) for forward compatibility with any future reasoning-only models.
+    # Per-class override of the module-level REASONING_MODEL_PATTERNS. The
+    # LLM wrapper treats ALL current Claude models as temperature-accepting
+    # (opus-4-7 accepts temperature despite being module-level-flagged as a
+    # reasoning model — the module-level tuple is retained for
+    # tool-runner consumers that use it to gate extended-thinking config).
+    # Leaving this empty means `generate_with_context` always passes
+    # `temperature`, restoring the REPS worker-diversity dial.
     REASONING_MODEL_PATTERNS: tuple = ()
 
     # Modern Claude models (4.6+) control thinking via the `effort` parameter
@@ -71,7 +77,7 @@ class AnthropicLLM(LLMInterface):
         self, system_message: str, messages: List[Dict[str, str]], **kwargs
     ) -> str:
         model_name = kwargs.get("model") or self.model
-        is_reasoning = any(p in model_name.lower() for p in self.REASONING_MODEL_PATTERNS)
+        is_reasoning = any(p in model_name.lower() for p in REASONING_MODEL_PATTERNS)
 
         params = {
             "model": model_name,

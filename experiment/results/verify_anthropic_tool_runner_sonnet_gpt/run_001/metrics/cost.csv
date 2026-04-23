@@ -1,0 +1,4 @@
+batch,model,tokens_in,tokens_out,wall_clock_seconds
+1,default,0,0,1.01
+2,default,0,0,0.91
+3,default,0,0,0.40

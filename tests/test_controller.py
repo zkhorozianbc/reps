@@ -1,31 +1,28 @@
 """
-Tests for process-based parallel controller
+Tests for the async controller (asyncio-only; no process fork).
 """
 
 import asyncio
 import os
 import tempfile
 import unittest
-from unittest.mock import Mock, patch, MagicMock
-import time
-from concurrent.futures import Future
+from unittest.mock import AsyncMock, patch
 
 # Set dummy API key for testing
 os.environ["OPENAI_API_KEY"] = "test"
 
-from reps.config import Config, DatabaseConfig, EvaluatorConfig, LLMConfig, PromptConfig
+from reps.config import Config
 from reps.database import Program, ProgramDatabase
 from reps.controller import ProcessParallelController, SerializableResult
 
 
 class TestProcessParallel(unittest.TestCase):
-    """Tests for process-based parallel controller"""
+    """Tests for async controller (class name kept for back-compat)."""
 
     def setUp(self):
         """Set up test environment"""
         self.test_dir = tempfile.mkdtemp()
 
-        # Create test config
         self.config = Config()
         self.config.max_iterations = 10
         self.config.evaluator.parallel_evaluations = 2
@@ -34,7 +31,6 @@ class TestProcessParallel(unittest.TestCase):
         self.config.database.in_memory = True
         self.config.checkpoint_interval = 5
 
-        # Create test evaluation file
         self.eval_content = """
 def evaluate(program_path):
     return {"score": 0.5, "performance": 0.6}
@@ -43,10 +39,8 @@ def evaluate(program_path):
         with open(self.eval_file, "w") as f:
             f.write(self.eval_content)
 
-        # Create test database
         self.database = ProgramDatabase(self.config.database)
 
-        # Add some test programs
         for i in range(3):
             program = Program(
                 id=f"test_{i}",
@@ -68,8 +62,11 @@ def evaluate(program_path):
         controller = ProcessParallelController(self.config, self.eval_file, self.database)
 
         self.assertEqual(controller.num_workers, 2)
-        self.assertIsNone(controller.executor)
-        self.assertIsNotNone(controller.shutdown_event)
+        # Shared singletons and concurrency primitives are lazy (built in start()).
+        self.assertIsNone(controller.evaluator)
+        self.assertIsNone(controller.llm_ensemble)
+        self.assertIsNone(controller._iter_semaphore)
+        self.assertIsNone(controller._shutdown)
 
     def test_controller_with_reps_does_not_create_default_output_dir(self):
         """Direct controller construction should not create a fallback output dir."""
@@ -90,96 +87,66 @@ def evaluate(program_path):
             shutil.rmtree(isolated_cwd, ignore_errors=True)
 
     def test_controller_start_stop(self):
-        """Test starting and stopping the controller"""
+        """Starting the controller wires shared singletons; stop sets shutdown."""
         controller = ProcessParallelController(self.config, self.eval_file, self.database)
 
-        # Start controller
         controller.start()
-        self.assertIsNotNone(controller.executor)
+        self.assertIsNotNone(controller.llm_ensemble)
+        self.assertIsNotNone(controller.evaluator)
+        self.assertIsNotNone(controller.prompt_sampler)
+        self.assertIsNotNone(controller._iter_semaphore)
+        self.assertIsNotNone(controller._shutdown)
+        self.assertFalse(controller._shutdown.is_set())
 
-        # Stop controller
         controller.stop()
-        self.assertIsNone(controller.executor)
-        self.assertTrue(controller.shutdown_event.is_set())
-
-    def test_database_snapshot_creation(self):
-        """Test creating database snapshot for workers"""
-        controller = ProcessParallelController(self.config, self.eval_file, self.database)
-
-        snapshot = controller._create_database_snapshot()
-
-        # Verify snapshot structure
-        self.assertIn("programs", snapshot)
-        self.assertIn("islands", snapshot)
-        self.assertIn("current_island", snapshot)
-        self.assertIn("artifacts", snapshot)
-
-        # Verify programs are serialized
-        self.assertEqual(len(snapshot["programs"]), 3)
-        for pid, prog_dict in snapshot["programs"].items():
-            self.assertIsInstance(prog_dict, dict)
-            self.assertIn("id", prog_dict)
-            self.assertIn("code", prog_dict)
+        self.assertTrue(controller._shutdown.is_set())
 
     def test_run_evolution_basic(self):
-        """Test basic evolution run"""
+        """Basic evolution run with _run_iteration mocked."""
 
         async def run_test():
-            controller = ProcessParallelController(self.config, self.eval_file, self.database)
+            controller = ProcessParallelController(
+                self.config, self.eval_file, self.database
+            )
+            controller.start()
 
-            # Mock the executor to avoid actually spawning processes
-            with patch.object(controller, "_submit_iteration") as mock_submit:
-                # Create mock futures that complete immediately
-                mock_future1 = MagicMock()
-                mock_result1 = SerializableResult(
-                    child_program_dict={
-                        "id": "child_1",
-                        "code": "def evolved(): return 1",
-                        "language": "python",
-                        "parent_id": "test_0",
-                        "generation": 1,
-                        "metrics": {"score": 0.7, "performance": 0.8},
-                        "iteration_found": 1,
-                        "metadata": {"changes": "test", "island": 0},
-                    },
-                    parent_id="test_0",
-                    iteration_time=0.1,
-                    iteration=1,
-                )
-                mock_future1.done.return_value = True
-                mock_future1.result.return_value = mock_result1
-                mock_future1.cancel.return_value = True
+            stub_result = SerializableResult(
+                child_program_dict={
+                    "id": "child_1",
+                    "code": "def evolved(): return 1",
+                    "language": "python",
+                    "parent_id": "test_0",
+                    "generation": 1,
+                    "metrics": {"score": 0.7, "performance": 0.8},
+                    "iteration_found": 1,
+                    "metadata": {"changes": "test", "island": 0},
+                },
+                parent_id="test_0",
+                iteration_time=0.1,
+                iteration=1,
+            )
 
-                mock_submit.return_value = mock_future1
-
-                # Start controller
-                controller.start()
-
-                # Run evolution for 1 iteration
-                result = await controller.run_evolution(
+            with patch.object(
+                controller, "_run_iteration", new=AsyncMock(return_value=stub_result)
+            ) as m:
+                await controller.run_evolution(
                     start_iteration=1, max_iterations=1, target_score=None
                 )
+                self.assertGreaterEqual(m.await_count, 1)
 
-                # Verify iteration was submitted with island_id
-                mock_submit.assert_called_once_with(1, 0, None)
+            # Verify program was added to database
+            self.assertIn("child_1", self.database.programs)
+            child = self.database.get("child_1")
+            self.assertEqual(child.metrics["score"], 0.7)
 
-                # Verify program was added to database
-                self.assertIn("child_1", self.database.programs)
-                child = self.database.get("child_1")
-                self.assertEqual(child.metrics["score"], 0.7)
-
-        # Run the async test
         asyncio.run(run_test())
 
     def test_request_shutdown(self):
-        """Test graceful shutdown request"""
+        """Graceful shutdown sets the asyncio event."""
         controller = ProcessParallelController(self.config, self.eval_file, self.database)
-
-        # Request shutdown
+        controller.start()
         controller.request_shutdown()
-
-        # Verify shutdown event is set
-        self.assertTrue(controller.shutdown_event.is_set())
+        self.assertTrue(controller._shutdown.is_set())
 
     def test_serializable_result(self):
         """Test SerializableResult dataclass"""
@@ -191,14 +158,12 @@ def evaluate(program_path):
             error=None,
         )
 
-        # Verify attributes
         self.assertEqual(result.child_program_dict["id"], "test")
         self.assertEqual(result.parent_id, "parent")
         self.assertEqual(result.iteration_time, 1.5)
         self.assertEqual(result.iteration, 10)
         self.assertIsNone(result.error)
 
-        # Test with error
         error_result = SerializableResult(error="Test error", iteration=5)
         self.assertEqual(error_result.error, "Test error")
         self.assertIsNone(error_result.child_program_dict)

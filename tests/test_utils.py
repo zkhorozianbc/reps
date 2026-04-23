@@ -161,7 +161,7 @@ class TestParseFullRewrite:
 class TestFormatMetricsSafe:
     def test_formats_numeric(self):
         result = format_metrics_safe({"accuracy": 0.95})
-        assert result == "accuracy=0.9500"
+        assert result == "accuracy=0.95000000"
 
     def test_formats_string_value(self):
         result = format_metrics_safe({"status": "ok"})
@@ -169,7 +169,7 @@ class TestFormatMetricsSafe:
 
     def test_mixed_types(self):
         result = format_metrics_safe({"score": 1.5, "label": "good"})
-        assert "score=1.5000" in result
+        assert "score=1.50000000" in result
         assert "label=good" in result
 
     def test_empty_dict(self):
@@ -177,4 +177,4 @@ class TestFormatMetricsSafe:
 
     def test_integer_value(self):
         result = format_metrics_safe({"count": 42})
-        assert result == "count=42.0000"
+        assert result == "count=42.00000000"

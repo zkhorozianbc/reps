@@ -1,5 +1,6 @@
-### Inspiration {program_number} (Score: {score}, Type: {program_type})
+### Inspiration {program_number} (id: {id_short}, Score: {score}, Type: {program_type})
+Unique approach: {unique_features}
+{notebook}
 ```{language}
 {program_snippet}
 ```
-Unique approach: {unique_features}

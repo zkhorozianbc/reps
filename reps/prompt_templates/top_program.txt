@@ -1,5 +1,6 @@
-### Program {program_number} (Score: {score})
+### Program {program_number} (id: {id_short}, Score: {score})
+Key features: {key_features}
+{notebook}
 ```{language}
 {program_snippet}
 ```
-Key features: {key_features}

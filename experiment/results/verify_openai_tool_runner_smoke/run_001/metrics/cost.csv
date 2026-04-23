@@ -1,0 +1,2 @@
+batch,model,tokens_in,tokens_out,wall_clock_seconds
+1,gpt-5.4-pro,106159,27576,4031.07

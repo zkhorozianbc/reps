@@ -81,7 +81,7 @@ reps:
 
   sota:
     enabled: true
-    target_score: 2.635
+    target_score: 2.6361
 
   annotations:
     enabled: true

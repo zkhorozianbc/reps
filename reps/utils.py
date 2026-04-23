@@ -380,7 +380,7 @@ def format_metrics_safe(metrics: Dict[str, Any]) -> str:
         if isinstance(value, (int, float)):
             try:
                 # Only apply float formatting to numeric values
-                formatted_parts.append(f"{name}={value:.4f}")
+                formatted_parts.append(f"{name}={value:.8f}")
             except (ValueError, TypeError):
                 # Fallback to string representation if formatting fails
                 formatted_parts.append(f"{name}={value}")

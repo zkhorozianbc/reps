@@ -1,0 +1,124 @@
+# experiment/configs/verify_anthropic_tool_runner_sonnet.yaml
+# Variant: Sonnet 4.6 drives the tool-runner worker, Opus 4.7 runs the
+# per-program summarizer. Tests whether a cheaper/faster main agent with a
+# stronger reflector produces better trajectories than the inverse.
+initial_program: experiment/benchmarks/circle_packing/initial_program.py
+evaluator_path: experiment/benchmarks/circle_packing/evaluator.py
+
+max_iterations: 15
+checkpoint_interval: 20
+log_level: INFO
+random_seed: 42
+language: python
+file_suffix: .py
+provider: anthropic
+harness: reps
+
+llm:
+  api_key: "${ANTHROPIC_API_KEY}"
+  temperature: 0.7
+  max_tokens: 64000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+  models:
+    - name: claude-sonnet-4-6
+      provider: anthropic
+      weight: 1.0
+    - name: claude-opus-4-7
+      provider: anthropic
+      weight: 0.0   # present for summarizer; not sampled by the main worker
+
+prompt:
+  num_top_programs: 3
+  num_diverse_programs: 2
+
+database:
+  population_size: 200
+  archive_size: 50
+  num_islands: 3
+  log_prompts: true
+  random_seed: 42
+  max_turns_persisted: 24
+
+evaluator:
+  timeout: 600
+  max_retries: 2
+  parallel_evaluations: 2
+  max_concurrent_iterations: 2
+  cascade_evaluation: true
+
+diff_based_evolution: true
+
+reps:
+  enabled: true
+  batch_size: 2
+  workers:
+    types:
+      - name: atr_explorer
+        impl: anthropic_tool_runner
+        role: explorer
+        model_id: claude-sonnet-4-6
+        generation_mode: full
+        tools: [view_parent, view_program, edit_file, run_tests, submit_child, mark_converged]
+        max_turns: 30
+        uses_evaluator: true
+        expected_wall_clock_s: 180
+        baseline_context: |
+          ## Problem landscape
+          Benchmark: circle packing n=26 inside the unit square. Objective:
+          maximize sum_radii subject to non-overlap and staying inside
+          [0,1]x[0,1]. The best value known so far is approximately
+          2.636. This is NOT a proven mathematical ceiling — beating it
+          is an open problem, and any positive delta over the current
+          best is a genuine result.
+
+          The real goal for this search is a positive delta over the best
+          known — not a fixed numeric target. Do not treat "approximately
+          2.636" as a finish line; treat it as the current frontier you
+          are trying to cross.
+
+          ## Where novelty may lie
+          Directions that are candidates for a structural pivot when the
+          archive's local basin is exhausted:
+            - variable-radius (non-uniform) parametrization instead of
+              equal-radius rows
+            - alternative topology / row layout (e.g. hexagonal, mixed
+              hex-square, bordered-vs-interior role splits)
+            - a different optimizer family — basin-hopping, simulated
+              annealing, CMA-ES, SLSQP with random restarts — rather
+              than a single local refinement pass
+            - symmetry-breaking perturbations to escape axis-aligned
+              local optima
+        impl_options:
+          thinking_effort: high
+          thinking_display: summarized
+          code_execution: true
+          retries: 3
+          max_tokens: 64000
+          task_budget_total: 64000
+        weight: 1.0
+  reflection:
+    enabled: true
+    top_k: 3
+    bottom_k: 2
+  revisitation:
+    enabled: true
+  convergence:
+    enabled: true
+  contracts:
+    enabled: false
+  annotations:
+    enabled: true
+  summarizer:
+    enabled: true
+    model_id: claude-opus-4-7
+    task_instructions: |
+      Benchmark: circle packing n=26 in the unit square. validity=0 / score=0
+      means the code produced circles that either overlap one another or
+      extend outside [0,1]x[0,1]. The DeepMind strict verifier is correct —
+      NEVER speculate that it is broken. Attribute validity failures to
+      concrete geometric issues (overlap between two rows, radius exceeds
+      boundary slack, floating-point cascade from chained margin shrinks,
+      wrong row-offset constant, etc.). Reference specific row/column
+      indices or constants from the code when possible.

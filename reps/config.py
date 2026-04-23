@@ -14,6 +14,10 @@ import yaml
 if TYPE_CHECKING:
     from reps.llm.base import LLMInterface
 
+# Imported here (not under TYPE_CHECKING) so dacite can deserialize it from YAML.
+# workers/base.py only imports Config under TYPE_CHECKING, so no circular import.
+from reps.workers.base import WorkerConfig  # noqa: E402
+
 
 _ENV_VAR_PATTERN = re.compile(r"^\$\{([^}]+)\}$")  # ${VAR}
 
@@ -309,6 +313,9 @@ class DatabaseConfig:
     embedding_model: Optional[str] = None
     similarity_threshold: float = 0.99
 
+    # Trace sidecar: TurnRecord persistence (Task 17)
+    max_turns_persisted: Optional[int] = None  # None = unlimited
+
 
 @dataclass
 class EvaluatorConfig:
@@ -329,6 +336,10 @@ class EvaluatorConfig:
 
     # Parallel evaluation
     parallel_evaluations: int = 1
+    # Maximum concurrent in-flight iterations (bounds asyncio semaphore).
+    # Defaults to parallel_evaluations when unset. Controls how many worker
+    # iterations the async controller dispatches concurrently.
+    max_concurrent_iterations: Optional[int] = None
     # Note: distributed evaluation not implemented
     distributed: bool = False
 
@@ -357,6 +368,7 @@ class EvolutionTraceConfig:
     format: str = "jsonl"  # Options: "jsonl", "json", "hdf5"
     include_code: bool = False
     include_prompts: bool = True
+    include_turns: bool = False  # Include TurnRecord turns in evolution trace (Task 17)
     output_path: Optional[str] = None
     buffer_size: int = 10
     compress: bool = False
@@ -384,12 +396,16 @@ class REPSRevisitationConfig:
 @dataclass
 class REPSWorkersConfig:
     """F3: Worker Type Diversity config"""
-    types: List[str] = field(default_factory=lambda: ["exploiter", "explorer", "crossover"])
+    # Legacy fields — retained for backward compat, renamed from `types`.
+    types_legacy: List[str] = field(default_factory=lambda: ["exploiter", "explorer", "crossover"])
     initial_allocation: Dict[str, float] = field(
         default_factory=lambda: {"exploiter": 0.6, "explorer": 0.25, "crossover": 0.15}
     )
     exploiter_temperature: float = 0.3
     explorer_temperature: float = 1.0
+
+    # New — preferred surface. When non-empty, overrides types_legacy.
+    types: List[WorkerConfig] = field(default_factory=list)
 
 
 @dataclass
@@ -425,6 +441,20 @@ class REPSAnnotationsConfig:
 
 
 @dataclass
+class REPSSummarizerConfig:
+    """Per-program Sonnet 4.6 summarizer (runs inline per iteration).
+
+    General role + output rules live in the module's fixed system prompt.
+    `task_instructions` is the benchmark-specific guidance appended to the
+    summarizer's user message (before the trace data) — use it to correct
+    common hallucinations or enforce domain-specific framing.
+    """
+    enabled: bool = True
+    model_id: str = "claude-sonnet-4-6"
+    task_instructions: Optional[str] = None
+
+
+@dataclass
 class REPSConfig:
     """Master REPS configuration -- all features toggled and tuned here."""
     enabled: bool = False  # Master switch: set True to activate REPS features
@@ -437,11 +467,18 @@ class REPSConfig:
     contracts: REPSContractsConfig = field(default_factory=REPSContractsConfig)
     sota: REPSSOTAConfig = field(default_factory=REPSSOTAConfig)
     annotations: REPSAnnotationsConfig = field(default_factory=REPSAnnotationsConfig)
+    summarizer: REPSSummarizerConfig = field(default_factory=REPSSummarizerConfig)
 
 
 @dataclass
 class Config:
     """Master configuration for REPS / OpenEvolve"""
+
+    # Experiment inputs — can be specified in YAML or overridden on CLI.
+    # Named `..._path` to avoid collision with the `evaluator:` EvaluatorConfig section.
+    initial_program: Optional[str] = None
+    evaluator_path: Optional[str] = None
+    output: Optional[str] = None  # base output dir; runs auto-version to <output>/run_NNN
 
     # General settings
     max_iterations: int = 10000

@@ -1,5 +1,5 @@
 """
-Process-based parallel controller for true parallelism
+Async controller for parallel evolution (asyncio-only; no process fork).
 
 Extended with REPS (Recursive Evolutionary Program Search) features:
 - F1: Reflection Engine (post-batch self-reflection)
@@ -14,21 +14,19 @@ Extended with REPS (Recursive Evolutionary Program Search) features:
 
 import asyncio
 import logging
-import multiprocessing as mp
-import pickle
 import random
-import signal
 import time
-from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeoutError
-from concurrent.futures import wait as cf_wait
+import uuid
 from dataclasses import asdict, dataclass
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from reps.config import Config
 from reps.database import Program, ProgramDatabase
 from reps.utils import safe_numeric_average
+
+if TYPE_CHECKING:
+    from reps.iteration_config import IterationConfig
+    from reps.workers.base import WorkerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +46,7 @@ def _classify_outcome(metrics: Dict[str, Any], child_score: float, parent_score:
     tolerant = metrics.get("tolerant_pass")
     if validity == 0.0 and tolerant == 1.0 and strict == 0.0:
         reported = metrics.get("reported_sum_radii")
-        if isinstance(reported, (int, float)) and reported == reported:  # NaN-safe
+        if isinstance(reported, (int, float)) and reported == reported:
             return f"STRICT_FAIL (tolerant OK, reported≈{reported:.3f})"
         return "STRICT_FAIL (tolerant OK)"
     if validity == 0.0:
@@ -62,7 +60,12 @@ def _classify_outcome(metrics: Dict[str, Any], child_score: float, parent_score:
 
 @dataclass
 class SerializableResult:
-    """Result that can be pickled and sent between processes"""
+    """Result of one async iteration.
+
+    The name stays from the old ProcessPool era for compatibility; nothing
+    needs to cross a pickle boundary anymore, but downstream REPS modules
+    still read its fields by name.
+    """
 
     child_program_dict: Optional[Dict[str, Any]] = None
     parent_id: Optional[str] = None
@@ -74,455 +77,60 @@ class SerializableResult:
     error: Optional[str] = None
     target_island: Optional[int] = None  # Island where child should be placed
 
-    # REPS metadata — survives pickle across process boundaries
+    # REPS metadata (turns, worker_name, tokens, diff, etc.)
     reps_meta: Optional[Dict[str, Any]] = None
 
-
-def _worker_init(config_dict: dict, evaluation_file: str, parent_env: dict = None) -> None:
-    """Initialize worker process with necessary components"""
-    import os
-
-    # Set environment from parent process
-    if parent_env:
-        os.environ.update(parent_env)
-
-    global _worker_config
-    global _worker_evaluation_file
-    global _worker_evaluator
-    global _worker_llm_ensemble
-    global _worker_prompt_sampler
-
-    # Store config for later use
-    # Reconstruct Config object from nested dictionaries
-    from reps.config import (
-        Config,
-        DatabaseConfig,
-        EvaluatorConfig,
-        LLMConfig,
-        LLMModelConfig,
-        PromptConfig,
-        REPSConfig,
-        REPSReflectionConfig,
-        REPSRevisitationConfig,
-        REPSWorkersConfig,
-        REPSConvergenceConfig,
-        REPSContractsConfig,
-        REPSSOTAConfig,
-        REPSAnnotationsConfig,
-    )
-
-    # Reconstruct model objects
-    models = [LLMModelConfig(**m) for m in config_dict["llm"]["models"]]
-    evaluator_models = [LLMModelConfig(**m) for m in config_dict["llm"]["evaluator_models"]]
-
-    # Create LLM config with models
-    llm_dict = config_dict["llm"].copy()
-    llm_dict["models"] = models
-    llm_dict["evaluator_models"] = evaluator_models
-    llm_config = LLMConfig(**llm_dict)
-
-    # Create other configs
-    prompt_config = PromptConfig(**config_dict["prompt"])
-    database_config = DatabaseConfig(**config_dict["database"])
-    evaluator_config = EvaluatorConfig(**config_dict["evaluator"])
-
-    # Reconstruct REPS config from nested dicts
-    reps_dict = config_dict.get("reps", {})
-    reps_config = REPSConfig(
-        enabled=reps_dict.get("enabled", False),
-        batch_size=reps_dict.get("batch_size", 10),
-        reflection=REPSReflectionConfig(**reps_dict.get("reflection", {})),
-        revisitation=REPSRevisitationConfig(**reps_dict.get("revisitation", {})),
-        workers=REPSWorkersConfig(**reps_dict.get("workers", {})),
-        convergence=REPSConvergenceConfig(**reps_dict.get("convergence", {})),
-        contracts=REPSContractsConfig(**reps_dict.get("contracts", {})),
-        sota=REPSSOTAConfig(**reps_dict.get("sota", {})),
-        annotations=REPSAnnotationsConfig(**reps_dict.get("annotations", {})),
-    )
-
-    _worker_config = Config(
-        llm=llm_config,
-        prompt=prompt_config,
-        database=database_config,
-        evaluator=evaluator_config,
-        reps=reps_config,
-        **{
-            k: v
-            for k, v in config_dict.items()
-            if k not in ["llm", "prompt", "database", "evaluator", "reps"]
-        },
-    )
-    _worker_evaluation_file = evaluation_file
-
-    # These will be lazily initialized on first use
-    _worker_evaluator = None
-    _worker_llm_ensemble = None
-    _worker_prompt_sampler = None
+    # Convergence signalling — set when the worker invoked `mark_converged`.
+    # The controller short-circuits: no child is persisted, but the event is
+    # logged to metrics/convergence_events.jsonl and counts as a completed
+    # iteration for budget accounting. child_program_dict will be None.
+    converged: bool = False
+    converged_reason: Optional[str] = None
+    worker_name: Optional[str] = None
 
 
-def _lazy_init_worker_components():
-    """Lazily initialize expensive components on first use"""
-    global _worker_evaluator
-    global _worker_llm_ensemble
-    global _worker_prompt_sampler
-
-    if _worker_llm_ensemble is None:
-        from reps.llm.ensemble import LLMEnsemble
-
-        _worker_llm_ensemble = LLMEnsemble(_worker_config.llm.models)
-
-    if _worker_prompt_sampler is None:
-        from reps.prompt_sampler import PromptSampler
-
-        _worker_prompt_sampler = PromptSampler(_worker_config.prompt)
-
-    if _worker_evaluator is None:
-        from reps.evaluator import Evaluator
-        from reps.llm.ensemble import LLMEnsemble
-        from reps.prompt_sampler import PromptSampler
-
-        # Create evaluator-specific components
-        evaluator_llm = LLMEnsemble(_worker_config.llm.evaluator_models)
-        evaluator_prompt = PromptSampler(_worker_config.prompt)
-        evaluator_prompt.set_templates("evaluator_system_message")
-
-        _worker_evaluator = Evaluator(
-            _worker_config.evaluator,
-            _worker_evaluation_file,
-            evaluator_llm,
-            evaluator_prompt,
-            database=None,  # No shared database in worker
-            suffix=getattr(_worker_config, "file_suffix", ".py"),
-        )
+# _run_iteration_worker removed — see ProcessParallelController._run_iteration.
+# _worker_init / _lazy_init_worker_components removed — components are built
+# once in ProcessParallelController.start() and shared by all async tasks.
+# _create_database_snapshot removed — tasks read self.database directly.
 
 
-def _run_iteration_worker(
-    iteration: int,
-    db_snapshot: Dict[str, Any],
-    parent_id: str,
-    inspiration_ids: List[str],
-    reps_config: Optional[Dict[str, Any]] = None,
-) -> SerializableResult:
-    """Run a single iteration in a worker process.
+def _derive_prompt_from_turns(turns) -> Dict[str, str]:
+    """Reconstruct {'system': ..., 'user': ...} from the first system/user turns."""
+    system_text = ""
+    user_text = ""
+    for t in turns:
+        if t.role == "system" and not system_text:
+            system_text = "\n".join(b.text or "" for b in t.blocks if b.type == "text")
+        if t.role == "user" and not user_text:
+            user_text = "\n".join(b.text or "" for b in t.blocks if b.type == "text")
+        if system_text and user_text:
+            break
+    return {"system": system_text, "user": user_text}
 
-    Args:
-        iteration: Iteration number
-        db_snapshot: Serialized database snapshot
-        parent_id: ID of parent program to evolve from
-        inspiration_ids: IDs of inspiration programs
-        reps_config: Optional REPS IterationConfig as dict. If provided,
-            controls worker type, generation mode, temperature, and prompt extras.
-    """
-    try:
-        # Lazy initialization
-        _lazy_init_worker_components()
 
-        # Reconstruct programs from snapshot
-        programs = {pid: Program(**prog_dict) for pid, prog_dict in db_snapshot["programs"].items()}
+def _derive_llm_response_from_turns(turns) -> str:
+    """Concatenate text blocks from the last assistant turn (skip thinking/tool_use)."""
+    for t in reversed(turns):
+        if t.role == "assistant":
+            return "\n".join(b.text or "" for b in t.blocks if b.type == "text")
+    return ""
 
-        parent = programs[parent_id]
-        inspirations = [programs[pid] for pid in inspiration_ids if pid in programs]
 
-        # Get parent artifacts if available
-        parent_artifacts = db_snapshot["artifacts"].get(parent_id)
-
-        # Get island-specific programs for context
-        parent_island = parent.metadata.get("island", db_snapshot["current_island"])
-        island_programs = [
-            programs[pid] for pid in db_snapshot["islands"][parent_island] if pid in programs
-        ]
-
-        # Sort by metrics for top programs
-        island_programs.sort(
-            key=lambda p: p.metrics.get("combined_score", safe_numeric_average(p.metrics)),
-            reverse=True,
-        )
-
-        # Use config values for limits instead of hardcoding
-        # Programs for LLM display (includes both top and diverse for inspiration)
-        programs_for_prompt = island_programs[
-            : _worker_config.prompt.num_top_programs + _worker_config.prompt.num_diverse_programs
-        ]
-        # Best programs only (for previous attempts section, focused on top performers)
-        best_programs_only = island_programs[: _worker_config.prompt.num_top_programs]
-
-        # --- REPS: Determine generation mode and extras from IterationConfig ---
-        reps_worker_type = "exploiter"
-        reps_generation_mode = None  # None = use global config default
-        reps_temperature = None
-        reps_model_id = None
-        prompt_extras = {}
-        is_revisitation = False
-        second_parent_id = None
-
-        if reps_config:
-            reps_worker_type = reps_config.get("worker_type", "exploiter")
-            reps_generation_mode = reps_config.get("generation_mode")
-            reps_temperature = reps_config.get("temperature")
-            reps_model_id = reps_config.get("model_id")
-            prompt_extras = reps_config.get("prompt_extras", {})
-            is_revisitation = reps_config.get("is_revisitation", False)
-            second_parent_id = reps_config.get("second_parent_id")
-
-        # Determine diff mode: worker generation_mode can only narrow, not widen.
-        # If global config disables diffs, no worker can force diff mode on.
-        if not _worker_config.diff_based_evolution:
-            use_diff = False
-        elif reps_generation_mode == "full":
-            use_diff = False
-        elif reps_generation_mode == "diff":
-            use_diff = True
-        else:
-            use_diff = _worker_config.diff_based_evolution
-
-        # --- REPS: Handle crossover (add second parent to inspirations) ---
-        if reps_worker_type == "crossover" and second_parent_id and second_parent_id in programs:
-            second_parent = programs[second_parent_id]
-            # Add second parent as first inspiration for crossover context
-            inspirations = [second_parent] + inspirations
-            # Populate an explicit crossover instruction for the prompt template.
-            # The prompt template exposes a {crossover_context} placeholder; if
-            # the template does not yet include it (companion agent WIP) the
-            # fallback-append loop below will still inject this text into the
-            # user prompt so the model knows to merge, not just to exploit.
-            prompt_extras = dict(prompt_extras)  # avoid mutating caller's dict
-            prompt_extras["crossover_context"] = (
-                "# Crossover Merge Task\n"
-                "This iteration is a CROSSOVER operation. Your goal is to "
-                "synthesize a new program that combines successful ideas from "
-                "BOTH:\n"
-                "1. The Current Program (shown below)\n"
-                "2. Inspiration Program #1 (shown in the Evolution History, "
-                "marked as the first inspiration)\n\n"
-                "Identify what each program does well, then produce a hybrid "
-                "that inherits the best aspects of both. This is not an "
-                "incremental improvement — it's a deliberate fusion of two "
-                "distinct approaches."
-            )
-
-        # Build prompt
-        if _worker_config.prompt.programs_as_changes_description:
-            parent_changes_desc = (
-                parent.changes_description or _worker_config.prompt.initial_changes_description
-            )
-            child_changes_desc = parent_changes_desc
-        else:
-            parent_changes_desc = None
-            child_changes_desc = None
-
-        # Compute the best score across the whole population so the prompt can
-        # anchor the model on the current target-to-beat (not the stale seed).
-        best_so_far = 0.0
-        for prog in programs.values():
-            if prog.metrics:
-                s = prog.metrics.get("combined_score", safe_numeric_average(prog.metrics))
-                if isinstance(s, (int, float)) and s > best_so_far:
-                    best_so_far = s
-
-        # --- REPS: Build prompt with extras (reflection, SOTA, dead-end warnings) ---
-        prompt = _worker_prompt_sampler.build_prompt(
-            current_program=parent.code,
-            parent_program=parent.code,
-            program_metrics=parent.metrics,
-            previous_programs=[p.to_dict() for p in best_programs_only],
-            top_programs=[p.to_dict() for p in programs_for_prompt],
-            inspirations=[p.to_dict() for p in inspirations],
-            language=_worker_config.language,
-            evolution_round=iteration,
-            current_best=f"{best_so_far:.4f}",
-            diff_based_evolution=use_diff,
-            program_artifacts=parent_artifacts,
-            feature_dimensions=db_snapshot.get("feature_dimensions", []),
-            current_changes_description=parent_changes_desc,
-            # REPS prompt extras passed as kwargs -> template {placeholders}
-            **prompt_extras,
-        )
-
-        # --- REPS: Inject extras into prompt if template didn't consume them ---
-        # Append any REPS context that wasn't consumed by template placeholders
-        for key in ("reflection", "sota_injection", "dead_end_warnings", "crossover_context"):
-            text = prompt_extras.get(key, "")
-            if text and "{" + key + "}" not in prompt.get("user", ""):
-                # Template didn't have a placeholder for this key, append to user prompt
-                prompt["user"] = prompt["user"] + "\n\n" + text
-
-        iteration_start = time.time()
-
-        # --- REPS: Apply temperature/model overrides ---
-        generate_kwargs = {}
-        if reps_temperature is not None:
-            generate_kwargs["temperature"] = reps_temperature
-        if reps_model_id is not None:
-            generate_kwargs["model"] = reps_model_id
-
-        # Generate code modification (sync wrapper for async)
-        try:
-            llm_response = asyncio.run(
-                _worker_llm_ensemble.generate_with_context(
-                    system_message=prompt["system"],
-                    messages=[{"role": "user", "content": prompt["user"]}],
-                    **generate_kwargs,
-                )
-            )
-        except Exception as e:
-            logger.error(f"LLM generation failed: {e}")
-            return SerializableResult(error=f"LLM generation failed: {str(e)}", iteration=iteration)
-
-        # Check for None response
-        if llm_response is None:
-            return SerializableResult(error="LLM returned None response", iteration=iteration)
-
-        # Parse response based on evolution mode
-        if use_diff:
-            from reps.utils import (
-                apply_diff,
-                apply_diff_blocks,
-                extract_diffs,
-                format_diff_summary,
-                split_diffs_by_target,
-            )
-
-            diff_blocks = extract_diffs(llm_response, _worker_config.diff_pattern)
-            if not diff_blocks:
-                return SerializableResult(
-                    error="No valid diffs found in response", iteration=iteration
-                )
-
-            if _worker_config.prompt.programs_as_changes_description:
-                try:
-                    code_blocks, desc_blocks, _unmatched = split_diffs_by_target(
-                        diff_blocks,
-                        code_text=parent.code,
-                        changes_description_text=parent_changes_desc,
-                    )
-                except Exception as e:
-                    return SerializableResult(error=str(e), iteration=iteration)
-
-                child_code, _ = apply_diff_blocks(parent.code, code_blocks)
-                child_changes_desc, desc_applied = apply_diff_blocks(
-                    parent_changes_desc, desc_blocks
-                )
-
-                # Must update the previous changes description
-                if (
-                    desc_applied == 0
-                    or not child_changes_desc.strip()
-                    or child_changes_desc.strip() == parent_changes_desc.strip()
-                ):
-                    return SerializableResult(
-                        error="changes_description was not updated or empty, program is discarded",
-                        iteration=iteration,
-                    )
-
-                changes_summary = format_diff_summary(
-                    code_blocks,
-                    max_line_len=_worker_config.prompt.diff_summary_max_line_len,
-                    max_lines=_worker_config.prompt.diff_summary_max_lines,
-                )
-            else:
-                # All diffs applied only to code
-                child_code = apply_diff(parent.code, llm_response, _worker_config.diff_pattern)
-                changes_summary = format_diff_summary(
-                    diff_blocks,
-                    max_line_len=_worker_config.prompt.diff_summary_max_line_len,
-                    max_lines=_worker_config.prompt.diff_summary_max_lines,
-                )
-        else:
-            from reps.utils import parse_full_rewrite
-
-            new_code = parse_full_rewrite(llm_response, _worker_config.language)
-            if not new_code:
-                return SerializableResult(
-                    error=f"No valid code found in response", iteration=iteration
-                )
-
-            child_code = new_code
-            changes_summary = "Full rewrite"
-
-        # Check code length
-        if len(child_code) > _worker_config.max_code_length:
-            return SerializableResult(
-                error=f"Generated code exceeds maximum length ({len(child_code)} > {_worker_config.max_code_length})",
-                iteration=iteration,
-            )
-
-        # Evaluate the child program
-        import uuid
-
-        child_id = str(uuid.uuid4())
-        child_metrics = asyncio.run(_worker_evaluator.evaluate_program(child_code, child_id))
-
-        # Get artifacts
-        artifacts = _worker_evaluator.get_pending_artifacts(child_id)
-
-        # Create child program with REPS metadata
-        child_metadata = {
-            "changes": changes_summary,
-            "parent_metrics": parent.metrics,
-            "island": parent_island,
-            "reps_worker_type": reps_worker_type,
-            "reps_is_revisitation": is_revisitation,
-        }
-        if reps_model_id:
-            child_metadata["reps_model_id"] = reps_model_id
-
-        child_program = Program(
-            id=child_id,
-            code=child_code,
-            changes_description=child_changes_desc,
-            language=_worker_config.language,
-            parent_id=parent.id,
-            generation=parent.generation + 1,
-            metrics=child_metrics,
-            iteration_found=iteration,
-            metadata=child_metadata,
-        )
-
-        iteration_time = time.time() - iteration_start
-
-        # Get target island from snapshot (where child should be placed)
-        target_island = db_snapshot.get("sampling_island")
-
-        # Compute parent score for REPS tracking
-        parent_score = parent.metrics.get(
-            "combined_score", safe_numeric_average(parent.metrics)
-        ) if parent.metrics else 0.0
-
-        return SerializableResult(
-            child_program_dict=child_program.to_dict(),
-            parent_id=parent.id,
-            iteration_time=iteration_time,
-            prompt=prompt,
-            llm_response=llm_response,
-            artifacts=artifacts,
-            iteration=iteration,
-            target_island=target_island,
-            reps_meta={
-                "worker_type": reps_worker_type,
-                "is_revisitation": is_revisitation,
-                "model_id": reps_model_id,
-                "model_actual": getattr(_worker_llm_ensemble, "last_model_name", None),
-                "temperature": reps_temperature,
-                "parent_score": parent_score,
-                "diff": llm_response or "",
-                "reasoning": getattr(_worker_llm_ensemble, "last_reasoning", None),
-                "tokens_in": getattr(_worker_llm_ensemble, "last_usage", {}).get("prompt_tokens", 0),
-                "tokens_out": getattr(_worker_llm_ensemble, "last_usage", {}).get("completion_tokens", 0),
-                "cache_read": getattr(_worker_llm_ensemble, "last_usage", {}).get(
-                    "cache_read_input_tokens", 0
-                ),
-            },
-        )
-
-    except Exception as e:
-        logger.exception(f"Error in worker iteration {iteration}")
-        return SerializableResult(error=str(e), iteration=iteration)
+def _turn_to_dict(t) -> Dict[str, Any]:
+    """Dataclass-to-dict, preserving signature bytes and all provider_extras."""
+    return asdict(t)
 
 
 class ProcessParallelController:
-    """Controller for process-based parallel evolution.
+    """Async controller for evolution (single process, single event loop).
 
-    Extended with REPS features that run at batch boundaries in the controller process.
+    Name kept for backward compatibility with callers (runner.py). Under the
+    hood this is asyncio-only: an asyncio.Semaphore bounds concurrency, and
+    asyncio.Tasks spawn iterations that share one LLMEnsemble / Evaluator /
+    PromptSampler with the controller.
+
+    Extended with REPS features that run at batch boundaries in the event loop.
     """
 
     def __init__(
@@ -540,15 +148,23 @@ class ProcessParallelController:
         self.evolution_tracer = evolution_tracer
         self.file_suffix = file_suffix
         self.output_dir = output_dir
+        self._reps_metrics = None
 
-        self.executor: Optional[ProcessPoolExecutor] = None
-        self.shutdown_event = mp.Event()
+        # Shared singletons — populated by start()
+        self.llm_ensemble = None
+        self.evaluator = None
+        self.prompt_sampler = None
+        self.worker_pool = None
+
+        self._iter_semaphore: Optional[asyncio.Semaphore] = None
+        self._shutdown: Optional[asyncio.Event] = None
+        self._llm_factory = None
+        self._dspy_lm_factory = None
+
         self.early_stopping_triggered = False
         self._cumulative_tokens = {"in": 0, "out": 0}
         self._warned_about_combined_score = False
-        self._reps_metrics = None
 
-        # Number of worker processes
         self.num_workers = config.evaluator.parallel_evaluations
         self.num_islands = config.database.num_islands
 
@@ -558,8 +174,25 @@ class ProcessParallelController:
         self._reps_current_reflection: Optional[Dict[str, Any]] = None
         self._reps_epsilon = config.reps.revisitation.epsilon_start
         self._reps_batch_count = 0
-        self._reps_batch_results: List = []  # accumulator for batch boundary
+        self._reps_batch_results: List = []
         self._reps_rng = random.Random(config.random_seed)
+
+        # --- Plateau tracking (item #2 from the 3-agent analysis) ------
+        # Rolling history of best combined_score per completed iteration so
+        # _detect_plateau() can tell whether progress has stalled. When it
+        # has, _pick_iteration_inputs temporarily tilts the sampler toward
+        # exploration for a few iterations (see _plateau_boost_remaining).
+        # The original config.database.exploration_ratio /
+        # exploitation_ratio are preserved and restored after each sample
+        # call so a mid-run checkpoint restart does not inherit bias.
+        self._plateau_window: int = 5
+        self._plateau_boost_iters: int = 3
+        self._plateau_best_history: List[float] = []
+        self._plateau_boost_remaining: int = 0
+        # --- Convergence-event log (item #1) ---------------------------
+        # Populated the first time a WorkerResult with converged=True is
+        # handled. File lives under self.output_dir/metrics/.
+        self._convergence_events_path: Optional[str] = None
 
         if self._reps_enabled:
             from reps.worker_pool import WorkerPool
@@ -570,9 +203,11 @@ class ProcessParallelController:
 
             reps = config.reps
 
-            workers_cfg = asdict(reps.workers)
-            workers_cfg["random_seed"] = config.random_seed
-            self._reps_worker_pool = WorkerPool(workers_cfg)
+            primary_model = config.llm.models[0].name if config.llm.models else ""
+            self._reps_worker_pool = WorkerPool(
+                reps.workers,
+                default_model_id=primary_model,
+            )
             self._reps_convergence = ConvergenceMonitor(asdict(reps.convergence))
             contracts_cfg = asdict(reps.contracts)
             contracts_cfg["random_seed"] = config.random_seed
@@ -584,131 +219,474 @@ class ProcessParallelController:
             else:
                 logger.info("REPS metrics logging disabled: no output_dir provided")
 
-            # Reflection engine needs an LLM — will be initialized lazily
-            # since we need the ensemble from the controller
             self._reps_reflection = None
             self._reps_reflection_config = asdict(reps.reflection)
 
+            worker_names = list(self._reps_worker_pool._configs.keys())
             logger.info(
                 f"REPS enabled: batch_size={self._reps_batch_size}, "
-                f"workers={reps.workers.types}, "
+                f"workers={worker_names}, "
                 f"ε={reps.revisitation.epsilon_start}"
             )
         else:
             logger.info("REPS features disabled")
 
-        logger.info(f"Initialized process parallel controller with {self.num_workers} workers")
+        logger.info(f"Initialized async controller with {self.num_workers} workers")
 
-    def _serialize_config(self, config: Config) -> dict:
-        """Serialize config object to a dictionary that can be pickled"""
-        # Manual serialization to handle nested objects properly
-
-        # The asdict() call itself triggers the deepcopy which tries to serialize novelty_llm. Remove it first.
-        config.database.novelty_llm = None
-
-        return {
-            "llm": {
-                "models": [asdict(m) for m in config.llm.models],
-                "evaluator_models": [asdict(m) for m in config.llm.evaluator_models],
-                "api_base": config.llm.api_base,
-                "api_key": config.llm.api_key,
-                "temperature": config.llm.temperature,
-                "top_p": config.llm.top_p,
-                "max_tokens": config.llm.max_tokens,
-                "timeout": config.llm.timeout,
-                "retries": config.llm.retries,
-                "retry_delay": config.llm.retry_delay,
-            },
-            "prompt": asdict(config.prompt),
-            "database": asdict(config.database),
-            "evaluator": asdict(config.evaluator),
-            "max_iterations": config.max_iterations,
-            "checkpoint_interval": config.checkpoint_interval,
-            "log_level": config.log_level,
-            "log_dir": config.log_dir,
-            "random_seed": config.random_seed,
-            "diff_based_evolution": config.diff_based_evolution,
-            "max_code_length": config.max_code_length,
-            "language": config.language,
-            "file_suffix": self.file_suffix,
-            "reps": asdict(config.reps),
-        }
+    # ------------------------------------------------------------------ #
+    # Lifecycle
+    # ------------------------------------------------------------------ #
 
     def start(self) -> None:
-        """Start the process pool"""
-        # Convert config to dict for pickling
-        # We need to be careful with nested dataclasses
-        config_dict = self._serialize_config(self.config)
+        """Build shared singletons + concurrency primitives.
 
-        # Pass current environment to worker processes
-        import os
-        import sys
+        Safe to call outside a running event loop: asyncio.Semaphore and
+        asyncio.Event don't require a loop at construction time in 3.10+.
+        """
+        from reps.evaluator import Evaluator
+        from reps.llm.ensemble import LLMEnsemble
+        from reps.prompt_sampler import PromptSampler
+        from reps.worker_pool import WorkerPool
 
-        current_env = dict(os.environ)
+        self.llm_ensemble = LLMEnsemble(self.config.llm.models)
+        self.prompt_sampler = PromptSampler(self.config.prompt)
 
-        executor_kwargs = {
-            "max_workers": self.num_workers,
-            "initializer": _worker_init,
-            "initargs": (config_dict, self.evaluation_file, current_env),
-        }
-        if sys.version_info >= (3, 11):
-            logger.info(f"Set max {self.config.max_tasks_per_child} tasks per child")
-            executor_kwargs["max_tasks_per_child"] = self.config.max_tasks_per_child
-        elif self.config.max_tasks_per_child is not None:
-            logger.warn(
-                "max_tasks_per_child is only supported in Python 3.11+. "
-                "Ignoring max_tasks_per_child and using spawn start method."
+        evaluator_prompt_sampler = PromptSampler(self.config.prompt)
+        evaluator_prompt_sampler.set_templates("evaluator_system_message")
+        self.evaluator = Evaluator(
+            self.config.evaluator,
+            self.evaluation_file,
+            LLMEnsemble(self.config.llm.evaluator_models),
+            evaluator_prompt_sampler,
+            database=self.database,
+            suffix=self.file_suffix,
+        )
+
+        max_conc = (
+            self.config.evaluator.max_concurrent_iterations
+            if self.config.evaluator.max_concurrent_iterations is not None
+            else self.config.evaluator.parallel_evaluations
+        )
+        max_conc = max(1, int(max_conc))
+        self._iter_semaphore = asyncio.Semaphore(max_conc)
+        self._shutdown = asyncio.Event()
+
+        def llm_factory(model_id):
+            # Trivial path: hand out the shared ensemble. Specific-model
+            # overrides go via WorkerRequest.model_id into generate_with_context.
+            return self.llm_ensemble
+
+        self._llm_factory = llm_factory
+
+        def dspy_lm_factory(wc):
+            from reps.workers.dspy_react import make_dspy_lm
+            return make_dspy_lm(self.config, wc)
+
+        self._dspy_lm_factory = dspy_lm_factory
+
+        # Reuse the existing REPS WorkerPool if enabled; otherwise build a minimal one.
+        if self._reps_enabled:
+            self.worker_pool = self._reps_worker_pool
+        else:
+            # Minimal pool so _run_iteration has something to consult.
+            primary_model = self.config.llm.models[0].name if self.config.llm.models else ""
+            self.worker_pool = WorkerPool(
+                {"types": ["exploiter"]},
+                default_model_id=primary_model,
             )
-            executor_kwargs["mp_context"] = mp.get_context("spawn")
 
-        # Create process pool with initializer
-        self.executor = ProcessPoolExecutor(**executor_kwargs)
-        logger.info(f"Started process pool with {self.num_workers} processes")
+        logger.info(
+            "AsyncController started (asyncio-only, max_concurrent_iterations=%d)",
+            max_conc,
+        )
 
     def stop(self) -> None:
-        """Stop the process pool"""
-        self.shutdown_event.set()
-
-        if self.executor:
-            self.executor.shutdown(wait=True)
-            self.executor = None
-
-        logger.info("Stopped process pool")
+        """Signal shutdown. Running tasks see self._shutdown.is_set()."""
+        if self._shutdown is not None:
+            self._shutdown.set()
+        logger.info("AsyncController stopping")
 
     def request_shutdown(self) -> None:
-        """Request graceful shutdown"""
         logger.info("Graceful shutdown requested...")
-        self.shutdown_event.set()
+        self.stop()
 
-    def _create_database_snapshot(self) -> Dict[str, Any]:
-        """Create a serializable snapshot of the database state"""
-        # Only include necessary data for workers
-        snapshot = {
-            "programs": {pid: prog.to_dict() for pid, prog in self.database.programs.items()},
-            "islands": [list(island) for island in self.database.islands],
-            "current_island": self.database.current_island,
-            "feature_dimensions": self.database.config.feature_dimensions,
-            "artifacts": {},  # Will be populated selectively
+    # ------------------------------------------------------------------ #
+    # One iteration (async, no process fork)
+    # ------------------------------------------------------------------ #
+
+    async def _run_iteration(
+        self,
+        iteration: int,
+        parent_id: str,
+        inspiration_ids: List[str],
+        iteration_config: "IterationConfig",
+    ) -> "SerializableResult":
+        """One iteration: build WorkerRequest, dispatch Worker, evaluate child."""
+        from reps.workers.base import WorkerContext, WorkerRequest
+        from reps.workers.registry import build_worker
+
+        final_child_id = str(uuid.uuid4())
+
+        if parent_id not in self.database.programs:
+            return SerializableResult(
+                error=f"parent_id {parent_id!r} not in database",
+                iteration=iteration,
+            )
+
+        parent = self.database.programs[parent_id]
+        inspirations = [
+            self.database.programs[pid]
+            for pid in inspiration_ids
+            if pid in self.database.programs
+        ]
+
+        parent_island = parent.metadata.get("island", self.database.current_island)
+        island_pids = list(self.database.islands[parent_island])
+        island_programs = [
+            self.database.programs[p]
+            for p in island_pids
+            if p in self.database.programs
+        ]
+        island_programs.sort(
+            key=lambda p: p.metrics.get(
+                "combined_score", safe_numeric_average(p.metrics)
+            ),
+            reverse=True,
+        )
+        top_k = (
+            self.config.prompt.num_top_programs
+            + self.config.prompt.num_diverse_programs
+        )
+        _programs_for_prompt = island_programs[:top_k]
+        best_programs_only = island_programs[: self.config.prompt.num_top_programs]
+
+        second_parent = None
+        if (
+            iteration_config.second_parent_id
+            and iteration_config.second_parent_id in self.database.programs
+        ):
+            second_parent = self.database.programs[iteration_config.second_parent_id]
+
+        # Collect the last 5 completed programs across the whole database
+        # (newest-first), irrespective of island. Program.timestamp is set at
+        # dataclass construction; fall back to iteration_found if equal.
+        all_programs = list(self.database.programs.values())
+        all_programs.sort(
+            key=lambda p: (getattr(p, "timestamp", 0.0), getattr(p, "iteration_found", 0)),
+            reverse=True,
+        )
+        recent_iterations = all_programs[:5]
+
+        # Load parent's eval artifacts (stdout/stderr) so the worker sees
+        # the actual output of the previous run. Fall back to None on any
+        # failure — artifacts are best-effort.
+        parent_artifacts = None
+        try:
+            parent_artifacts = self.database.get_artifacts(parent.id) or None
+        except Exception as e:
+            logger.debug(f"Failed to load parent artifacts for {parent.id[:8]}: {e}")
+
+        request = WorkerRequest(
+            parent=parent,
+            inspirations=inspirations,
+            top_programs=best_programs_only,
+            second_parent=second_parent,
+            iteration=iteration,
+            language=self.config.language,
+            feature_dimensions=self.database.config.feature_dimensions,
+            generation_mode=iteration_config.generation_mode,
+            prompt_extras=dict(iteration_config.prompt_extras),
+            temperature=iteration_config.temperature,
+            model_id=iteration_config.model_id,
+            recent_iterations=recent_iterations,
+            parent_artifacts=parent_artifacts,
+        )
+
+        worker_cfg = self.worker_pool.get_worker_config(iteration_config.worker_name)
+        ctx = WorkerContext(
+            prompt_sampler=self.prompt_sampler,
+            llm_factory=self._llm_factory,
+            dspy_lm_factory=self._dspy_lm_factory,
+            evaluator=self.evaluator if worker_cfg.uses_evaluator else None,
+            scratch_id_factory=lambda: f"scratch-{uuid.uuid4().hex[:12]}",
+            final_child_id=final_child_id,
+            config=self.config,
+            iteration_config=iteration_config,
+        )
+
+        worker = build_worker(worker_cfg)
+
+        t_start = time.time()
+        try:
+            result = await worker.run(request, ctx)
+        except Exception as e:
+            logger.exception(f"Worker.run raised for iteration {iteration}")
+            return SerializableResult(
+                error=f"Worker raised: {e}",
+                iteration=iteration,
+                iteration_time=time.time() - t_start,
+            )
+        iteration_time = time.time() - t_start
+
+        if result.error is not None:
+            return SerializableResult(
+                error=str(result.error),
+                iteration=iteration,
+                iteration_time=iteration_time,
+            )
+
+        # Worker signalled mark_converged: no child was produced. Surface the
+        # signal up through SerializableResult so the main loop can log the
+        # event, skip database.add, and advance the iteration counter.
+        if getattr(result, "converged", False):
+            return SerializableResult(
+                converged=True,
+                converged_reason=result.converged_reason,
+                worker_name=iteration_config.worker_name,
+                parent_id=parent.id,
+                iteration=iteration,
+                iteration_time=iteration_time,
+                target_island=iteration_config.target_island,
+                reps_meta={
+                    "worker_name": iteration_config.worker_name,
+                    "is_revisitation": iteration_config.is_revisitation,
+                    "model_id": iteration_config.model_id,
+                    "temperature": iteration_config.temperature,
+                    "parent_score": (
+                        parent.metrics.get(
+                            "combined_score", safe_numeric_average(parent.metrics)
+                        )
+                        if parent.metrics
+                        else 0.0
+                    ),
+                    "tokens_in": result.usage.get(
+                        "prompt_tokens", result.usage.get("input_tokens", 0)
+                    ),
+                    "tokens_out": result.usage.get(
+                        "completion_tokens", result.usage.get("output_tokens", 0)
+                    ),
+                    "wall_clock_seconds": result.wall_clock_seconds,
+                    "converged": True,
+                    "converged_reason": result.converged_reason,
+                },
+            )
+
+        if len(result.child_code) > self.config.max_code_length:
+            return SerializableResult(
+                error=(
+                    f"Generated code exceeds maximum length "
+                    f"({len(result.child_code)} > {self.config.max_code_length})"
+                ),
+                iteration=iteration,
+                iteration_time=iteration_time,
+            )
+
+        # Final (scored) evaluation — artifacts of this call land in the DB.
+        try:
+            outcome = await self.evaluator.evaluate_isolated(
+                result.child_code, program_id=final_child_id
+            )
+        except Exception as e:
+            logger.exception(f"Evaluator failed for iteration {iteration}")
+            return SerializableResult(
+                error=f"Evaluator failed: {e}",
+                iteration=iteration,
+                iteration_time=iteration_time,
+            )
+
+        child_metadata = {
+            "changes": result.changes_summary or "",
+            "parent_metrics": parent.metrics,
+            "island": parent_island,
+            "reps_worker_name": iteration_config.worker_name,
+            "reps_is_revisitation": iteration_config.is_revisitation,
         }
+        if iteration_config.model_id:
+            child_metadata["reps_model_id"] = iteration_config.model_id
+        child_metadata["turns"] = [_turn_to_dict(t) for t in result.turns]
 
-        # Include artifacts for programs that might be selected
-        # This limits artifacts (execution outputs/errors) to avoid large snapshot sizes.
-        # This does NOT affect program code - all programs are fully serialized above.
-        # With max_artifact_bytes=20KB and population_size=1000, artifacts could be 20MB total,
-        # which would significantly slow worker process initialization. The default limit of 100
-        # keeps artifact data under 2MB while still providing execution context for recent programs.
-        # Workers can still evolve properly as they have access to ALL program code.
-        # Configure via database.max_snapshot_artifacts (None for unlimited).
-        max_artifacts = self.database.config.max_snapshot_artifacts
-        program_ids = list(self.database.programs.keys())
-        if max_artifacts is not None:
-            program_ids = program_ids[:max_artifacts]
-        for pid in program_ids:
-            artifacts = self.database.get_artifacts(pid)
-            if artifacts:
-                snapshot["artifacts"][pid] = artifacts
+        parent_score = (
+            parent.metrics.get("combined_score", safe_numeric_average(parent.metrics))
+            if parent.metrics
+            else 0.0
+        )
+        child_score = outcome.metrics.get(
+            "combined_score", safe_numeric_average(outcome.metrics)
+        )
 
-        return snapshot
+        # Per-iteration summarization: run BEFORE the child enters the DB so
+        # descendants that start concurrently see the summary. Bounded by the
+        # reflection LLM ensemble; best-effort — failures don't block the child.
+        summarizer_cfg = getattr(self.config.reps, "summarizer", None)
+        if (
+            self._reps_enabled
+            and self._reps_reflection is not None
+            and (summarizer_cfg is None or summarizer_cfg.enabled)
+        ):
+            try:
+                from reps.program_summarizer import summarize_program
+
+                turns_dicts = [_turn_to_dict(t) for t in result.turns]
+                # Item #4: surface recent sibling dead-ends to the
+                # summarizer so it does not re-emit them as
+                # `next_directions`. Best-effort — aggregator is cheap but
+                # guarded, since a failure here must not block the child.
+                try:
+                    _, recent_avoids = self._build_recent_directions_extras(k=10)
+                except Exception:
+                    recent_avoids = ""
+                summary = await summarize_program(
+                    program_id=final_child_id,
+                    code=result.child_code,
+                    turns=turns_dicts,
+                    parent_score=parent_score,
+                    child_score=child_score,
+                    improved=child_score > parent_score,
+                    llm_ensemble=self._reps_reflection.llm,
+                    model_id=(
+                        summarizer_cfg.model_id
+                        if summarizer_cfg
+                        else "claude-sonnet-4-6"
+                    ),
+                    task_instructions=(
+                        summarizer_cfg.task_instructions if summarizer_cfg else None
+                    ),
+                    recent_avoids=recent_avoids or None,
+                )
+                if summary:
+                    ann = child_metadata.setdefault("reps_annotations", {})
+                    ann["summary"] = summary
+            except Exception as e:
+                logger.warning(
+                    "per-iteration summarizer failed for %s: %s", final_child_id[:8], e
+                )
+
+        child = Program(
+            id=final_child_id,
+            code=result.child_code,
+            changes_description=result.changes_description,
+            language=self.config.language,
+            parent_id=parent.id,
+            generation=parent.generation + 1,
+            metrics=outcome.metrics,
+            iteration_found=iteration,
+            metadata=child_metadata,
+        )
+
+        prompt_dict = _derive_prompt_from_turns(result.turns)
+        llm_response_str = _derive_llm_response_from_turns(result.turns)
+
+        return SerializableResult(
+            child_program_dict=child.to_dict(),
+            parent_id=parent.id,
+            iteration_time=iteration_time,
+            prompt=prompt_dict,
+            llm_response=llm_response_str,
+            artifacts=outcome.artifacts,
+            iteration=iteration,
+            target_island=iteration_config.target_island,
+            reps_meta={
+                "worker_name": iteration_config.worker_name,
+                "is_revisitation": iteration_config.is_revisitation,
+                "model_id": iteration_config.model_id,
+                "temperature": iteration_config.temperature,
+                "parent_score": parent_score,
+                "diff": result.applied_edit,
+                "turns": [_turn_to_dict(t) for t in result.turns],
+                "tokens_in": result.usage.get(
+                    "prompt_tokens", result.usage.get("input_tokens", 0)
+                ),
+                "tokens_out": result.usage.get(
+                    "completion_tokens", result.usage.get("output_tokens", 0)
+                ),
+                "wall_clock_seconds": result.wall_clock_seconds,
+            },
+        )
+
+    async def _spawn_iteration(
+        self,
+        iteration: int,
+        parent_id: str,
+        inspiration_ids: List[str],
+        iteration_config: "IterationConfig",
+    ) -> "SerializableResult":
+        """Semaphore-bounded wrapper that shields siblings from one failure."""
+        assert self._iter_semaphore is not None, "start() must be called first"
+        async with self._iter_semaphore:
+            try:
+                return await self._run_iteration(
+                    iteration=iteration,
+                    parent_id=parent_id,
+                    inspiration_ids=inspiration_ids,
+                    iteration_config=iteration_config,
+                )
+            except Exception as e:
+                logger.exception(f"iteration {iteration} failed in spawn")
+                return SerializableResult(error=str(e), iteration=iteration)
+
+    def _pick_iteration_inputs(
+        self, iteration: int, island_id: int, reps_iter_config: Optional["IterationConfig"]
+    ):
+        """Sample a parent + inspirations for one dispatch.
+
+        Returns (parent_id, inspiration_ids, iteration_config_with_target_island).
+        Raises on DB errors (caller logs + skips).
+        """
+        from reps.iteration_config import IterationConfig
+
+        target_island = island_id if island_id is not None else self.database.current_island
+
+        if reps_iter_config is None:
+            reps_iter_config = IterationConfig(target_island=target_island)
+        else:
+            if reps_iter_config.target_island is None:
+                reps_iter_config.target_island = target_island
+
+        forced_parent_id = reps_iter_config.parent_id if reps_iter_config else None
+
+        # Plateau rebalance (item #2): when best-score has stalled for
+        # `_plateau_window` iters, temporarily tilt sampling toward
+        # exploration for `_plateau_boost_iters` sample calls. We mutate
+        # self.database.config in-place JUST for the sample_from_island call
+        # and restore afterwards so a checkpoint save does not persist the
+        # bias and a restart does not inherit it.
+        boosting = False
+        orig_exploration = None
+        orig_exploitation = None
+        if self._plateau_boost_remaining > 0:
+            boosting = True
+            orig_exploration = self.database.config.exploration_ratio
+            orig_exploitation = self.database.config.exploitation_ratio
+            self.database.config.exploration_ratio = min(
+                1.0, orig_exploration + 0.2
+            )
+            self.database.config.exploitation_ratio = max(
+                0.0, orig_exploitation - 0.2
+            )
+            self._plateau_boost_remaining -= 1
+
+        try:
+            if forced_parent_id and forced_parent_id in self.database.programs:
+                parent = self.database.programs[forced_parent_id]
+                _, inspirations = self.database.sample_from_island(
+                    island_id=target_island,
+                    num_inspirations=self.config.prompt.num_top_programs,
+                )
+            else:
+                parent, inspirations = self.database.sample_from_island(
+                    island_id=target_island,
+                    num_inspirations=self.config.prompt.num_top_programs,
+                )
+        finally:
+            if boosting:
+                self.database.config.exploration_ratio = orig_exploration
+                self.database.config.exploitation_ratio = orig_exploitation
+
+        return parent.id, [p.id for p in inspirations], reps_iter_config
+
+    # ------------------------------------------------------------------ #
+    # Main loop
+    # ------------------------------------------------------------------ #
 
     async def run_evolution(
         self,
@@ -717,56 +695,82 @@ class ProcessParallelController:
         target_score: Optional[float] = None,
         checkpoint_callback=None,
     ):
-        """Run evolution with process-based parallelism.
+        """Run evolution on the current event loop.
 
-        When REPS is enabled, accumulates results into batches and runs
-        REPS controller-side modules (reflection, convergence, SOTA, contracts)
-        at batch boundaries.
+        Concurrency is bounded by self._iter_semaphore. Each iteration runs
+        as an asyncio.Task via _spawn_iteration. Completed tasks are drained
+        with asyncio.wait(..., FIRST_COMPLETED). REPS batch processing runs
+        at batch boundaries with self.database directly (no snapshot).
         """
-        if not self.executor:
-            raise RuntimeError("Process pool not started")
+        from reps.iteration_config import IterationConfig
+
+        if self.evaluator is None or self.llm_ensemble is None:
+            raise RuntimeError("Controller not started — call .start() first")
 
         total_iterations = start_iteration + max_iterations
 
         logger.info(
-            f"Starting process-based evolution from iteration {start_iteration} "
+            f"Starting async evolution from iteration {start_iteration} "
             f"for {max_iterations} iterations (total: {total_iterations})"
         )
 
-        # Track pending futures by island to maintain distribution
-        pending_futures: Dict[int, Future] = {}
+        pending: Dict[int, asyncio.Task] = {}
         island_pending: Dict[int, List[int]] = {i: [] for i in range(self.num_islands)}
         batch_size = min(self.num_workers * 2, max_iterations)
 
-        # --- REPS: Build initial prompt extras ---
-        reps_prompt_extras = self._reps_build_prompt_extras() if self._reps_enabled else {}
+        reps_prompt_extras = (
+            self._reps_build_prompt_extras() if self._reps_enabled else {}
+        )
         if reps_prompt_extras:
-            logger.info(f"REPS prompt extras keys: {list(reps_prompt_extras.keys())}, "
-                        f"lengths: {{k: len(v) for k, v in reps_prompt_extras.items() if v}}")
+            logger.info(
+                f"REPS prompt extras keys: {list(reps_prompt_extras.keys())}"
+            )
 
-        # Submit initial batch - distribute across islands
-        batch_per_island = max(1, batch_size // self.num_islands) if batch_size > 0 else 0
+        def _build_iter_config(island_id: int) -> "IterationConfig":
+            if self._reps_enabled:
+                cfg = self._reps_build_iteration_config(
+                    island_id, reps_prompt_extras, max_iterations
+                )
+                if cfg is not None:
+                    return cfg
+            return IterationConfig(target_island=island_id)
+
+        def _spawn(iteration: int, island_id: int) -> Optional[asyncio.Task]:
+            try:
+                iteration_config = _build_iter_config(island_id)
+                parent_id, inspiration_ids, iteration_config = self._pick_iteration_inputs(
+                    iteration, island_id, iteration_config
+                )
+            except Exception as e:
+                logger.error(f"Error preparing iteration {iteration}: {e}")
+                return None
+            return asyncio.create_task(
+                self._spawn_iteration(
+                    iteration=iteration,
+                    parent_id=parent_id,
+                    inspiration_ids=inspiration_ids,
+                    iteration_config=iteration_config,
+                )
+            )
+
+        # Initial batch — round-robin across islands.
+        batch_per_island = (
+            max(1, batch_size // self.num_islands) if batch_size > 0 else 0
+        )
         current_iteration = start_iteration
-
-        # Round-robin distribution across islands
         for island_id in range(self.num_islands):
             for _ in range(batch_per_island):
                 if current_iteration < total_iterations:
-                    reps_cfg = self._reps_build_iteration_config(
-                        island_id, reps_prompt_extras, max_iterations
-                    ) if self._reps_enabled else None
-                    future = self._submit_iteration(current_iteration, island_id, reps_cfg)
-                    if future:
-                        pending_futures[current_iteration] = future
+                    task = _spawn(current_iteration, island_id)
+                    if task is not None:
+                        pending[current_iteration] = task
                         island_pending[island_id].append(current_iteration)
                     current_iteration += 1
 
         next_iteration = current_iteration
         completed_iterations = 0
-        # REPS batch accumulator
         reps_batch_accumulator: List = []
 
-        # Early stopping tracking
         early_stopping_enabled = self.config.early_stopping_patience is not None
         if early_stopping_enabled:
             best_score = float("-inf")
@@ -785,401 +789,387 @@ class ProcessParallelController:
         else:
             logger.info("Early stopping disabled")
 
-        # Process results as they complete
+        # Iteration drain loop.
         while (
-            pending_futures
+            pending
             and completed_iterations < max_iterations
-            and not self.shutdown_event.is_set()
+            and not self._shutdown.is_set()
         ):
-            # Block (via a worker thread so the event loop stays responsive)
-            # until at least one future completes, with a short timeout so the
-            # shutdown flag is still checked in a timely manner.
-            await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: cf_wait(
-                    list(pending_futures.values()),
-                    timeout=0.5,
-                    return_when=FIRST_COMPLETED,
-                ),
+            timeout_seconds = self.config.evaluator.timeout + 30
+            done_tasks, _pending_set = await asyncio.wait(
+                list(pending.values()),
+                return_when=asyncio.FIRST_COMPLETED,
+                timeout=timeout_seconds,
             )
 
-            # Find the first completed future (process one per outer loop
-            # iteration; if more are ready they will be picked up on the next
-            # pass, which keeps the submission/island-balancing logic simple).
-            completed_iteration = None
-            for iteration, future in list(pending_futures.items()):
-                if future.done():
-                    completed_iteration = iteration
-                    break
-
-            if completed_iteration is None:
-                # Timeout fired without any future completing; loop and re-check
-                # the shutdown event / max_iterations guard.
+            if not done_tasks:
+                # Timeout elapsed with nothing completing — log once and continue.
+                logger.warning(
+                    f"No iteration completed within {timeout_seconds}s; continuing to wait."
+                )
                 continue
 
-            # Process completed result
-            future = pending_futures.pop(completed_iteration)
+            for task in done_tasks:
+                # Map task → iteration key.
+                completed_iteration = None
+                for it_key, t in list(pending.items()):
+                    if t is task:
+                        completed_iteration = it_key
+                        break
+                if completed_iteration is None:
+                    continue
 
-            try:
-                # Use evaluator timeout + buffer to gracefully handle stuck processes
-                timeout_seconds = self.config.evaluator.timeout + 30
-                result = future.result(timeout=timeout_seconds)
+                del pending[completed_iteration]
 
-                if result.error:
-                    logger.warning(f"Iteration {completed_iteration} error: {result.error}")
-                elif result.child_program_dict:
-                    # Reconstruct program from dict
-                    child_program = Program(**result.child_program_dict)
-
-                    # Add to database with explicit target_island to ensure proper island placement
-                    # This fixes issue #391: children should go to the target island, not inherit
-                    # from the parent (which may be from a different island due to fallback sampling)
-                    self.database.add(
-                        child_program,
-                        iteration=completed_iteration,
-                        target_island=result.target_island,
-                    )
-
-                    # Store artifacts
-                    if result.artifacts:
-                        self.database.store_artifacts(child_program.id, result.artifacts)
-
-                    # Log evolution trace
-                    if self.evolution_tracer:
-                        # Retrieve parent program for trace logging
-                        parent_program = (
-                            self.database.get(result.parent_id) if result.parent_id else None
-                        )
-                        if parent_program:
-                            # Determine island ID
-                            island_id = child_program.metadata.get(
-                                "island", self.database.current_island
-                            )
-
-                            self.evolution_tracer.log_trace(
-                                iteration=completed_iteration,
-                                parent_program=parent_program,
-                                child_program=child_program,
-                                prompt=result.prompt,
-                                llm_response=result.llm_response,
-                                artifacts=result.artifacts,
-                                island_id=island_id,
-                                metadata={
-                                    "iteration_time": result.iteration_time,
-                                    "changes": child_program.metadata.get("changes", ""),
-                                },
-                            )
-
-                    # Log prompts
-                    if result.prompt:
-                        self.database.log_prompt(
-                            template_key=(
-                                "full_rewrite_user"
-                                if not self.config.diff_based_evolution
-                                else "diff_user"
-                            ),
-                            program_id=child_program.id,
-                            prompt=result.prompt,
-                            responses=[result.llm_response] if result.llm_response else [],
-                        )
-
-                    # Island management
-                    # get current program island id
-                    island_id = child_program.metadata.get("island", self.database.current_island)
-                    # use this to increment island generation
-                    self.database.increment_island_generation(island_idx=island_id)
-
-                    # Check migration
-                    if self.database.should_migrate():
-                        logger.info(f"Performing migration at iteration {completed_iteration}")
-                        self.database.migrate_programs()
-                        self.database.log_island_status()
-
-                    # Log progress — header line with iteration context
-                    meta = result.reps_meta or {}
-                    parent_score = meta.get("parent_score", 0.0) or 0.0
-                    metrics = child_program.metrics or {}
-                    child_score = (
-                        metrics.get("combined_score", safe_numeric_average(metrics))
-                        if metrics else 0.0
-                    )
-                    delta = child_score - parent_score
-                    arrow = "↑" if delta > 0 else ("↓" if delta < 0 else "=")
-                    revis = " [REVISIT]" if meta.get("is_revisitation") else ""
-                    model_actual = meta.get("model_actual") or meta.get("model_id") or "default"
-                    temp = meta.get("temperature")
-                    temp_str = f"t={temp:.2f}" if isinstance(temp, (int, float)) else "t=auto"
-                    worker = meta.get("worker_type", "?")
-
-                    # Classify outcome so the log tells the real story instead
-                    # of just "score = 0". Handles eval errors, strict/tolerant
-                    # splits, and pure improvements.
-                    verdict = _classify_outcome(metrics, child_score, parent_score)
-
+                result: Optional[SerializableResult] = None
+                try:
+                    result = task.result()
+                except asyncio.CancelledError:
                     logger.info(
-                        f"[iter {completed_iteration}]{revis} "
-                        f"{worker}/{temp_str}/{model_actual} "
-                        f"{verdict} "
-                        f"score {parent_score:.4f} {arrow} {child_score:.4f} "
-                        f"(Δ{delta:+.4f}) "
-                        f"in {result.iteration_time:.2f}s "
-                        f"| program={child_program.id[:8]} parent={str(result.parent_id)[:8]}"
+                        f"Iteration {completed_iteration} cancelled; continuing."
+                    )
+                    completed_iterations += 1
+                    continue
+                except Exception as e:
+                    logger.error(
+                        f"Error processing result from iteration {completed_iteration}: {e}"
+                    )
+                    completed_iterations += 1
+                    continue
+
+                try:
+                    if result is None:
+                        pass
+                    elif result.converged:
+                        # Worker called mark_converged: persist a telemetry row
+                        # and treat the iteration as successfully completed
+                        # (for budget accounting) without adding a child to
+                        # the database. Summarization is skipped — there is
+                        # nothing to summarize.
+                        self._record_convergence_event(
+                            iteration=completed_iteration,
+                            parent_id=result.parent_id,
+                            reason=result.converged_reason,
+                            worker_name=result.worker_name,
+                        )
+                        logger.info(
+                            "Iteration %d: worker marked converged (reason: %s) "
+                            "— no child added",
+                            completed_iteration,
+                            result.converged_reason or "(unspecified)",
+                        )
+                    elif result.error:
+                        logger.warning(
+                            f"Iteration {completed_iteration} error: {result.error}"
+                        )
+                    elif result.child_program_dict:
+                        child_program = Program(**result.child_program_dict)
+
+                        self.database.add(
+                            child_program,
+                            iteration=completed_iteration,
+                            target_island=result.target_island,
+                        )
+
+                        if result.artifacts:
+                            self.database.store_artifacts(
+                                child_program.id, result.artifacts
+                            )
+
+                        # Persist this child's JSON + trace sidecar immediately
+                        # so a killed or crashed run doesn't lose completed work.
+                        # Checkpoint / final save_database still happen; this
+                        # just ensures no per-iter state is in-memory-only.
+                        try:
+                            self.database._save_program(
+                                child_program, base_path=self.output_dir
+                            )
+                        except Exception as persist_exc:
+                            logger.warning(
+                                "per-iteration persist failed for %s: %s",
+                                child_program.id[:8], persist_exc,
+                            )
+
+                        if self.evolution_tracer:
+                            parent_program = (
+                                self.database.get(result.parent_id)
+                                if result.parent_id
+                                else None
+                            )
+                            if parent_program:
+                                island_id = child_program.metadata.get(
+                                    "island", self.database.current_island
+                                )
+                                self.evolution_tracer.log_trace(
+                                    iteration=completed_iteration,
+                                    parent_program=parent_program,
+                                    child_program=child_program,
+                                    prompt=result.prompt,
+                                    llm_response=result.llm_response,
+                                    artifacts=result.artifacts,
+                                    island_id=island_id,
+                                    metadata={
+                                        "iteration_time": result.iteration_time,
+                                        "changes": child_program.metadata.get(
+                                            "changes", ""
+                                        ),
+                                    },
+                                )
+
+                        if result.prompt:
+                            self.database.log_prompt(
+                                template_key=(
+                                    "full_rewrite_user"
+                                    if not self.config.diff_based_evolution
+                                    else "diff_user"
+                                ),
+                                program_id=child_program.id,
+                                prompt=result.prompt,
+                                responses=(
+                                    [result.llm_response] if result.llm_response else []
+                                ),
+                            )
+
+                        island_id = child_program.metadata.get(
+                            "island", self.database.current_island
+                        )
+                        self.database.increment_island_generation(island_idx=island_id)
+
+                        if self.database.should_migrate():
+                            logger.info(
+                                f"Performing migration at iteration {completed_iteration}"
+                            )
+                            self.database.migrate_programs()
+                            self.database.log_island_status()
+
+                        logger.info(
+                            f"Iteration {completed_iteration}: "
+                            f"Program {child_program.id} "
+                            f"(parent: {result.parent_id}) "
+                            f"completed in {result.iteration_time:.2f}s"
+                        )
+
+                        if child_program.metrics:
+                            metrics_str = ", ".join(
+                                [
+                                    f"{k}={v}"
+                                    for k, v in child_program.metrics.items()
+                                ]
+                            )
+                            logger.info(f"Metrics: {metrics_str}")
+
+                        if result.reps_meta:
+                            t_in = result.reps_meta.get("tokens_in", 0)
+                            t_out = result.reps_meta.get("tokens_out", 0)
+                            if t_in or t_out:
+                                self._cumulative_tokens["in"] += t_in
+                                self._cumulative_tokens["out"] += t_out
+                                logger.info(
+                                    f"Tokens: in={t_in}, out={t_out}, "
+                                    f"cumulative_in={self._cumulative_tokens['in']}, "
+                                    f"cumulative_out={self._cumulative_tokens['out']}"
+                                )
+
+                            if (
+                                child_program.metrics
+                                and "combined_score" not in child_program.metrics
+                                and not self._warned_about_combined_score
+                            ):
+                                avg_score = safe_numeric_average(
+                                    child_program.metrics
+                                )
+                                logger.warning(
+                                    f"No 'combined_score' metric found in evaluation results. "
+                                    f"Using average of all numeric metrics ({avg_score:.4f}) for evolution guidance. "
+                                    f"Return a 'combined_score' from your evaluator for better results."
+                                )
+                                self._warned_about_combined_score = True
+
+                        if self.database.best_program_id == child_program.id:
+                            logger.info(
+                                f"New best at iteration {completed_iteration}: {child_program.id}"
+                            )
+
+                        if (
+                            completed_iteration > 0
+                            and completed_iteration % self.config.checkpoint_interval == 0
+                        ):
+                            logger.info(
+                                f"Checkpoint interval reached at iteration {completed_iteration}"
+                            )
+                            self.database.log_island_status()
+                            if checkpoint_callback:
+                                checkpoint_callback(completed_iteration)
+
+                        if target_score is not None and child_program.metrics:
+                            if (
+                                "combined_score" in child_program.metrics
+                                and child_program.metrics["combined_score"]
+                                >= target_score
+                            ):
+                                logger.info(
+                                    f"Target score {target_score} reached at iteration {completed_iteration}"
+                                )
+                                break
+
+                        if early_stopping_enabled and child_program.metrics:
+                            current_score = None
+                            if (
+                                self.config.early_stopping_metric
+                                in child_program.metrics
+                            ):
+                                current_score = child_program.metrics[
+                                    self.config.early_stopping_metric
+                                ]
+                            elif self.config.early_stopping_metric == "combined_score":
+                                current_score = safe_numeric_average(
+                                    child_program.metrics
+                                )
+                            else:
+                                logger.warning(
+                                    f"Early stopping metric '{self.config.early_stopping_metric}' not found, using safe numeric average"
+                                )
+                                current_score = safe_numeric_average(
+                                    child_program.metrics
+                                )
+
+                            if current_score is not None and isinstance(
+                                current_score, (int, float)
+                            ):
+                                if self.config.early_stopping_patience > 0:
+                                    improvement = current_score - best_score
+                                    if (
+                                        improvement
+                                        >= self.config.convergence_threshold
+                                    ):
+                                        best_score = current_score
+                                        iterations_without_improvement = 0
+                                        logger.debug(
+                                            f"New best score: {best_score:.4f} (improvement: {improvement:+.4f})"
+                                        )
+                                    else:
+                                        iterations_without_improvement += 1
+                                        logger.debug(
+                                            f"No improvement: {iterations_without_improvement}/{self.config.early_stopping_patience}"
+                                        )
+
+                                    if (
+                                        iterations_without_improvement
+                                        >= self.config.early_stopping_patience
+                                    ):
+                                        self.early_stopping_triggered = True
+                                        logger.info(
+                                            f"🛑 Early stopping triggered at iteration {completed_iteration}: "
+                                            f"No improvement for {iterations_without_improvement} iterations "
+                                            f"(best score: {best_score:.4f})"
+                                        )
+                                        break
+                                else:
+                                    if (
+                                        current_score
+                                        == self.config.convergence_threshold
+                                    ):
+                                        best_score = current_score
+                                        logger.info(
+                                            f"🛑 Early stopping (event-based) triggered at iteration {completed_iteration}: "
+                                            f"Task successfully solved with score {best_score:.4f}."
+                                        )
+                                        self.early_stopping_triggered = True
+                                        break
+                except Exception as e:
+                    logger.error(
+                        f"Error processing result from iteration {completed_iteration}: {e}"
                     )
 
-                    if metrics:
-                        metrics_str = ", ".join(
-                            f"{k}={v:.4f}" if isinstance(v, (int, float)) else f"{k}={v}"
-                            for k, v in metrics.items()
+                completed_iterations += 1
+
+                # Plateau tracking (item #2): append the current best
+                # combined_score to the rolling history and, if the window
+                # is full and no progress was made, arm the exploration
+                # boost for the next few sample calls. Armed state is
+                # cleared each time a new best arrives.
+                self._update_plateau_history()
+                if (
+                    self._plateau_boost_remaining == 0
+                    and self._detect_plateau()
+                ):
+                    self._plateau_boost_remaining = self._plateau_boost_iters
+                    logger.info(
+                        "Plateau detected at iteration %d (best has not "
+                        "improved across last %d iterations) — boosting "
+                        "exploration for the next %d sample calls",
+                        completed_iteration,
+                        self._plateau_window,
+                        self._plateau_boost_iters,
+                    )
+
+                if self._reps_enabled and result is not None:
+                    reps_batch_accumulator.append(result)
+                    if len(reps_batch_accumulator) >= self._reps_batch_size:
+                        await self._reps_process_batch(reps_batch_accumulator)
+                        self._reps_update_epsilon(
+                            completed_iterations, max_iterations
                         )
-                        logger.info(f"    metrics: {metrics_str}")
-                    if metrics.get("error"):
-                        logger.info(f"    eval error: {metrics['error']}")
+                        reps_prompt_extras = self._reps_build_prompt_extras()
+                        reps_batch_accumulator = []
 
-                    # Log token usage and cache hits from REPS metadata
-                    if result.reps_meta:
-                        t_in = meta.get("tokens_in", 0)
-                        t_out = meta.get("tokens_out", 0)
-                        cache_r = meta.get("cache_read", 0)
-                        if t_in or t_out:
-                            self._cumulative_tokens["in"] += t_in
-                            self._cumulative_tokens["out"] += t_out
-                            cache_part = f" cached={cache_r}" if cache_r else ""
-                            logger.info(
-                                f"    tokens: in={t_in} out={t_out}{cache_part} "
-                                f"| cumulative in={self._cumulative_tokens['in']} "
-                                f"out={self._cumulative_tokens['out']}"
-                            )
+                # Remove from island-pending tracking.
+                for island_id, iteration_list in island_pending.items():
+                    if completed_iteration in iteration_list:
+                        iteration_list.remove(completed_iteration)
+                        break
 
-                        # Log reasoning output if the model produced any
-                        reasoning = meta.get("reasoning")
-                        if reasoning:
-                            snippet = reasoning.strip().replace("\n", " ")
-                            if len(snippet) > 400:
-                                snippet = snippet[:400] + "…"
-                            logger.info(f"    reasoning: {snippet}")
-
-                        if (
-                            "combined_score" not in child_program.metrics
-                            and not self._warned_about_combined_score
-                        ):
-                            avg_score = safe_numeric_average(child_program.metrics)
-                            logger.warning(
-                                f"No 'combined_score' metric found in evaluation results. "
-                                f"Using average of all numeric metrics ({avg_score:.4f}) for evolution guidance. "
-                                f"Return a 'combined_score' from your evaluator for better results."
-                            )
-                            self._warned_about_combined_score = True
-
-                    if self.database.best_program_id == child_program.id:
-                        logger.info(
-                            f"New best at iteration {completed_iteration}: {child_program.id}"
-                        )
-
+                # Dispatch one new iteration on this island if room remains.
+                for island_id in range(self.num_islands):
                     if (
-                        completed_iteration > 0
-                        and completed_iteration % self.config.checkpoint_interval == 0
+                        len(island_pending[island_id]) < batch_per_island
+                        and next_iteration < total_iterations
+                        and not self._shutdown.is_set()
                     ):
-                        logger.info(
-                            f"Checkpoint interval reached at iteration {completed_iteration}"
-                        )
-                        self.database.log_island_status()
-                        if checkpoint_callback:
-                            checkpoint_callback(completed_iteration)
-
-                    # Check target score
-                    if target_score is not None and child_program.metrics:
-                        if (
-                            "combined_score" in child_program.metrics
-                            and child_program.metrics["combined_score"] >= target_score
-                        ):
-                            logger.info(
-                                f"Target score {target_score} reached at iteration {completed_iteration}"
-                            )
+                        task = _spawn(next_iteration, island_id)
+                        if task is not None:
+                            pending[next_iteration] = task
+                            island_pending[island_id].append(next_iteration)
+                            next_iteration += 1
                             break
 
-                    # Check early stopping
-                    if early_stopping_enabled and child_program.metrics:
-                        # Get the metric to track for early stopping
-                        current_score = None
-                        if self.config.early_stopping_metric in child_program.metrics:
-                            current_score = child_program.metrics[self.config.early_stopping_metric]
-                        elif self.config.early_stopping_metric == "combined_score":
-                            # Default metric not found, use safe average (standard pattern)
-                            current_score = safe_numeric_average(child_program.metrics)
-                        else:
-                            # User specified a custom metric that doesn't exist
-                            logger.warning(
-                                f"Early stopping metric '{self.config.early_stopping_metric}' not found, using safe numeric average"
-                            )
-                            current_score = safe_numeric_average(child_program.metrics)
-
-                        if current_score is not None and isinstance(current_score, (int, float)):
-                            # Check for improvement
-                            if self.config.early_stopping_patience > 0:
-                                improvement = current_score - best_score
-                                if improvement >= self.config.convergence_threshold:
-                                    best_score = current_score
-                                    iterations_without_improvement = 0
-                                    logger.debug(
-                                        f"New best score: {best_score:.4f} (improvement: {improvement:+.4f})"
-                                    )
-                                else:
-                                    iterations_without_improvement += 1
-                                    logger.debug(
-                                        f"No improvement: {iterations_without_improvement}/{self.config.early_stopping_patience}"
-                                    )
-
-                                # Check if we should stop
-                                if (
-                                    iterations_without_improvement
-                                    >= self.config.early_stopping_patience
-                                ):
-                                    self.early_stopping_triggered = True
-                                    logger.info(
-                                        f"🛑 Early stopping triggered at iteration {completed_iteration}: "
-                                        f"No improvement for {iterations_without_improvement} iterations "
-                                        f"(best score: {best_score:.4f})"
-                                    )
-                                    break
-
-                            else:
-                                # Event-based early stopping (patience <= 0).
-                                # patience == 0 and patience < 0 both land here
-                                # and are treated identically: stop as soon as
-                                # the metric reaches the convergence threshold.
-                                # Use >= rather than == to avoid fragile float
-                                # equality comparisons.
-                                if current_score >= self.config.convergence_threshold:
-                                    best_score = current_score
-                                    logger.info(
-                                        f"🛑 Early stopping (event-based) triggered at iteration {completed_iteration}: "
-                                        f"Task successfully solved with score {best_score:.4f}."
-                                    )
-                                    self.early_stopping_triggered = True
-                                    break
-
-            except FutureTimeoutError:
-                logger.error(
-                    f"⏰ Iteration {completed_iteration} timed out after {timeout_seconds}s "
-                    f"(evaluator timeout: {self.config.evaluator.timeout}s + 30s buffer). "
-                    f"Canceling future and continuing with next iteration."
-                )
-                # Cancel the future to clean up the process
-                future.cancel()
-            except Exception as e:
-                logger.error(f"Error processing result from iteration {completed_iteration}: {e}")
-
-            completed_iterations += 1
-
-            # --- REPS: Accumulate result for batch processing ---
-            if self._reps_enabled:
-                reps_batch_accumulator.append(result)
-
-                # Process REPS batch when we have enough results
-                if len(reps_batch_accumulator) >= self._reps_batch_size:
-                    await self._reps_process_batch(reps_batch_accumulator)
-                    self._reps_update_epsilon(completed_iterations, max_iterations)
-                    reps_prompt_extras = self._reps_build_prompt_extras()
-                    reps_batch_accumulator = []
-
-            # Remove completed iteration from island tracking
-            for island_id, iteration_list in island_pending.items():
-                if completed_iteration in iteration_list:
-                    iteration_list.remove(completed_iteration)
+            # End of done_tasks loop; check for early-stopping flags from inside.
+            if self.early_stopping_triggered:
+                break
+            if target_score is not None:
+                best = self.database.get_best_program()
+                if (
+                    best
+                    and best.metrics
+                    and "combined_score" in best.metrics
+                    and best.metrics["combined_score"] >= target_score
+                ):
                     break
 
-            # Submit next iterations maintaining island balance
-            for island_id in range(self.num_islands):
-                if (
-                    len(island_pending[island_id]) < batch_per_island
-                    and next_iteration < total_iterations
-                    and not self.shutdown_event.is_set()
-                ):
-                    # REPS: build iteration config for next dispatch
-                    reps_cfg = self._reps_build_iteration_config(
-                        island_id, reps_prompt_extras, max_iterations
-                    ) if self._reps_enabled else None
-                    future = self._submit_iteration(next_iteration, island_id, reps_cfg)
-                    if future:
-                        pending_futures[next_iteration] = future
-                        island_pending[island_id].append(next_iteration)
-                        next_iteration += 1
-                        break  # Only submit one iteration per completion to maintain balance
-
-        # --- REPS: Process any remaining accumulated results ---
+        # Final REPS batch flush.
         if self._reps_enabled and reps_batch_accumulator:
             await self._reps_process_batch(reps_batch_accumulator)
             reps_batch_accumulator = []
 
-        # Handle shutdown
-        if self.shutdown_event.is_set():
-            logger.info("Shutdown requested, canceling remaining evaluations...")
-            for future in pending_futures.values():
-                future.cancel()
+        # Shutdown drain: cancel any still-pending tasks.
+        if pending:
+            for t in pending.values():
+                t.cancel()
+            await asyncio.gather(*pending.values(), return_exceptions=True)
+            pending.clear()
 
         if self.early_stopping_triggered:
             logger.info("Evolution completed: early stopping triggered by convergence")
-        elif self.shutdown_event.is_set():
+        elif self._shutdown.is_set():
             logger.info("Evolution completed: shutdown requested")
         else:
             logger.info("Evolution completed: maximum iterations reached")
 
         return self.database.get_best_program()
 
-    def _submit_iteration(
-        self,
-        iteration: int,
-        island_id: Optional[int] = None,
-        reps_iter_config: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Future]:
-        """Submit an iteration to the process pool, optionally pinned to a specific island.
-
-        Args:
-            iteration: Iteration number
-            island_id: Target island
-            reps_iter_config: Optional REPS IterationConfig as dict
-        """
-        try:
-            # Use specified island or current island
-            target_island = island_id if island_id is not None else self.database.current_island
-
-            # --- REPS: Use parent from config if specified (for revisitation) ---
-            forced_parent_id = None
-            if reps_iter_config:
-                forced_parent_id = reps_iter_config.get("parent_id")
-
-            if forced_parent_id and forced_parent_id in self.database.programs:
-                parent = self.database.programs[forced_parent_id]
-                _, inspirations = self.database.sample_from_island(
-                    island_id=target_island, num_inspirations=self.config.prompt.num_top_programs
-                )
-            else:
-                # Use thread-safe sampling that doesn't modify shared state
-                parent, inspirations = self.database.sample_from_island(
-                    island_id=target_island, num_inspirations=self.config.prompt.num_top_programs
-                )
-
-            # Create database snapshot
-            db_snapshot = self._create_database_snapshot()
-            db_snapshot["sampling_island"] = target_island  # Mark which island this is for
-
-            # Submit to process pool
-            future = self.executor.submit(
-                _run_iteration_worker,
-                iteration,
-                db_snapshot,
-                parent.id,
-                [insp.id for insp in inspirations],
-                reps_iter_config,  # REPS: pass iteration config to worker
-            )
-
-            return future
-
-        except Exception as e:
-            logger.error(f"Error submitting iteration {iteration}: {e}")
-            return None
-
-    # --- REPS Controller Methods ---
+    # ------------------------------------------------------------------ #
+    # REPS controller-side methods (unchanged plumbing, snapshot-free)
+    # ------------------------------------------------------------------ #
 
     def _reps_init_reflection_engine(self, llm_ensemble):
         """Lazily initialize the reflection engine with an LLM ensemble."""
@@ -1200,9 +1190,6 @@ class ProcessParallelController:
             return None
 
         metrics = program.metrics
-
-        # Circle packing reports a raw objective alongside the normalized
-        # `combined_score`. Use the raw metric consistently for all F6 decisions.
         raw_score = metrics.get("sum_radii")
         if isinstance(raw_score, (int, float)) and not isinstance(raw_score, bool):
             return float(raw_score)
@@ -1237,14 +1224,189 @@ class ProcessParallelController:
         # F8: Dead-end warnings
         extras["dead_end_warnings"] = self._reps_build_dead_end_warnings()
 
+        # Item #3: unexplored directions + recent avoids, aggregated from
+        # the `reps_annotations.summary` blobs of the last K=10 programs.
+        # Empty strings when nothing is available — the prompt template
+        # (PROMPT team) skips empties.
+        unexplored, avoids = self._build_recent_directions_extras(k=10)
+        extras["unexplored_directions"] = unexplored
+        extras["recent_avoids"] = avoids
+
         return extras
+
+    # ------------------------------------------------------------------ #
+    # Helpers introduced by the 4-team parallel fix (items #1, #2, #3, #4)
+    # ------------------------------------------------------------------ #
+
+    def _record_convergence_event(
+        self,
+        *,
+        iteration: int,
+        parent_id: Optional[str],
+        reason: Optional[str],
+        worker_name: Optional[str],
+    ) -> None:
+        """Append a single convergence event to
+        ``<output_dir>/metrics/convergence_events.jsonl``.
+
+        Best-effort: any I/O failure is logged as a warning but does not
+        propagate, because the controller must continue advancing the
+        iteration counter (a dropped telemetry row is far less bad than a
+        dropped budget tick).
+        """
+        import json
+        import os
+
+        try:
+            if self._convergence_events_path is None:
+                metrics_dir = os.path.join(self.output_dir, "metrics")
+                os.makedirs(metrics_dir, exist_ok=True)
+                self._convergence_events_path = os.path.join(
+                    metrics_dir, "convergence_events.jsonl"
+                )
+            row = {
+                "iteration": iteration,
+                "parent_id": parent_id,
+                "reason": reason,
+                "timestamp": time.time(),
+                "worker_type": worker_name,
+            }
+            with open(self._convergence_events_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(row) + "\n")
+        except Exception as e:
+            logger.warning(
+                "Failed to persist convergence event for iteration %d: %s",
+                iteration,
+                e,
+            )
+
+    def _update_plateau_history(self) -> None:
+        """Append the current best combined_score to the plateau-history
+        ring. Called once per completed iteration (after the child, if any,
+        has been added to the database).
+        """
+        best = self.database.get_best_program()
+        if best is None or not best.metrics:
+            score = float("-inf")
+        else:
+            score = best.metrics.get(
+                "combined_score", safe_numeric_average(best.metrics)
+            )
+            if not isinstance(score, (int, float)):
+                score = float("-inf")
+        self._plateau_best_history.append(float(score))
+        # Keep it bounded; we only ever inspect the last plateau_window+1.
+        keep = self._plateau_window + 1
+        if len(self._plateau_best_history) > keep:
+            self._plateau_best_history = self._plateau_best_history[-keep:]
+
+    def _detect_plateau(self) -> bool:
+        """Return True when the best combined_score has not strictly
+        improved across the last `self._plateau_window` completed
+        iterations. We need at least window+1 history entries — the
+        reference score (before the window) plus `window` samples in the
+        window. A constant score qualifies as a plateau (no strict
+        improvement).
+        """
+        window = self._plateau_window
+        if window <= 0:
+            return False
+        if len(self._plateau_best_history) < window + 1:
+            return False
+        reference = self._plateau_best_history[-(window + 1)]
+        recent = self._plateau_best_history[-window:]
+        # Plateau <=> no strictly-greater value in `recent` vs. reference.
+        return all(r <= reference for r in recent)
+
+    def _build_recent_directions_extras(
+        self, k: int = 10
+    ) -> "tuple[str, str]":
+        """Aggregate `next_directions` and `avoid` entries across the last
+        K programs (newest-first) and return the (unexplored_block,
+        avoids_block) pair for prompt injection.
+
+        A `next_direction` is considered *unexplored* when no program newer
+        than the one that suggested it has an `approach` string sharing a
+        4-word contiguous sequence with it (a deliberately dumb keyword
+        check — see program_summarizer.direction_pursued_by_any).
+
+        Gracefully returns two empty strings when: no programs, no
+        summaries, or malformed summary blobs.
+        """
+        try:
+            from reps.program_summarizer import direction_pursued_by_any
+        except Exception:  # pragma: no cover - import guard
+            direction_pursued_by_any = None  # type: ignore
+
+        try:
+            entries = self.database.recent_summary_entries(k=k)
+        except Exception as e:
+            logger.debug("recent_summary_entries failed: %s", e)
+            return "", ""
+        if not entries:
+            return "", ""
+
+        # Entries are newest-first. For each direction we want to check
+        # whether any STRICTLY NEWER program's approach already covers it;
+        # build the list of (program, summary) with indexes so we can slice.
+        unexplored: List[str] = []
+        avoid_lines: List[str] = []
+
+        for idx, (prog, summary) in enumerate(entries):
+            iter_n = getattr(prog, "iteration_found", None)
+
+            # --- avoids: collect raw, capped at 5 across all programs ---
+            for a in summary.get("avoid") or []:
+                if not isinstance(a, str) or not a.strip():
+                    continue
+                suffix = f" (iter {iter_n})" if iter_n is not None else ""
+                avoid_lines.append(f"- {a.strip()}{suffix}")
+                if len(avoid_lines) >= 5:
+                    break
+
+            # --- unexplored directions: skip any pursued by a later program ---
+            later_approaches = [
+                (e[1].get("approach") or "")
+                for e in entries[:idx]
+                if isinstance(e[1], dict)
+            ]
+            for d in summary.get("next_directions") or []:
+                if not isinstance(d, str) or not d.strip():
+                    continue
+                pursued = False
+                if direction_pursued_by_any is not None:
+                    try:
+                        pursued = direction_pursued_by_any(d, later_approaches)
+                    except Exception:
+                        pursued = False
+                if pursued:
+                    continue
+                suffix = f" (suggested by iter {iter_n})" if iter_n is not None else ""
+                unexplored.append(f"- {d.strip()}{suffix}")
+                if len(unexplored) >= 5:
+                    break
+            if len(unexplored) >= 5 and len(avoid_lines) >= 5:
+                break
+
+        unexplored_block = (
+            "## Unexplored directions from recent archive\n"
+            + "\n".join(unexplored[:5])
+            if unexplored
+            else ""
+        )
+        avoids_block = (
+            "## Dead ends noted by recent siblings\n"
+            + "\n".join(avoid_lines[:5])
+            if avoid_lines
+            else ""
+        )
+        return unexplored_block, avoids_block
 
     def _reps_build_dead_end_warnings(self) -> str:
         """Build dead-end warning text from annotated programs."""
         if not self._reps_enabled or not self.config.reps.annotations.dead_end_awareness:
             return ""
 
-        # Collect dead-end annotations from recent programs
         dead_ends = []
         for pid, prog in self.database.programs.items():
             ann = prog.metadata.get("reps_annotations", {})
@@ -1261,41 +1423,58 @@ class ProcessParallelController:
         return ""
 
     def _reps_build_iteration_config(
-        self, island_id: int, prompt_extras: Dict[str, str], max_iterations: int
-    ) -> Optional[Dict[str, Any]]:
-        """Build a REPS IterationConfig dict for one iteration dispatch."""
+        self,
+        island_id: int,
+        prompt_extras: Dict[str, str],
+        max_iterations: int,
+    ) -> Optional["IterationConfig"]:
+        """Build a REPS IterationConfig object for one iteration dispatch.
+
+        Returns the dataclass directly now (no more asdict() across process
+        boundaries). Returns None when REPS is disabled; caller falls back to
+        a default IterationConfig.
+        """
         if not self._reps_enabled:
             return None
 
         # F2: ε-Revisitation check
-        if self._reps_rng.random() < self._reps_epsilon and self.config.reps.revisitation.enabled:
+        if (
+            self._reps_rng.random() < self._reps_epsilon
+            and self.config.reps.revisitation.enabled
+        ):
             target = self._reps_select_revisitation_target()
             if target is not None:
-                alt_type = self._reps_worker_pool.get_alternative_worker_type(
-                    target.metadata.get("reps_worker_type", "exploiter")
+                alt_name = self._reps_worker_pool.get_alternative_worker_name(
+                    target.metadata.get("reps_worker_name",
+                        target.metadata.get("reps_worker_type", "exploiter"))
                 )
                 config = self._reps_worker_pool.build_iteration_config(
-                    self.database, prompt_extras,
-                    override_type=alt_type,
+                    self.database,
+                    prompt_extras,
+                    override_name=alt_name,
                     target_island=island_id,
                 )
                 config.parent_id = target.id
                 config.is_revisitation = True
-                return asdict(config)
+                return config
 
-        # Normal iteration with WorkerPool
         config = self._reps_worker_pool.build_iteration_config(
-            self.database, prompt_extras, target_island=island_id,
+            self.database,
+            prompt_extras,
+            target_island=island_id,
         )
 
-        # F5: Intelligence Contracts override
+        # F5: Intelligence Contracts override — respect axis ownership
         if self._reps_contracts.enabled:
             contract = self._reps_contracts.select()
             if contract:
-                config.model_id = contract.model_id
-                config.temperature = contract.temperature
+                worker_cfg = self._reps_worker_pool.get_worker_config(config.worker_name)
+                if contract.model_id and not worker_cfg.owns_model:
+                    config.model_id = contract.model_id
+                if contract.temperature is not None and not worker_cfg.owns_temperature:
+                    config.temperature = contract.temperature
 
-        return asdict(config)
+        return config
 
     def _reps_select_revisitation_target(self) -> Optional[Program]:
         """Select a program with high score but low exploration for revisitation."""
@@ -1303,12 +1482,12 @@ class ProcessParallelController:
         for pid, prog in self.database.programs.items():
             if not prog.metrics:
                 continue
-            score = prog.metrics.get("combined_score", safe_numeric_average(prog.metrics))
-            # Count descendants
+            score = prog.metrics.get(
+                "combined_score", safe_numeric_average(prog.metrics)
+            )
             num_descendants = sum(
                 1 for p in self.database.programs.values() if p.parent_id == pid
             )
-            # Recency bonus
             age = self._reps_batch_count - prog.metadata.get("reps_batch_found", 0)
             recency_window = self.config.reps.revisitation.recency_window
             recency_bonus = 1.5 if age < recency_window else 1.0
@@ -1334,17 +1513,14 @@ class ProcessParallelController:
         )
 
     async def _reps_process_batch(self, batch_results: List):
-        """Run all REPS controller-side modules at a batch boundary.
-
-        Called after a batch of iteration results has been processed.
-        """
+        """Run all REPS controller-side modules at a batch boundary."""
         if not self._reps_enabled or not batch_results:
             return
 
         self._reps_batch_count += 1
 
-        # Convert SerializableResults to lightweight result dicts for REPS modules
         from reps.iteration_config import IterationResult
+
         reps_results = []
         for r in batch_results:
             meta = r.reps_meta or {}
@@ -1367,22 +1543,22 @@ class ProcessParallelController:
                 llm_response=r.llm_response,
                 artifacts=r.artifacts,
                 diff=meta.get("diff", ""),
-                worker_type=meta.get("worker_type", "exploiter"),
+                worker_name=meta.get("worker_name", meta.get("worker_type", "exploiter")),
                 is_revisitation=meta.get("is_revisitation", False),
                 model_id=meta.get("model_id"),
                 temperature=meta.get("temperature"),
                 parent_score=parent_score,
                 child_score=child_score,
                 improved=improved,
+                turns=meta.get("turns", []),
                 iteration_time=r.iteration_time,
                 tokens_in=meta.get("tokens_in", 0),
                 tokens_out=meta.get("tokens_out", 0),
-                wall_clock_seconds=r.iteration_time,
+                wall_clock_seconds=meta.get("wall_clock_seconds", r.iteration_time),
             )
             reps_results.append(rr)
 
-            # Update worker pool yield stats
-            self._reps_worker_pool.record_result(rr.worker_type, rr.improved)
+            self._reps_worker_pool.record_result(rr.worker_name, rr.improved)
 
         # F4: Convergence Monitor
         from reps.convergence_monitor import ConvergenceAction
@@ -1410,7 +1586,9 @@ class ProcessParallelController:
         if self._reps_contracts.enabled:
             for rr in reps_results:
                 if rr.model_id and rr.temperature is not None:
-                    self._reps_contracts.update(rr.model_id, rr.temperature, rr.improved)
+                    self._reps_contracts.update(
+                        rr.model_id, rr.temperature, rr.improved
+                    )
 
         # F1: Reflection Engine
         if self._reps_reflection and self._reps_reflection_config.get("enabled", True):
@@ -1440,9 +1618,9 @@ class ProcessParallelController:
 
         # F8: Annotate candidates
         if self.config.reps.annotations.enabled and self._reps_current_reflection:
-            self._reps_annotate_candidates(reps_results)
+            await self._reps_annotate_candidates(reps_results)
 
-    def _reps_annotate_candidates(self, reps_results: List):
+    async def _reps_annotate_candidates(self, reps_results: List):
         """F8: Annotate candidates with reflection-derived metadata."""
         reflection = self._reps_current_reflection or {}
         working = reflection.get("working_patterns", [])
@@ -1455,21 +1633,23 @@ class ProcessParallelController:
             if pid and pid in self.database.programs:
                 prog = self.database.programs[pid]
                 annotations = prog.metadata.get("reps_annotations", {})
-                annotations["worker_type"] = rr.worker_type
+                annotations["worker_name"] = rr.worker_name
                 annotations["model_used"] = rr.model_id or "default"
 
-                # Mark as dead end if it regressed and matches failing patterns
                 if not rr.improved and rr.child_score < rr.parent_score * 0.95:
                     annotations["dead_end"] = True
                     if failing:
                         annotations["outcome"] = failing[0][:200]
 
-                # Add hypothesis from working patterns
                 if rr.improved and working:
                     annotations["hypothesis"] = working[0][:200]
 
                 annotations["batch"] = self._reps_batch_count
                 prog.metadata["reps_annotations"] = annotations
-                # Set reps_batch_found for recency bonus in revisitation
                 if "reps_batch_found" not in prog.metadata:
                     prog.metadata["reps_batch_found"] = self._reps_batch_count
+
+        # Per-program summaries moved to per-iteration path (see
+        # _summarize_child_inline). Batch annotation only adds tags now.
+
+
