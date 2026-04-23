@@ -477,13 +477,14 @@ class ProcessParallelController:
         self.database = database
         self.evolution_tracer = evolution_tracer
         self.file_suffix = file_suffix
-        self.output_dir = output_dir or "openevolve_output"
+        self.output_dir = output_dir
 
         self.executor: Optional[ProcessPoolExecutor] = None
         self.shutdown_event = mp.Event()
         self.early_stopping_triggered = False
         self._cumulative_tokens = {"in": 0, "out": 0}
         self._warned_about_combined_score = False
+        self._reps_metrics = None
 
         # Number of worker processes
         self.num_workers = config.evaluator.parallel_evaluations
@@ -516,7 +517,10 @@ class ProcessParallelController:
             self._reps_contracts = ContractSelector(contracts_cfg)
             self._reps_sota = SOTAController(asdict(reps.sota))
 
-            self._reps_metrics = MetricsLogger(self.output_dir)
+            if self.output_dir:
+                self._reps_metrics = MetricsLogger(self.output_dir)
+            else:
+                logger.info("REPS metrics logging disabled: no output_dir provided")
 
             # Reflection engine needs an LLM — will be initialized lazily
             # since we need the ensemble from the controller
@@ -1070,6 +1074,30 @@ class ProcessParallelController:
                 llm_ensemble, self._reps_reflection_config
             )
 
+    def _reps_get_sota_score(self, program: Optional[Program]) -> Optional[float]:
+        """Return the metric F6 should compare against the configured target score.
+
+        Prefer raw objective metrics when available, since `combined_score` may be a
+        normalized surrogate used for selection rather than the metric the target is
+        expressed in.
+        """
+        if program is None or not program.metrics:
+            return None
+
+        metrics = program.metrics
+
+        # Circle packing reports a raw objective alongside the normalized
+        # `combined_score`. Use the raw metric consistently for all F6 decisions.
+        raw_score = metrics.get("sum_radii")
+        if isinstance(raw_score, (int, float)) and not isinstance(raw_score, bool):
+            return float(raw_score)
+
+        combined_score = metrics.get("combined_score")
+        if isinstance(combined_score, (int, float)) and not isinstance(combined_score, bool):
+            return float(combined_score)
+
+        return safe_numeric_average(metrics)
+
     def _reps_build_prompt_extras(self) -> Dict[str, str]:
         """Build the prompt extras dict from all REPS modules."""
         extras = {}
@@ -1084,14 +1112,10 @@ class ProcessParallelController:
             )
 
         # F6: SOTA injection
-        # Use sum_radii (raw score) for gap calculation, not combined_score (which may be a ratio)
         if self._reps_sota.enabled and self._reps_sota.target is not None:
             best = self.database.get_best_program()
-            if best and best.metrics:
-                best_score = best.metrics.get(
-                    "sum_radii",
-                    best.metrics.get("combined_score", safe_numeric_average(best.metrics))
-                )
+            best_score = self._reps_get_sota_score(best)
+            if best_score is not None:
                 self._reps_sota.get_regime(best_score)
                 extras["sota_injection"] = self._reps_sota.format_for_prompt()
 
@@ -1261,10 +1285,8 @@ class ProcessParallelController:
         # F6: SOTA-driven worker reallocation
         if self._reps_sota.enabled and self._reps_sota.target is not None:
             best = self.database.get_best_program()
-            if best and best.metrics:
-                best_score = best.metrics.get(
-                    "combined_score", safe_numeric_average(best.metrics)
-                )
+            best_score = self._reps_get_sota_score(best)
+            if best_score is not None:
                 regime = self._reps_sota.get_regime(best_score)
                 new_alloc = self._reps_sota.modulate_worker_allocation(regime)
                 self._reps_worker_pool.set_allocation(new_alloc)
@@ -1281,23 +1303,25 @@ class ProcessParallelController:
                 self._reps_current_reflection = await self._reps_reflection.reflect(
                     reps_results, self.database, self._reps_current_reflection,
                 )
-                self._reps_metrics.log_reflection(
-                    self._reps_batch_count,
-                    self._reps_current_reflection,
-                    reflection_calls=self._reps_reflection.total_reflection_calls,
-                    reflection_tokens=self._reps_reflection.total_reflection_tokens,
-                )
+                if self._reps_metrics is not None:
+                    self._reps_metrics.log_reflection(
+                        self._reps_batch_count,
+                        self._reps_current_reflection,
+                        reflection_calls=self._reps_reflection.total_reflection_calls,
+                        reflection_tokens=self._reps_reflection.total_reflection_tokens,
+                    )
             except Exception as e:
                 logger.warning(f"Reflection failed: {e}")
 
         # Metrics logging
-        self._reps_metrics.log_batch(
-            batch_number=self._reps_batch_count,
-            batch_results=reps_results,
-            database=self.database,
-            edit_entropy=self._reps_convergence.last_entropy,
-            strategy_divergence=self._reps_convergence.last_divergence,
-        )
+        if self._reps_metrics is not None:
+            self._reps_metrics.log_batch(
+                batch_number=self._reps_batch_count,
+                batch_results=reps_results,
+                database=self.database,
+                edit_entropy=self._reps_convergence.last_entropy,
+                strategy_divergence=self._reps_convergence.last_divergence,
+            )
 
         # F8: Annotate candidates
         if self.config.reps.annotations.enabled and self._reps_current_reflection:

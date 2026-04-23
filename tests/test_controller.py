@@ -71,6 +71,24 @@ def evaluate(program_path):
         self.assertIsNone(controller.executor)
         self.assertIsNotNone(controller.shutdown_event)
 
+    def test_controller_with_reps_does_not_create_default_output_dir(self):
+        """Direct controller construction should not create a fallback output dir."""
+        self.config.reps.enabled = True
+
+        old_cwd = os.getcwd()
+        isolated_cwd = tempfile.mkdtemp()
+        try:
+            os.chdir(isolated_cwd)
+            controller = ProcessParallelController(self.config, self.eval_file, self.database)
+            self.assertIsNone(controller.output_dir)
+            self.assertIsNone(controller._reps_metrics)
+            self.assertFalse(os.path.exists("openevolve_output"))
+        finally:
+            os.chdir(old_cwd)
+            import shutil
+
+            shutil.rmtree(isolated_cwd, ignore_errors=True)
+
     def test_controller_start_stop(self):
         """Test starting and stopping the controller"""
         controller = ProcessParallelController(self.config, self.eval_file, self.database)
@@ -184,6 +202,50 @@ def evaluate(program_path):
         error_result = SerializableResult(error="Test error", iteration=5)
         self.assertEqual(error_result.error, "Test error")
         self.assertIsNone(error_result.child_program_dict)
+
+    def test_sota_steering_uses_same_raw_metric_for_prompt_and_reallocation(self):
+        """F6 should use the same score basis across both steering callsites."""
+        self.config.reps.enabled = True
+        self.config.reps.sota.enabled = True
+        self.config.reps.sota.target_score = 2.635
+        self.config.reps.convergence.enabled = False
+        self.config.reps.contracts.enabled = False
+        self.config.reps.reflection.enabled = False
+
+        database = ProgramDatabase(self.config.database)
+        database.add(
+            Program(
+                id="best_raw",
+                code="def solve(): pass",
+                language="python",
+                metrics={
+                    "sum_radii": 2.5,
+                    "combined_score": 0.95,
+                },
+                iteration_found=0,
+            )
+        )
+
+        controller = ProcessParallelController(self.config, self.eval_file, database)
+        self.assertIsNone(controller._reps_metrics)
+
+        extras = controller._reps_build_prompt_extras()
+        expected_gap = (2.635 - 2.5) / 2.635
+        self.assertAlmostEqual(controller._reps_sota.current_gap, expected_gap)
+        self.assertIn("5.12%", extras["sota_injection"])
+
+        async def run_batch():
+            await controller._reps_process_batch(
+                [SerializableResult(iteration=1, error="synthetic failure")]
+            )
+
+        asyncio.run(run_batch())
+
+        self.assertAlmostEqual(controller._reps_sota.current_gap, expected_gap)
+        self.assertEqual(controller._reps_sota.current_regime.name, "NEAR")
+        self.assertAlmostEqual(controller._reps_worker_pool.allocation["exploiter"], 0.7)
+        self.assertAlmostEqual(controller._reps_worker_pool.allocation["explorer"], 0.15)
+        self.assertAlmostEqual(controller._reps_worker_pool.allocation["crossover"], 0.15)
 
 
 if __name__ == "__main__":
