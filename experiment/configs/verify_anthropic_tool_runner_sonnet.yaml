@@ -1,6 +1,7 @@
-# experiment/configs/verify_anthropic_tool_runner.yaml
-# Verification Run B: native Anthropic tool-use worker with extended thinking.
-# Defaults (CLI args override):
+# experiment/configs/verify_anthropic_tool_runner_sonnet.yaml
+# Variant: Sonnet 4.6 drives the tool-runner worker, Opus 4.7 runs the
+# per-program summarizer. Tests whether a cheaper/faster main agent with a
+# stronger reflector produces better trajectories than the inverse.
 initial_program: experiment/benchmarks/circle_packing/initial_program.py
 evaluator_path: experiment/benchmarks/circle_packing/evaluator.py
 
@@ -21,9 +22,12 @@ llm:
   retries: 3
   retry_delay: 5
   models:
-    - name: claude-opus-4-7
+    - name: claude-sonnet-4-6
       provider: anthropic
       weight: 1.0
+    - name: claude-opus-4-7
+      provider: anthropic
+      weight: 0.0   # present for summarizer; not sampled by the main worker
 
 prompt:
   num_top_programs: 3
@@ -54,7 +58,7 @@ reps:
       - name: atr_explorer
         impl: anthropic_tool_runner
         role: explorer
-        model_id: claude-opus-4-7
+        model_id: claude-sonnet-4-6
         generation_mode: full
         tools: [view_parent, view_program, edit_file, run_tests, submit_child, mark_converged]
         max_turns: 30
@@ -89,7 +93,7 @@ reps:
         impl_options:
           thinking_effort: high
           thinking_display: summarized
-          code_execution: true   # server-side code execution + programmatic tool calling
+          code_execution: true
           retries: 3
           max_tokens: 64000
           task_budget_total: 64000
@@ -108,7 +112,7 @@ reps:
     enabled: true
   summarizer:
     enabled: true
-    model_id: claude-sonnet-4-6
+    model_id: claude-opus-4-7
     task_instructions: |
       Benchmark: circle packing n=26 in the unit square. validity=0 / score=0
       means the code produced circles that either overlap one another or
