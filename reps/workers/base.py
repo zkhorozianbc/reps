@@ -71,6 +71,10 @@ class WorkerConfig:
     max_turns: int = 1
     uses_evaluator: bool = False
     system_prompt_template: Optional[str] = None
+    # Free-form per-benchmark context injected into the worker's system
+    # prompt (e.g. "target score ≥ X; margins are small — a 0.001
+    # absolute gain is a big improvement"). Optional.
+    baseline_context: Optional[str] = None
     impl_options: Dict[str, Any] = field(default_factory=dict)
     owns_model: bool = True                # if True, ContractSelector does NOT override model
     owns_temperature: bool = False         # if True, ContractSelector does NOT override temperature
@@ -142,6 +146,15 @@ class WorkerRequest:
     prompt_extras: Dict[str, str]             # reflection / sota_injection / dead_end_warnings
     temperature: Optional[float] = None
     model_id: Optional[str] = None
+    # Most-recent completed programs across the whole database (not just the
+    # parent's island), newest-first. Rendered in the "Previous Attempts"
+    # section of evolution_history.txt so the worker sees actual recent
+    # iteration history rather than a duplicate of top_programs.
+    recent_iterations: List["Program"] = field(default_factory=list)
+    # Parent's evaluation artifacts (stdout/stderr/etc) — already loaded from
+    # disk/JSON by the controller so workers don't need a database handle.
+    # Passed to PromptSampler.build_prompt(program_artifacts=...).
+    parent_artifacts: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -170,6 +183,12 @@ class WorkerResult:
     usage: Dict[str, int] = field(default_factory=dict)
     wall_clock_seconds: float = 0.0
     error: Optional[WorkerError] = None
+    # When True, the worker signalled via `mark_converged` that the parent is at
+    # saturation and no productive mutation is available this iteration.
+    # CONTROLLER team interprets this: no child is persisted to the database,
+    # but metadata (reason, cost) is recorded. `child_code` will be empty.
+    converged: bool = False
+    converged_reason: Optional[str] = None
 
 
 class Worker(Protocol):

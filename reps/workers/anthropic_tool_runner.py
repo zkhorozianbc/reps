@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import json
 import logging
 import os
 import time
@@ -18,7 +19,11 @@ import httpx
 from anthropic import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
 from reps.llm.anthropic import REASONING_MODEL_PATTERNS
+
+import os
+_MSG_DEBUG = os.environ.get("REPS_ATR_MSG_DEBUG") == "1"
 from reps.program_summarizer import format_summary_for_prompt
+from reps.prompt_sampler import build_budget_block, build_siblings_block
 from reps.workers.base import (
     ContentBlock,
     TurnRecord,
@@ -30,11 +35,55 @@ from reps.workers.base import (
 )
 from reps.workers.edit_serializer import serialize_diff_blocks
 from reps.workers.registry import register
-from reps.workers.tools import build_tool_impls, build_tool_schemas
+from reps.workers.tools import (
+    _format_metrics_precise,
+    build_tool_impls,
+    build_tool_schemas,
+)
 
 logger = logging.getLogger(__name__)
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "prompt_templates"
+
+
+def _strip_full_rewrite_tail(user_text: str) -> str:
+    """Remove the full-rewrite task framing that the sampler's
+    full_rewrite_user.txt template appends. The tool-runner uses edit_file
+    mechanics, so instructions telling the model to "provide the complete
+    new program code" and a trailing ```python # Your rewritten program
+    here ``` skeleton are actively harmful — they encourage the model to
+    dump a full-rewrite body instead of making targeted edits.
+
+    The template's tail looks like:
+        ...
+        # Task
+        Rewrite the program to improve its FITNESS SCORE.
+        ...
+        Provide the complete new program code.
+        IMPORTANT: Make sure your rewritten program maintains the same ...
+        ```python
+        # Your rewritten program here
+        ```
+
+    Strategy: locate the "# Task" header that precedes this rewrite block.
+    If found, cut from that point to the end. This also drops the fitness-
+    dimension boilerplate, which is already expressed in the system prompt
+    for the tool-runner.
+    """
+    if not user_text:
+        return user_text
+    idx = user_text.find("\n# Task\n")
+    if idx == -1:
+        # Fallback: try to find the skeleton itself and trim from there.
+        skel = user_text.find("# Your rewritten program here")
+        if skel == -1:
+            return user_text
+        # Walk backwards to the start of the ```<lang> fence.
+        fence = user_text.rfind("```", 0, skel)
+        if fence != -1:
+            return user_text[:fence].rstrip() + "\n"
+        return user_text[:skel].rstrip() + "\n"
+    return user_text[:idx].rstrip() + "\n"
 
 
 @register("anthropic_tool_runner")
@@ -112,6 +161,8 @@ class AnthropicToolRunnerWorker:
 
         submitted_code: Optional[str] = None
         submitted_desc: Optional[str] = None
+        converged_flag: bool = False
+        converged_reason: Optional[str] = None
 
         for turn_idx in range(self.config.max_turns):
             try:
@@ -194,14 +245,16 @@ class AnthropicToolRunnerWorker:
                 )
 
             if stop_reason == "end_turn":
-                # Defensive: if submit_child was called (e.g. from inside a
-                # code_execution block) and the final stop_reason wraps up as
-                # end_turn, let the tool_use dispatch path below process it.
-                has_submit = any(
-                    getattr(raw, "type", None) == "tool_use" and raw.name == "submit_child"
+                # Defensive: if a terminal tool (submit_child or mark_converged)
+                # was called (e.g. from inside a code_execution block) and the
+                # final stop_reason wraps up as end_turn, let the tool_use
+                # dispatch path below process it.
+                has_terminal = any(
+                    getattr(raw, "type", None) == "tool_use"
+                    and raw.name in ("submit_child", "mark_converged")
                     for raw in response.content
                 )
-                if not has_submit:
+                if not has_terminal:
                     return self._fail(
                         WorkerError(kind="PARSE_ERROR", detail="end_turn without submit_child"),
                         turns, usage_total, t0,
@@ -216,6 +269,15 @@ class AnthropicToolRunnerWorker:
 
             # Echo assistant turn verbatim (thinking blocks + signatures preserved).
             messages.append({"role": "assistant", "content": assistant_blocks_for_message})
+            # future: inject fresh budget block on each loop turn
+            # The initial user prompt has "Turn: 1 / max_turns" (built in
+            # _build_initial_prompt via build_budget_block). Later turns
+            # don't re-render the block, so the model can't see live Turn N
+            # / max_turns or cumulative tokens out. A targeted extension
+            # would prepend a fresh build_budget_block(current_turn=turn_idx+1,
+            # max_turns=self.config.max_turns, cumulative_out=<sum output
+            # tokens from usage_total>) to the next user (tool_result) turn.
+            # Deferred — too invasive for the current PROMPT-team scope.
 
             # Dispatch every tool_use block in this turn.
             tool_result_blocks: List[Dict[str, Any]] = []
@@ -231,6 +293,44 @@ class AnthropicToolRunnerWorker:
                 if name == "submit_child":
                     code = args.get("code", "")
                     desc = args.get("changes_description", "")
+                    # Reject empty / placeholder / suspiciously short payloads
+                    # BEFORE attempting to compile. The model sometimes submits
+                    # sentinel strings ("code_placeholder", "...", "TODO")
+                    # instead of the real program body; letting those through
+                    # clobbers the parent with garbage and burns an iteration.
+                    stripped = (code or "").strip()
+                    _placeholders = {
+                        "code_placeholder",
+                        "PLACEHOLDER_USE_INFLIGHT",
+                        "TODO",
+                        "...",
+                    }
+                    if (
+                        not stripped
+                        or stripped in _placeholders
+                        or len(stripped) < 30
+                    ):
+                        err_text = (
+                            f"REJECTED: submitted code is empty / placeholder / "
+                            f"too short (len={len(stripped)}). Retry with actual "
+                            f"program code."
+                        )
+                        tool_result_blocks.append({
+                            "type": "tool_result",
+                            "tool_use_id": tid,
+                            "content": err_text,
+                            "is_error": True,
+                        })
+                        tool_result_turn_blocks.append(ContentBlock(
+                            type="tool_result",
+                            tool_use_id=tid,
+                            tool_result_for_id=tid,
+                            tool_result_content=err_text,
+                            tool_result_is_error=True,
+                        ))
+                        # Do NOT terminate — let the model retry within its
+                        # remaining turn budget.
+                        continue
                     try:
                         compile(code, "<submitted>", "exec")
                     except SyntaxError as se:
@@ -251,17 +351,65 @@ class AnthropicToolRunnerWorker:
                         continue
                     submitted_code = code
                     submitted_desc = desc
+                    # Auto-reevaluate the submitted program synchronously on
+                    # the evaluator (same call path as run_tests). The result
+                    # is surfaced back to the model in the tool_result payload
+                    # so that iterations where the model tweaks code in a
+                    # code_execution scratch after its last run_tests can see
+                    # what they actually submitted scored. We never REJECT —
+                    # just surface, so the controller still persists the child.
+                    accept_text = "accepted"
+                    if ctx.evaluator is not None:
+                        try:
+                            scratch_id = ctx.scratch_id_factory()
+                            outcome = await ctx.evaluator.evaluate_isolated(
+                                code, program_id=scratch_id, scratch=True
+                            )
+                            metrics_precise = _format_metrics_precise(outcome.metrics)
+                            accept_text = (
+                                "accepted\n\n## Submitted program auto-reevaluation\n"
+                                + json.dumps(metrics_precise, sort_keys=True)
+                            )
+                        except Exception as re_exc:
+                            accept_text = (
+                                "accepted\n\n## Submitted program auto-reevaluation\n"
+                                f"ERROR: {type(re_exc).__name__}: {re_exc}"
+                            )
+                    else:
+                        accept_text = (
+                            "accepted\n\n## Submitted program auto-reevaluation\n"
+                            "SKIPPED: no evaluator attached (uses_evaluator=False)"
+                        )
                     tool_result_blocks.append({
                         "type": "tool_result",
                         "tool_use_id": tid,
-                        "content": "accepted",
+                        "content": accept_text,
                         "is_error": False,
                     })
                     tool_result_turn_blocks.append(ContentBlock(
                         type="tool_result",
                         tool_use_id=tid,
                         tool_result_for_id=tid,
-                        tool_result_content="accepted",
+                        tool_result_content=accept_text,
+                        tool_result_is_error=False,
+                    ))
+                    terminated = True
+                elif name == "mark_converged":
+                    reason = args.get("reason", "") if isinstance(args, dict) else ""
+                    converged_flag = True
+                    converged_reason = reason
+                    ack = "acknowledged: converged"
+                    tool_result_blocks.append({
+                        "type": "tool_result",
+                        "tool_use_id": tid,
+                        "content": ack,
+                        "is_error": False,
+                    })
+                    tool_result_turn_blocks.append(ContentBlock(
+                        type="tool_result",
+                        tool_use_id=tid,
+                        tool_result_for_id=tid,
+                        tool_result_content=ack,
                         tool_result_is_error=False,
                     ))
                     terminated = True
@@ -299,6 +447,21 @@ class AnthropicToolRunnerWorker:
             ))
             messages.append({"role": "user", "content": tool_result_blocks})
 
+            if terminated and converged_flag:
+                # Convergence short-circuit: the controller (team 3) reads
+                # `converged=True` and skips persisting a child, recording
+                # only metadata. No child_code is produced.
+                return WorkerResult(
+                    child_code="",
+                    turns=turns,
+                    turn_count=len(turns),
+                    usage=usage_total,
+                    wall_clock_seconds=time.monotonic() - t0,
+                    error=None,
+                    converged=True,
+                    converged_reason=converged_reason,
+                )
+
             if terminated and submitted_code is not None:
                 # Compute applied_edit per D1 hybrid rule.
                 if edit_accumulator:
@@ -317,75 +480,15 @@ class AnthropicToolRunnerWorker:
                     error=None,
                 )
 
-        # Turn budget exhausted without submit_child. Give the model one final
-        # nudge to ship whatever it has before we fail.
-        nudge_text = (
-            f"You have reached the turn limit (max_turns={self.config.max_turns}). "
-            "Your next and final response MUST call submit_child with your best "
-            "working program so far — whatever you have. Do not call any other "
-            "tools. Do not do any more editing or testing. Submit now."
-        )
-        messages.append({"role": "user", "content": [{"type": "text", "text": nudge_text}]})
-        turns.append(TurnRecord(
-            index=len(turns),
-            role="user",
-            blocks=[ContentBlock(type="text", text=nudge_text)],
-            worker_type="anthropic_tool_runner",
-        ))
-        try:
-            final_resp = await self._call_with_retry(
-                model=model,
-                system_prompt=system_prompt,
-                messages=messages,
-                tools=tool_schemas,
-                is_reasoning=is_reasoning,
-                container=container_id,
-            )
-        except WorkerError as we:
-            return self._fail(we, turns, usage_total, t0)
-
-        self._accumulate_usage(usage_total, final_resp.usage)
-        final_blocks_turn = [self._raw_block_to_content_block(r) for r in final_resp.content]
-        turns.append(TurnRecord(
-            index=len(turns),
-            role="assistant",
-            blocks=final_blocks_turn,
-            model_id=model,
-            usage=self._snapshot_usage(final_resp.usage),
-            stop_reason=final_resp.stop_reason,
-            worker_type="anthropic_tool_runner",
-        ))
-        # Extract submit_child call from the final response, if present.
-        for raw in final_resp.content:
-            if getattr(raw, "type", None) == "tool_use" and raw.name == "submit_child":
-                code = (raw.input or {}).get("code", "")
-                desc = (raw.input or {}).get("changes_description", "")
-                try:
-                    compile(code, "<submitted>", "exec")
-                except SyntaxError as se:
-                    return self._fail(
-                        WorkerError(kind="PARSE_ERROR", detail=f"final submit SyntaxError: {se}"),
-                        turns, usage_total, t0,
-                    )
-                applied = (
-                    serialize_diff_blocks(edit_accumulator)
-                    if edit_accumulator
-                    else self._compute_applied_edit(code, request)
-                )
-                return WorkerResult(
-                    child_code=code,
-                    changes_description=desc,
-                    changes_summary=(desc or "")[:120],
-                    applied_edit=applied,
-                    turns=turns,
-                    turn_count=len(turns),
-                    usage=usage_total,
-                    wall_clock_seconds=time.monotonic() - t0,
-                    error=None,
-                )
-        # Final nudge still didn't yield a submit_child.
+        # Turn budget exhausted without submit_child. Surface it as a clean
+        # MAX_TURNS_HIT; if the model needs more turns, raise max_turns in the
+        # config. (A prior version appended a "final nudge" user message here,
+        # which produced two consecutive user turns and tripped Anthropic's
+        # programmatic-tool-calling contract: when the last assistant turn had
+        # a tool_use with caller=code_execution_20260120, the next user turn
+        # must contain only tool_result blocks.)
         return self._fail(
-            WorkerError(kind="MAX_TURNS_HIT", detail=f"max_turns={self.config.max_turns} + final nudge ignored"),
+            WorkerError(kind="MAX_TURNS_HIT", detail=f"max_turns={self.config.max_turns}"),
             turns, usage_total, t0,
         )
 
@@ -401,13 +504,13 @@ class AnthropicToolRunnerWorker:
             current_program=request.parent.code,
             parent_program=request.parent.code,
             program_metrics=request.parent.metrics,
-            previous_programs=[p.to_dict() for p in request.top_programs],
-            top_programs=[p.to_dict() for p in (request.top_programs + request.inspirations)],
+            previous_programs=[p.to_dict() for p in request.recent_iterations],
+            top_programs=[p.to_dict() for p in request.top_programs],
             inspirations=[p.to_dict() for p in request.inspirations],
             language=request.language,
             evolution_round=request.iteration,
             diff_based_evolution=False,  # tool runner handles its own edit mechanics
-            program_artifacts=None,
+            program_artifacts=request.parent_artifacts,
             feature_dimensions=request.feature_dimensions,
             current_changes_description=None,
             **request.prompt_extras,
@@ -419,8 +522,68 @@ class AnthropicToolRunnerWorker:
         except Exception:
             system_text = prompt.get("system", "")
 
-        # Prepend parent's per-program summary if available.
+        # Inject per-benchmark baseline context into the {baseline_context}
+        # slot if the template has one. Empty string when unset so the
+        # template collapses to whitespace cleanly.
+        bc = (self.config.baseline_context or "").strip()
+        bc_block = f"\n{bc}\n" if bc else ""
+        if "{baseline_context}" in system_text:
+            system_text = system_text.replace("{baseline_context}", bc_block)
+        elif bc_block:
+            # Template doesn't have a slot — append at end.
+            system_text = system_text.rstrip() + "\n" + bc_block
+
         user_text = prompt.get("user", "")
+
+        # Post-process: the sampler rendered full_rewrite_user.txt (because we
+        # pass diff_based_evolution=False), which ends with a "# Task / Provide
+        # the complete new program code" block and a ```python # Your rewritten
+        # program here ``` skeleton. That framing contradicts the tool-runner's
+        # edit_file-based workflow. Chose to post-process (Team 2 scope
+        # forbids creating new templates). Strip the rewrite task block and
+        # its code-skeleton suffix; keep everything above.
+        user_text = _strip_full_rewrite_tail(user_text)
+
+        # Append un-consumed prompt_extras (mirrors single_call.py:80-84).
+        # The sampler may have already rendered these via template slots;
+        # skip when the value is already substring-present to avoid dup.
+        # For multi-line values (e.g. pre-formatted bullet-list strings like
+        # unexplored_directions / recent_avoids which the CONTROLLER team
+        # ships as "## Header\n- ..."), raw `v in user_text` can drop the
+        # block when whitespace differs. Probe by the first non-whitespace
+        # line instead: if that line is present verbatim in user_text,
+        # assume the block was already rendered via a template slot.
+        for key, value in (request.prompt_extras or {}).items():
+            if not isinstance(value, str):
+                continue
+            v = value.strip()
+            if not v:
+                continue
+            probe = v.splitlines()[0].strip()
+            if probe and probe in user_text:
+                continue
+            # Pre-formatted blocks (value already starts with "## ...")
+            # get injected verbatim — wrapping them in a derived "## Title"
+            # would double the heading.
+            if v.lstrip().startswith("## "):
+                user_text = user_text + "\n\n" + v + "\n"
+            else:
+                title = key.replace("_", " ").title()
+                user_text = user_text + f"\n\n## {title}\n{value}\n"
+
+        # Append a '## Siblings you can view_program' bullet list with short
+        # 8-char ids + one-liners (from notebook.key_insight or score). This
+        # makes the call-site obvious: the model sees concrete ids it can
+        # feed straight into view_program(id). 0/30 iterations used
+        # view_program in the prior run because the ids were not surfaced
+        # near the tool description.
+        top_dicts = [p.to_dict() for p in request.top_programs]
+        insp_dicts = [p.to_dict() for p in request.inspirations]
+        siblings_block = build_siblings_block(top_dicts, insp_dicts, limit=8)
+        if siblings_block:
+            user_text = user_text.rstrip() + "\n\n" + siblings_block + "\n"
+
+        # Prepend parent's per-program summary if available.
         parent_summary = (
             request.parent.metadata.get("reps_annotations", {}).get("summary")
             if request.parent and request.parent.metadata
@@ -429,6 +592,14 @@ class AnthropicToolRunnerWorker:
         if parent_summary:
             insights_text = format_summary_for_prompt(parent_summary, label="Parent's notebook")
             user_text = insights_text + "\n\n" + user_text
+
+        # Prepend the iteration-budget block at the very top (above the
+        # parent's notebook). Displays Turn: 1 / max_turns for the initial
+        # prompt; live per-turn updates are deferred — see the
+        # "# future: inject fresh budget block on each loop turn" comment
+        # in run() near the assistant-echo logic.
+        budget_block = build_budget_block(current_turn=1, max_turns=self.config.max_turns)
+        user_text = budget_block + "\n\n" + user_text
 
         return system_text, user_text
 
@@ -459,6 +630,19 @@ class AnthropicToolRunnerWorker:
         else:
             if self.config.temperature is not None:
                 params["temperature"] = self.config.temperature
+
+        # DEBUG: dump outbound message shape so we can pinpoint malformed turns
+        # when the API rejects with 400 on programmatic tool calling.
+        if logger.isEnabledFor(logging.DEBUG) or _MSG_DEBUG:
+            shape = []
+            for i, m in enumerate(params.get("messages") or []):
+                c = m.get("content")
+                if isinstance(c, list):
+                    types = [b.get("type") if isinstance(b, dict) else type(b).__name__ for b in c]
+                    shape.append(f"#{i}:{m.get('role')}={types}")
+                else:
+                    shape.append(f"#{i}:{m.get('role')}=<str>")
+            logger.info("OUTBOUND messages: %s", " | ".join(shape))
 
         last_exc: Optional[BaseException] = None
         for attempt in range(self.retries + 1):
@@ -639,9 +823,14 @@ class AnthropicToolRunnerWorker:
                 else:
                     out["content"] = content
             return out
-        # fallback: best-effort dict
-        if hasattr(raw, "model_dump"):
-            return raw.model_dump()
+        # fallback: unknown block type. Do NOT leak arbitrary dumped fields
+        # back to the API — Anthropic rejects requests containing fields it
+        # does not recognize on a given block shape (seen with
+        # code_execution_tool_result's `citations` extra). Log once so we
+        # notice new block types; return a minimal, schema-safe stub.
+        logger.warning(
+            "unknown content block type=%r; returning minimal stub", t
+        )
         return {"type": t or "unknown"}
 
     def _raw_block_to_content_block(self, raw) -> ContentBlock:
