@@ -53,6 +53,14 @@ class SerializableResult:
     # REPS metadata (turns, worker_name, tokens, diff, etc.)
     reps_meta: Optional[Dict[str, Any]] = None
 
+    # Convergence signalling — set when the worker invoked `mark_converged`.
+    # The controller short-circuits: no child is persisted, but the event is
+    # logged to metrics/convergence_events.jsonl and counts as a completed
+    # iteration for budget accounting. child_program_dict will be None.
+    converged: bool = False
+    converged_reason: Optional[str] = None
+    worker_name: Optional[str] = None
+
 
 # _run_iteration_worker removed — see ProcessParallelController._run_iteration.
 # _worker_init / _lazy_init_worker_components removed — components are built
@@ -140,6 +148,23 @@ class ProcessParallelController:
         self._reps_batch_count = 0
         self._reps_batch_results: List = []
         self._reps_rng = random.Random(config.random_seed)
+
+        # --- Plateau tracking (item #2 from the 3-agent analysis) ------
+        # Rolling history of best combined_score per completed iteration so
+        # _detect_plateau() can tell whether progress has stalled. When it
+        # has, _pick_iteration_inputs temporarily tilts the sampler toward
+        # exploration for a few iterations (see _plateau_boost_remaining).
+        # The original config.database.exploration_ratio /
+        # exploitation_ratio are preserved and restored after each sample
+        # call so a mid-run checkpoint restart does not inherit bias.
+        self._plateau_window: int = 5
+        self._plateau_boost_iters: int = 3
+        self._plateau_best_history: List[float] = []
+        self._plateau_boost_remaining: int = 0
+        # --- Convergence-event log (item #1) ---------------------------
+        # Populated the first time a WorkerResult with converged=True is
+        # handled. File lives under self.output_dir/metrics/.
+        self._convergence_events_path: Optional[str] = None
 
         if self._reps_enabled:
             from reps.worker_pool import WorkerPool
@@ -311,6 +336,25 @@ class ProcessParallelController:
         ):
             second_parent = self.database.programs[iteration_config.second_parent_id]
 
+        # Collect the last 5 completed programs across the whole database
+        # (newest-first), irrespective of island. Program.timestamp is set at
+        # dataclass construction; fall back to iteration_found if equal.
+        all_programs = list(self.database.programs.values())
+        all_programs.sort(
+            key=lambda p: (getattr(p, "timestamp", 0.0), getattr(p, "iteration_found", 0)),
+            reverse=True,
+        )
+        recent_iterations = all_programs[:5]
+
+        # Load parent's eval artifacts (stdout/stderr) so the worker sees
+        # the actual output of the previous run. Fall back to None on any
+        # failure — artifacts are best-effort.
+        parent_artifacts = None
+        try:
+            parent_artifacts = self.database.get_artifacts(parent.id) or None
+        except Exception as e:
+            logger.debug(f"Failed to load parent artifacts for {parent.id[:8]}: {e}")
+
         request = WorkerRequest(
             parent=parent,
             inspirations=inspirations,
@@ -323,6 +367,8 @@ class ProcessParallelController:
             prompt_extras=dict(iteration_config.prompt_extras),
             temperature=iteration_config.temperature,
             model_id=iteration_config.model_id,
+            recent_iterations=recent_iterations,
+            parent_artifacts=parent_artifacts,
         )
 
         worker_cfg = self.worker_pool.get_worker_config(iteration_config.worker_name)
@@ -356,6 +402,42 @@ class ProcessParallelController:
                 error=str(result.error),
                 iteration=iteration,
                 iteration_time=iteration_time,
+            )
+
+        # Worker signalled mark_converged: no child was produced. Surface the
+        # signal up through SerializableResult so the main loop can log the
+        # event, skip database.add, and advance the iteration counter.
+        if getattr(result, "converged", False):
+            return SerializableResult(
+                converged=True,
+                converged_reason=result.converged_reason,
+                worker_name=iteration_config.worker_name,
+                parent_id=parent.id,
+                iteration=iteration,
+                iteration_time=iteration_time,
+                target_island=iteration_config.target_island,
+                reps_meta={
+                    "worker_name": iteration_config.worker_name,
+                    "is_revisitation": iteration_config.is_revisitation,
+                    "model_id": iteration_config.model_id,
+                    "temperature": iteration_config.temperature,
+                    "parent_score": (
+                        parent.metrics.get(
+                            "combined_score", safe_numeric_average(parent.metrics)
+                        )
+                        if parent.metrics
+                        else 0.0
+                    ),
+                    "tokens_in": result.usage.get(
+                        "prompt_tokens", result.usage.get("input_tokens", 0)
+                    ),
+                    "tokens_out": result.usage.get(
+                        "completion_tokens", result.usage.get("output_tokens", 0)
+                    ),
+                    "wall_clock_seconds": result.wall_clock_seconds,
+                    "converged": True,
+                    "converged_reason": result.converged_reason,
+                },
             )
 
         if len(result.child_code) > self.config.max_code_length:
@@ -414,6 +496,14 @@ class ProcessParallelController:
                 from reps.program_summarizer import summarize_program
 
                 turns_dicts = [_turn_to_dict(t) for t in result.turns]
+                # Item #4: surface recent sibling dead-ends to the
+                # summarizer so it does not re-emit them as
+                # `next_directions`. Best-effort — aggregator is cheap but
+                # guarded, since a failure here must not block the child.
+                try:
+                    _, recent_avoids = self._build_recent_directions_extras(k=10)
+                except Exception:
+                    recent_avoids = ""
                 summary = await summarize_program(
                     program_id=final_child_id,
                     code=result.child_code,
@@ -430,6 +520,7 @@ class ProcessParallelController:
                     task_instructions=(
                         summarizer_cfg.task_instructions if summarizer_cfg else None
                     ),
+                    recent_avoids=recent_avoids or None,
                 )
                 if summary:
                     ann = child_metadata.setdefault("reps_annotations", {})
@@ -521,17 +612,44 @@ class ProcessParallelController:
                 reps_iter_config.target_island = target_island
 
         forced_parent_id = reps_iter_config.parent_id if reps_iter_config else None
-        if forced_parent_id and forced_parent_id in self.database.programs:
-            parent = self.database.programs[forced_parent_id]
-            _, inspirations = self.database.sample_from_island(
-                island_id=target_island,
-                num_inspirations=self.config.prompt.num_top_programs,
+
+        # Plateau rebalance (item #2): when best-score has stalled for
+        # `_plateau_window` iters, temporarily tilt sampling toward
+        # exploration for `_plateau_boost_iters` sample calls. We mutate
+        # self.database.config in-place JUST for the sample_from_island call
+        # and restore afterwards so a checkpoint save does not persist the
+        # bias and a restart does not inherit it.
+        boosting = False
+        orig_exploration = None
+        orig_exploitation = None
+        if self._plateau_boost_remaining > 0:
+            boosting = True
+            orig_exploration = self.database.config.exploration_ratio
+            orig_exploitation = self.database.config.exploitation_ratio
+            self.database.config.exploration_ratio = min(
+                1.0, orig_exploration + 0.2
             )
-        else:
-            parent, inspirations = self.database.sample_from_island(
-                island_id=target_island,
-                num_inspirations=self.config.prompt.num_top_programs,
+            self.database.config.exploitation_ratio = max(
+                0.0, orig_exploitation - 0.2
             )
+            self._plateau_boost_remaining -= 1
+
+        try:
+            if forced_parent_id and forced_parent_id in self.database.programs:
+                parent = self.database.programs[forced_parent_id]
+                _, inspirations = self.database.sample_from_island(
+                    island_id=target_island,
+                    num_inspirations=self.config.prompt.num_top_programs,
+                )
+            else:
+                parent, inspirations = self.database.sample_from_island(
+                    island_id=target_island,
+                    num_inspirations=self.config.prompt.num_top_programs,
+                )
+        finally:
+            if boosting:
+                self.database.config.exploration_ratio = orig_exploration
+                self.database.config.exploitation_ratio = orig_exploitation
 
         return parent.id, [p.id for p in inspirations], reps_iter_config
 
@@ -691,6 +809,24 @@ class ProcessParallelController:
                 try:
                     if result is None:
                         pass
+                    elif result.converged:
+                        # Worker called mark_converged: persist a telemetry row
+                        # and treat the iteration as successfully completed
+                        # (for budget accounting) without adding a child to
+                        # the database. Summarization is skipped — there is
+                        # nothing to summarize.
+                        self._record_convergence_event(
+                            iteration=completed_iteration,
+                            parent_id=result.parent_id,
+                            reason=result.converged_reason,
+                            worker_name=result.worker_name,
+                        )
+                        logger.info(
+                            "Iteration %d: worker marked converged (reason: %s) "
+                            "— no child added",
+                            completed_iteration,
+                            result.converged_reason or "(unspecified)",
+                        )
                     elif result.error:
                         logger.warning(
                             f"Iteration {completed_iteration} error: {result.error}"
@@ -707,6 +843,20 @@ class ProcessParallelController:
                         if result.artifacts:
                             self.database.store_artifacts(
                                 child_program.id, result.artifacts
+                            )
+
+                        # Persist this child's JSON + trace sidecar immediately
+                        # so a killed or crashed run doesn't lose completed work.
+                        # Checkpoint / final save_database still happen; this
+                        # just ensures no per-iter state is in-memory-only.
+                        try:
+                            self.database._save_program(
+                                child_program, base_path=self.output_dir
+                            )
+                        except Exception as persist_exc:
+                            logger.warning(
+                                "per-iteration persist failed for %s: %s",
+                                child_program.id[:8], persist_exc,
                             )
 
                         if self.evolution_tracer:
@@ -902,6 +1052,26 @@ class ProcessParallelController:
 
                 completed_iterations += 1
 
+                # Plateau tracking (item #2): append the current best
+                # combined_score to the rolling history and, if the window
+                # is full and no progress was made, arm the exploration
+                # boost for the next few sample calls. Armed state is
+                # cleared each time a new best arrives.
+                self._update_plateau_history()
+                if (
+                    self._plateau_boost_remaining == 0
+                    and self._detect_plateau()
+                ):
+                    self._plateau_boost_remaining = self._plateau_boost_iters
+                    logger.info(
+                        "Plateau detected at iteration %d (best has not "
+                        "improved across last %d iterations) — boosting "
+                        "exploration for the next %d sample calls",
+                        completed_iteration,
+                        self._plateau_window,
+                        self._plateau_boost_iters,
+                    )
+
                 if self._reps_enabled and result is not None:
                     reps_batch_accumulator.append(result)
                     if len(reps_batch_accumulator) >= self._reps_batch_size:
@@ -1007,7 +1177,183 @@ class ProcessParallelController:
         # F8: Dead-end warnings
         extras["dead_end_warnings"] = self._reps_build_dead_end_warnings()
 
+        # Item #3: unexplored directions + recent avoids, aggregated from
+        # the `reps_annotations.summary` blobs of the last K=10 programs.
+        # Empty strings when nothing is available — the prompt template
+        # (PROMPT team) skips empties.
+        unexplored, avoids = self._build_recent_directions_extras(k=10)
+        extras["unexplored_directions"] = unexplored
+        extras["recent_avoids"] = avoids
+
         return extras
+
+    # ------------------------------------------------------------------ #
+    # Helpers introduced by the 4-team parallel fix (items #1, #2, #3, #4)
+    # ------------------------------------------------------------------ #
+
+    def _record_convergence_event(
+        self,
+        *,
+        iteration: int,
+        parent_id: Optional[str],
+        reason: Optional[str],
+        worker_name: Optional[str],
+    ) -> None:
+        """Append a single convergence event to
+        ``<output_dir>/metrics/convergence_events.jsonl``.
+
+        Best-effort: any I/O failure is logged as a warning but does not
+        propagate, because the controller must continue advancing the
+        iteration counter (a dropped telemetry row is far less bad than a
+        dropped budget tick).
+        """
+        import json
+        import os
+
+        try:
+            if self._convergence_events_path is None:
+                metrics_dir = os.path.join(self.output_dir, "metrics")
+                os.makedirs(metrics_dir, exist_ok=True)
+                self._convergence_events_path = os.path.join(
+                    metrics_dir, "convergence_events.jsonl"
+                )
+            row = {
+                "iteration": iteration,
+                "parent_id": parent_id,
+                "reason": reason,
+                "timestamp": time.time(),
+                "worker_type": worker_name,
+            }
+            with open(self._convergence_events_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(row) + "\n")
+        except Exception as e:
+            logger.warning(
+                "Failed to persist convergence event for iteration %d: %s",
+                iteration,
+                e,
+            )
+
+    def _update_plateau_history(self) -> None:
+        """Append the current best combined_score to the plateau-history
+        ring. Called once per completed iteration (after the child, if any,
+        has been added to the database).
+        """
+        best = self.database.get_best_program()
+        if best is None or not best.metrics:
+            score = float("-inf")
+        else:
+            score = best.metrics.get(
+                "combined_score", safe_numeric_average(best.metrics)
+            )
+            if not isinstance(score, (int, float)):
+                score = float("-inf")
+        self._plateau_best_history.append(float(score))
+        # Keep it bounded; we only ever inspect the last plateau_window+1.
+        keep = self._plateau_window + 1
+        if len(self._plateau_best_history) > keep:
+            self._plateau_best_history = self._plateau_best_history[-keep:]
+
+    def _detect_plateau(self) -> bool:
+        """Return True when the best combined_score has not strictly
+        improved across the last `self._plateau_window` completed
+        iterations. We need at least window+1 history entries — the
+        reference score (before the window) plus `window` samples in the
+        window. A constant score qualifies as a plateau (no strict
+        improvement).
+        """
+        window = self._plateau_window
+        if window <= 0:
+            return False
+        if len(self._plateau_best_history) < window + 1:
+            return False
+        reference = self._plateau_best_history[-(window + 1)]
+        recent = self._plateau_best_history[-window:]
+        # Plateau <=> no strictly-greater value in `recent` vs. reference.
+        return all(r <= reference for r in recent)
+
+    def _build_recent_directions_extras(
+        self, k: int = 10
+    ) -> "tuple[str, str]":
+        """Aggregate `next_directions` and `avoid` entries across the last
+        K programs (newest-first) and return the (unexplored_block,
+        avoids_block) pair for prompt injection.
+
+        A `next_direction` is considered *unexplored* when no program newer
+        than the one that suggested it has an `approach` string sharing a
+        4-word contiguous sequence with it (a deliberately dumb keyword
+        check — see program_summarizer.direction_pursued_by_any).
+
+        Gracefully returns two empty strings when: no programs, no
+        summaries, or malformed summary blobs.
+        """
+        try:
+            from reps.program_summarizer import direction_pursued_by_any
+        except Exception:  # pragma: no cover - import guard
+            direction_pursued_by_any = None  # type: ignore
+
+        try:
+            entries = self.database.recent_summary_entries(k=k)
+        except Exception as e:
+            logger.debug("recent_summary_entries failed: %s", e)
+            return "", ""
+        if not entries:
+            return "", ""
+
+        # Entries are newest-first. For each direction we want to check
+        # whether any STRICTLY NEWER program's approach already covers it;
+        # build the list of (program, summary) with indexes so we can slice.
+        unexplored: List[str] = []
+        avoid_lines: List[str] = []
+
+        for idx, (prog, summary) in enumerate(entries):
+            iter_n = getattr(prog, "iteration_found", None)
+
+            # --- avoids: collect raw, capped at 5 across all programs ---
+            for a in summary.get("avoid") or []:
+                if not isinstance(a, str) or not a.strip():
+                    continue
+                suffix = f" (iter {iter_n})" if iter_n is not None else ""
+                avoid_lines.append(f"- {a.strip()}{suffix}")
+                if len(avoid_lines) >= 5:
+                    break
+
+            # --- unexplored directions: skip any pursued by a later program ---
+            later_approaches = [
+                (e[1].get("approach") or "")
+                for e in entries[:idx]
+                if isinstance(e[1], dict)
+            ]
+            for d in summary.get("next_directions") or []:
+                if not isinstance(d, str) or not d.strip():
+                    continue
+                pursued = False
+                if direction_pursued_by_any is not None:
+                    try:
+                        pursued = direction_pursued_by_any(d, later_approaches)
+                    except Exception:
+                        pursued = False
+                if pursued:
+                    continue
+                suffix = f" (suggested by iter {iter_n})" if iter_n is not None else ""
+                unexplored.append(f"- {d.strip()}{suffix}")
+                if len(unexplored) >= 5:
+                    break
+            if len(unexplored) >= 5 and len(avoid_lines) >= 5:
+                break
+
+        unexplored_block = (
+            "## Unexplored directions from recent archive\n"
+            + "\n".join(unexplored[:5])
+            if unexplored
+            else ""
+        )
+        avoids_block = (
+            "## Dead ends noted by recent siblings\n"
+            + "\n".join(avoid_lines[:5])
+            if avoid_lines
+            else ""
+        )
+        return unexplored_block, avoids_block
 
     def _reps_build_dead_end_warnings(self) -> str:
         """Build dead-end warning text from annotated programs."""

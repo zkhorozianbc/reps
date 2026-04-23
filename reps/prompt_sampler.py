@@ -7,6 +7,7 @@ import random
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from reps.config import PromptConfig
+from reps.program_summarizer import format_summary_for_prompt
 from reps.prompt_templates import TemplateManager
 from reps.utils import (
     format_metrics_safe,
@@ -14,6 +15,97 @@ from reps.utils import (
     get_fitness_score,
     format_feature_coordinates,
 )
+
+
+def _extract_notebook(program: Dict[str, Any], label: str = "Notebook") -> str:
+    """Pull a program's reps_annotations.summary (if present) and render it as
+    a compact notebook block. Returns empty string if no summary is attached."""
+    metadata = program.get("metadata") or {}
+    if not isinstance(metadata, dict):
+        return ""
+    annotations = metadata.get("reps_annotations") or {}
+    if not isinstance(annotations, dict):
+        return ""
+    summary = annotations.get("summary")
+    if not summary:
+        return ""
+    return format_summary_for_prompt(summary, label=label)
+
+
+def build_budget_block(current_turn: int, max_turns: int, cumulative_out: Optional[int] = None) -> str:
+    """Render a compact iteration-budget block for the user prompt.
+
+    The tool-runner prepends this on every turn (initial prompt only in
+    _build_initial_prompt today; the main loop can re-render on each turn
+    to keep live counters fresh).
+    """
+    lines = [
+        "## Iteration budget",
+        f"Turn: {current_turn} / {max_turns}",
+    ]
+    if cumulative_out is not None:
+        lines.append(f"Model tokens out so far this iter: {cumulative_out}")
+    return "\n".join(lines)
+
+
+def _program_one_liner(program_dict: Dict[str, Any]) -> str:
+    """Return a single-line description of a program suitable for the
+    siblings-listing block. Prefers the program's notebook summary's
+    `key_insight`; falls back to `score=X.XXXXXX`."""
+    metadata = program_dict.get("metadata") or {}
+    if isinstance(metadata, dict):
+        annotations = metadata.get("reps_annotations") or {}
+        summary = annotations.get("summary") if isinstance(annotations, dict) else None
+        if isinstance(summary, dict):
+            insight = summary.get("key_insight")
+            if isinstance(insight, str) and insight.strip() and insight.strip().lower() != "none":
+                return insight.strip()
+    metrics = program_dict.get("metrics") or {}
+    score = None
+    if isinstance(metrics, dict):
+        score = metrics.get("combined_score")
+        if not isinstance(score, (int, float)):
+            # try fitness-score conventions
+            for k in ("fitness", "score"):
+                v = metrics.get(k)
+                if isinstance(v, (int, float)):
+                    score = v
+                    break
+    if isinstance(score, (int, float)):
+        return f"score={score:.6f}"
+    return "no summary"
+
+
+def build_siblings_block(
+    top_programs: List[Dict[str, Any]],
+    inspirations: List[Dict[str, Any]],
+    limit: int = 8,
+) -> str:
+    """Render a '## Siblings you can view_program' bullet block.
+
+    For each program in top_programs + inspirations (deduplicated by id),
+    emit one line: `- {short_id}: {one_liner}`. Returns empty string when
+    there are no entries so the caller can skip appending.
+    """
+    seen: set = set()
+    entries: List[Tuple[str, str]] = []  # (short_id, one_liner)
+    for prog in list(top_programs) + list(inspirations):
+        if not isinstance(prog, dict):
+            continue
+        pid = str(prog.get("id") or "")
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        short = pid[:8]
+        entries.append((short, _program_one_liner(prog)))
+        if len(entries) >= limit:
+            break
+    if not entries:
+        return ""
+    lines = ["## Siblings you can view_program"]
+    for short, one_liner in entries:
+        lines.append(f"- {short}: {one_liner}")
+    return "\n".join(lines)
 
 logger = logging.getLogger(__name__)
 
@@ -359,13 +451,21 @@ class PromptSampler:
 
             key_features_str = ", ".join(key_features)
 
+            notebook_str = _extract_notebook(program, label="Notebook")
+
+            pid = str(program.get("id", "") or "")
+            id_short = pid[:8] if pid else "unknown"
+
             top_programs_str += (
                 top_program_template.format(
                     program_number=i + 1,
+                    id_short=id_short,
+                    id=pid,
                     score=f"{score:.4f}",
                     language=("text" if self.config.programs_as_changes_description else language),
                     program_snippet=program_code,
                     key_features=key_features_str,
+                    notebook=notebook_str,
                 )
                 + "\n\n"
             )
@@ -412,13 +512,21 @@ class PromptSampler:
 
                     key_features_str = ", ".join(key_features)
 
+                    notebook_str = _extract_notebook(program, label="Notebook")
+
+                    pid = str(program.get("id", "") or "")
+                    id_short = pid[:8] if pid else "unknown"
+
                     diverse_programs_str += (
                         top_program_template.format(
                             program_number=f"D{i + 1}",
+                            id_short=id_short,
+                            id=pid,
                             score=f"{score:.4f}",
                             language=("text" if self.config.programs_as_changes_description else language),
                             program_snippet=program_code,
                             key_features=key_features_str,
+                            notebook=notebook_str,
                         )
                         + "\n\n"
                     )
@@ -482,14 +590,22 @@ class PromptSampler:
             # Extract unique features (emphasizing diversity rather than just performance)
             unique_features = self._extract_unique_features(program)
 
+            notebook_str = _extract_notebook(program, label="Notebook")
+
+            pid = str(program.get("id", "") or "")
+            id_short = pid[:8] if pid else "unknown"
+
             inspiration_programs_str += (
                 inspiration_program_template.format(
                     program_number=i + 1,
+                    id_short=id_short,
+                    id=pid,
                     score=f"{score:.4f}",
                     program_type=program_type,
                     language=("text" if self.config.programs_as_changes_description else language),
                     program_snippet=program_code,
                     unique_features=unique_features,
+                    notebook=notebook_str,
                 )
                 + "\n\n"
             )

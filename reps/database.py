@@ -2592,3 +2592,32 @@ class ProgramDatabase:
         if program_id not in self.prompts_by_program:
             self.prompts_by_program[program_id] = {}
         self.prompts_by_program[program_id][template_key] = prompt
+
+    # ------------------------------------------------------------------ #
+    # REPS: recent-programs summary aggregator
+    # ------------------------------------------------------------------ #
+
+    def recent_summary_entries(
+        self, k: int = 10
+    ) -> List[Tuple[Program, Dict[str, Any]]]:
+        """Return up to K most-recent programs (newest-first) paired with
+        their `reps_annotations.summary` dict. Programs without a summary
+        are skipped. Used by the controller to aggregate unexplored
+        directions and dead-end avoids for prompt injection.
+        """
+        if not self.programs:
+            return []
+        all_progs = list(self.programs.values())
+        # Newest-first by timestamp, break ties with iteration_found.
+        all_progs.sort(
+            key=lambda p: (getattr(p, "timestamp", 0.0), getattr(p, "iteration_found", 0)),
+            reverse=True,
+        )
+        out: List[Tuple[Program, Dict[str, Any]]] = []
+        for prog in all_progs[:k]:
+            meta = prog.metadata or {}
+            ann = meta.get("reps_annotations") or {}
+            summary = ann.get("summary")
+            if isinstance(summary, dict):
+                out.append((prog, summary))
+        return out
