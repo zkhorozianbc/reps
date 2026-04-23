@@ -6,6 +6,7 @@ Evaluation interface compatible with OpenEvolve.
 """
 
 import importlib.util
+import json
 import os
 import pickle
 import subprocess
@@ -16,6 +17,15 @@ import traceback
 from pathlib import Path
 
 import numpy as np
+
+# EvaluationResult is part of the REPS harness; when the evaluator is invoked
+# via `uv run python -c ...` outside a full run, the reps package is still
+# importable (pyproject installs it editable). If import fails we fall back to
+# returning a plain dict so this module stays usable as a standalone script.
+try:
+    from reps.evaluation_result import EvaluationResult  # type: ignore
+except ImportError:  # pragma: no cover - standalone ad-hoc use
+    EvaluationResult = None  # type: ignore
 
 
 # ---------------------------------------------------------------------------
@@ -239,14 +249,148 @@ def _dump_packing_markdown(
 
 
 # ---------------------------------------------------------------------------
+# Per-constraint diagnostics (emitted on every evaluate to give the LLM
+# signal about *why* a packing failed — boundary crossings, overlaps, wrong
+# count — or about how tight a valid packing is.)
+# ---------------------------------------------------------------------------
+
+_DIAGNOSTIC_CAP = 10  # cap list lengths so prompts stay small
+_DIAGNOSTIC_TOL = 1e-9  # suppress float-noise "violations" at exact-touch boundaries
+
+
+def _compute_constraint_diagnostics(centers: np.ndarray, radii: np.ndarray) -> dict:
+    """Compute structured feedback about constraint satisfaction.
+
+    Returns a dict with:
+      - n_circles_submitted: int, actual count of circles in the submission
+      - boundary_violations: list of dicts (capped) for circles crossing [0,1]^2
+      - overlap_pairs: list of dicts (capped, sorted worst-first) for overlaps
+      - min_pairwise_slack: float or None — tightest non-overlap margin across
+        all pairs (only meaningful when there are >=2 circles).
+
+    All numbers are native Python floats/ints (JSON-safe).
+    """
+    # Tolerate odd shapes — we still report what we can see.
+    c_arr = np.asarray(centers, dtype=float) if centers is not None else np.zeros((0, 2))
+    r_arr = np.asarray(radii, dtype=float).ravel() if radii is not None else np.zeros(0)
+
+    if c_arr.ndim != 2 or c_arr.shape[-1] != 2:
+        # Malformed centers — count what the program submitted as best we can.
+        n_submitted = int(r_arr.shape[0]) if r_arr.ndim == 1 else 0
+        return {
+            "n_circles_submitted": n_submitted,
+            "boundary_violations": [],
+            "overlap_pairs": [],
+            "min_pairwise_slack": None,
+            "note": f"centers has malformed shape {tuple(c_arr.shape)}; expected (n, 2)",
+        }
+
+    n = int(c_arr.shape[0])
+    # If radii length disagrees, use the min so pairwise math is well-defined.
+    n_eff = int(min(n, r_arr.shape[0]))
+
+    # --- boundary violations (signed slack: negative means the circle sticks
+    # out of the unit square along the tightest side). ---
+    boundary_violations = []
+    for i in range(n_eff):
+        x, y = float(c_arr[i, 0]), float(c_arr[i, 1])
+        r = float(r_arr[i])
+        # Slack to each side: positive = inside margin; negative = crossing.
+        slacks = [x - r, (1.0 - x) - r, y - r, (1.0 - y) - r]
+        min_slack = min(slacks)
+        if min_slack < -_DIAGNOSTIC_TOL or not np.isfinite(min_slack):
+            boundary_violations.append(
+                {
+                    "circle_index": i,
+                    "center": [x, y],
+                    "radius": r,
+                    "slack": float(min_slack),
+                }
+            )
+    # Worst (most-negative slack) first, cap.
+    boundary_violations.sort(key=lambda d: d["slack"])
+    boundary_violations = boundary_violations[:_DIAGNOSTIC_CAP]
+
+    # --- overlap pairs + minimum pairwise slack ---
+    overlap_pairs = []
+    min_slack_pairwise = None
+    if n_eff >= 2:
+        for i in range(n_eff):
+            ri = float(r_arr[i])
+            for j in range(i + 1, n_eff):
+                rj = float(r_arr[j])
+                d = float(np.linalg.norm(c_arr[i] - c_arr[j]))
+                rsum = ri + rj
+                interpen = rsum - d  # positive = overlap
+                slack_ij = d - rsum  # positive = non-overlapping gap
+                if min_slack_pairwise is None or slack_ij < min_slack_pairwise:
+                    min_slack_pairwise = slack_ij
+                if interpen > _DIAGNOSTIC_TOL:
+                    overlap_pairs.append(
+                        {
+                            "pair": [i, j],
+                            "center_distance": d,
+                            "radius_sum": rsum,
+                            "interpenetration": interpen,
+                        }
+                    )
+        overlap_pairs.sort(key=lambda d: d["interpenetration"], reverse=True)
+        overlap_pairs = overlap_pairs[:_DIAGNOSTIC_CAP]
+
+    return {
+        "n_circles_submitted": n,
+        "boundary_violations": boundary_violations,
+        "overlap_pairs": overlap_pairs,
+        "min_pairwise_slack": (
+            float(min_slack_pairwise) if min_slack_pairwise is not None else None
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # OpenEvolve-compatible evaluate interface
 # ---------------------------------------------------------------------------
 
 TARGET_VALUE = 2.6361  # target beyond current AlphaEvolve/OpenEvolve baseline (2.635983); see algorithmicsuperintelligence/openevolve#156
 
 
+def _build_result(metrics: dict, artifacts: dict):
+    """Return either an EvaluationResult (if available) or a plain dict.
+
+    We always populate nested `constraint_diagnostics` inside metrics too so
+    standalone callers (and any consumer that only inspects the top-level
+    dict) can see it. The float-only stage-merge path in reps.evaluator will
+    drop this nested key silently — that's fine; the artifacts channel is the
+    authoritative home for the diagnostics in multi-stage pipelines.
+    """
+    if EvaluationResult is not None:
+        return EvaluationResult(metrics=metrics, artifacts=artifacts)
+    # Standalone fallback: flatten artifacts into the metrics dict so ad-hoc
+    # `python -c` callers can still see everything in one place.
+    merged = dict(metrics)
+    merged["_artifacts"] = artifacts
+    return merged
+
+
 def evaluate(program_path, env=None):
-    """Evaluate a circle packing program. Returns full-precision metrics."""
+    """Evaluate a circle packing program. Returns full-precision metrics.
+
+    Top-level metric keys (unchanged contract):
+        validity, sum_radii, target_ratio, combined_score, eval_time,
+        strict_pass, tolerant_pass.
+
+    Additional signals (new):
+        - metrics["combined_score_hi_precision_str"]: "{:.12g}" formatted string
+          so downstream display doesn't truncate small deltas.
+          NOTE: This is intentionally a STRING, not a float, so it survives
+          verbatim through any formatter. It is returned both inside the
+          metrics dict (for direct-eval consumers) and as an artifact.
+        - metrics["constraint_diagnostics"]: nested dict with boundary/overlap
+          diagnostics (see `_compute_constraint_diagnostics`).
+        - artifacts["constraint_diagnostics_json"]: same content as a JSON
+          string for easy embedding in prompts.
+        - artifacts["combined_score_hi_precision_str"]: see above.
+    """
     try:
         start_time = time.time()
         centers, radii, reported_sum = run_with_timeout(program_path, timeout_seconds=600, env=env)
@@ -257,22 +401,40 @@ def evaluate(program_path, env=None):
         if not isinstance(radii, np.ndarray):
             radii = np.array(radii)
 
-        if np.isnan(centers).any() or np.isnan(radii).any():
-            return {"sum_radii": 0.0, "target_ratio": 0.0, "validity": 0.0,
-                    "eval_time": eval_time, "combined_score": 0.0}
+        # Even on NaN we still emit diagnostics (the LLM deserves to know how
+        # many circles came back and where they were — NaN in one coordinate
+        # shouldn't erase the rest of the signal).
+        has_nan = bool(np.isnan(centers).any() or np.isnan(radii).any())
 
         shape_valid = centers.shape == (26, 2) and radii.shape == (26,)
-        tolerant_pass = shape_valid and validate_packing(centers, radii)
+        tolerant_pass = bool(shape_valid and not has_nan and validate_packing(centers, radii))
 
-        strict_verdict = check_construction(centers, radii, 26) if shape_valid else {"sum_of_radii": -np.inf}
+        if shape_valid and not has_nan:
+            strict_verdict = check_construction(centers, radii, 26)
+        else:
+            strict_verdict = {"sum_of_radii": -np.inf}
         strict_sum = strict_verdict["sum_of_radii"]
-        strict_pass = np.isfinite(strict_sum)
+        strict_pass = bool(np.isfinite(strict_sum))
 
         # Score on the strict DeepMind checker — matches the benchmark standard.
         sum_radii = float(strict_sum) if strict_pass else 0.0
         validity = 1.0 if strict_pass else 0.0
-        target_ratio = sum_radii / TARGET_VALUE if strict_pass else 0.0
-        combined_score = target_ratio * validity
+        target_ratio = float(sum_radii / TARGET_VALUE) if strict_pass else 0.0
+        combined_score = float(target_ratio * validity)
+
+        # Diagnostics are always computed — even on success, so the LLM can
+        # see how tight the current packing is (min_pairwise_slack).
+        diagnostics = _compute_constraint_diagnostics(centers, radii)
+        if has_nan:
+            diagnostics.setdefault(
+                "note",
+                "centers or radii contained NaN; treating as fully invalid",
+            )
+
+        # High-precision combined_score string. {:.12g} preserves at least 12
+        # significant digits without trailing zeros, which is enough to
+        # distinguish combined_score=0.9999640000 from 0.9999640001.
+        hi_prec = "{:.12g}".format(combined_score)
 
         _dump_packing_markdown(
             centers, radii,
@@ -283,20 +445,37 @@ def evaluate(program_path, env=None):
             eval_time=eval_time,
         )
 
-        return {
-            "sum_radii": sum_radii,
-            "target_ratio": target_ratio,
-            "validity": validity,
-            "eval_time": eval_time,
-            "combined_score": combined_score,
+        metrics = {
+            "sum_radii": float(sum_radii),
+            "target_ratio": float(target_ratio),
+            "validity": float(validity),
+            "eval_time": float(eval_time),
+            "combined_score": float(combined_score),
             "strict_pass": 1.0 if strict_pass else 0.0,
             "tolerant_pass": 1.0 if tolerant_pass else 0.0,
+            # New — non-float payloads are kept nested so existing float-only
+            # consumers ignore them; artifacts channel is the canonical home.
+            "combined_score_hi_precision_str": hi_prec,
+            "constraint_diagnostics": diagnostics,
         }
+        artifacts = {
+            "combined_score_hi_precision_str": hi_prec,
+            "constraint_diagnostics_json": json.dumps(diagnostics, indent=2),
+        }
+        return _build_result(metrics, artifacts)
 
     except Exception as e:
         traceback.print_exc()
-        return {"sum_radii": 0.0, "target_ratio": 0.0, "validity": 0.0,
-                "eval_time": 0.0, "combined_score": 0.0, "error": str(e)}
+        err_metrics = {
+            "sum_radii": 0.0,
+            "target_ratio": 0.0,
+            "validity": 0.0,
+            "eval_time": 0.0,
+            "combined_score": 0.0,
+            "error": str(e),
+            "combined_score_hi_precision_str": "0",
+        }
+        return _build_result(err_metrics, {"error": str(e)})
 
 
 def evaluate_stage1(program_path, env=None):
