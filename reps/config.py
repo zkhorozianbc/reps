@@ -100,7 +100,11 @@ class LLMConfig(LLMModelConfig):
     """Configuration for LLM models"""
 
     # API configuration
-    api_base: str = "https://api.openai.com/v1"
+    # Default to None so configs that omit `api_base` flow through as
+    # "OpenAI Direct" (the openai SDK defaults base_url to api.openai.com when
+    # None). Non-OpenAI providers (OpenRouter, custom gateways) must set
+    # api_base explicitly in their YAML.
+    api_base: str = None
 
     # Generation parameters
     system_message: Optional[str] = "system_message"
@@ -430,7 +434,19 @@ class REPSAnnotationsConfig:
 
 @dataclass
 class REPSSummarizerConfig:
-    """Per-program Sonnet 4.6 summarizer (runs inline per iteration).
+    """Per-program summarizer (runs inline per iteration).
+
+    The summarizer uses its OWN dedicated LLM client — independent of the
+    worker ensemble. That's intentional: it lets a run configure a cheap
+    summarizer (e.g. claude-sonnet-4-6) while workers run on a different
+    provider (e.g. gpt-5.4-pro), without anyone having to add the
+    summarizer model to the worker ensemble.
+
+    `provider` and `api_key` are optional — if not set, they are derived
+    from `model_id` at controller-startup time (claude-* → anthropic +
+    ${ANTHROPIC_API_KEY}; gpt-* / o*-* → openai + ${OPENAI_API_KEY}).
+    Set them explicitly for unusual setups (OpenRouter-hosted claude,
+    custom api_base, etc.).
 
     General role + output rules live in the module's fixed system prompt.
     `task_instructions` is the benchmark-specific guidance appended to the
@@ -440,6 +456,19 @@ class REPSSummarizerConfig:
     enabled: bool = True
     model_id: str = "claude-sonnet-4-6"
     task_instructions: Optional[str] = None
+    # Optional overrides. When None, derived from `model_id` at init time.
+    provider: Optional[str] = None
+    api_key: Optional[str] = None
+    api_base: Optional[str] = None
+    temperature: float = 0.2
+    max_tokens: int = 4096
+    timeout: int = 300
+    retries: int = 2
+    retry_delay: int = 5
+
+    def __post_init__(self):
+        """Resolve ${VAR} in api_key early so bad env setup fails at config load."""
+        self.api_key = _resolve_env_var(self.api_key)
 
 
 @dataclass
@@ -587,7 +616,9 @@ def load_config(config_path: Optional[Union[str, Path]] = None) -> Config:
 
         # Use environment variables if available
         api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-        api_base = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
+        # Only override api_base if OPENAI_API_BASE is explicitly set; otherwise
+        # leave it None so OpenAI Direct is detected correctly downstream.
+        api_base = os.environ.get("OPENAI_API_BASE")
 
         config.llm.update_model_params({"api_key": api_key, "api_base": api_base})
 

@@ -222,6 +222,20 @@ class ProcessParallelController:
             self._reps_reflection = None
             self._reps_reflection_config = asdict(reps.reflection)
 
+            # Dedicated summarizer LLM (independent of worker ensemble).
+            # Fail LOUDLY now if the summarizer is enabled but its model
+            # can't be constructed — better than silently disabling F8
+            # annotations for the whole run.
+            self._reps_summarizer_llm = None
+            summarizer_cfg = getattr(reps, "summarizer", None)
+            if summarizer_cfg is not None and summarizer_cfg.enabled:
+                from reps.program_summarizer import build_summarizer_llm
+                self._reps_summarizer_llm = build_summarizer_llm(summarizer_cfg)
+                logger.info(
+                    f"Summarizer LLM: model={summarizer_cfg.model_id} "
+                    f"provider={self._reps_summarizer_llm.provider}"
+                )
+
             worker_names = list(self._reps_worker_pool._configs.keys())
             logger.info(
                 f"REPS enabled: batch_size={self._reps_batch_size}, "
@@ -531,12 +545,14 @@ class ProcessParallelController:
         )
 
         # Per-iteration summarization: run BEFORE the child enters the DB so
-        # descendants that start concurrently see the summary. Bounded by the
-        # reflection LLM ensemble; best-effort — failures don't block the child.
+        # descendants that start concurrently see the summary. Uses a
+        # dedicated summarizer LLM (built at controller startup) — NOT the
+        # worker ensemble — so the summarizer model is independent of what
+        # workers use. Best-effort: failures don't block the child.
         summarizer_cfg = getattr(self.config.reps, "summarizer", None)
         if (
             self._reps_enabled
-            and self._reps_reflection is not None
+            and self._reps_summarizer_llm is not None
             and (summarizer_cfg is None or summarizer_cfg.enabled)
         ):
             try:
@@ -558,12 +574,7 @@ class ProcessParallelController:
                     parent_score=parent_score,
                     child_score=child_score,
                     improved=child_score > parent_score,
-                    llm_ensemble=self._reps_reflection.llm,
-                    model_id=(
-                        summarizer_cfg.model_id
-                        if summarizer_cfg
-                        else "claude-sonnet-4-6"
-                    ),
+                    summarizer_llm=self._reps_summarizer_llm,
                     task_instructions=(
                         summarizer_cfg.task_instructions if summarizer_cfg else None
                     ),

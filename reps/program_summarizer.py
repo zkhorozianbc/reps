@@ -17,6 +17,7 @@ broken validator").
 from __future__ import annotations
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from reps.workers.trace_render import render_trace_from_dicts
@@ -26,7 +27,136 @@ logger = logging.getLogger(__name__)
 _MAX_REASONING_CHARS = 12000  # truncate very long traces before sending
 
 
-async def _openai_responses_call(*, model_id: str, system_prompt: str, user_text: str) -> str:
+def build_summarizer_llm(cfg) -> "SummarizerLLM":
+    """Build a dedicated LLM client for the per-program summarizer.
+
+    Takes a `REPSSummarizerConfig` (or any duck-typed object exposing the
+    same attributes) and returns a small wrapper that knows how to call
+    the right provider endpoint. Independent of the worker ensemble — so
+    the summarizer works regardless of what models workers use.
+
+    Fails LOUDLY at construction time if the provider/api_key cannot be
+    resolved. This is intentional: a silent fallback here would hide
+    real config mistakes for the rest of the run.
+    """
+    from reps.llm.provider_of import provider_of_model
+
+    model_id = cfg.model_id
+    provider = cfg.provider or provider_of_model(model_id)
+
+    # Resolve api_key with a provider-appropriate env-var default.
+    api_key = cfg.api_key
+    if not api_key:
+        if provider == "anthropic":
+            api_key = os.environ.get("ANTHROPIC_API_KEY")
+        elif provider == "openai":
+            api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        env_var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+        raise ValueError(
+            f"summarizer: provider={provider!r} but no api_key set "
+            f"(neither reps.summarizer.api_key nor {env_var} in env)"
+        )
+
+    return SummarizerLLM(
+        model_id=model_id,
+        provider=provider,
+        api_key=api_key,
+        api_base=cfg.api_base,
+        temperature=cfg.temperature,
+        max_tokens=cfg.max_tokens,
+        timeout=cfg.timeout,
+        retries=cfg.retries,
+        retry_delay=cfg.retry_delay,
+    )
+
+
+class SummarizerLLM:
+    """Thin summarizer-only LLM wrapper.
+
+    For anthropic models, delegates to `AnthropicLLM` (streaming + cache
+    control etc.). For openai gpt-* / o*-* models, keeps the Responses
+    API shortcut (which is what gpt-5.4-pro requires — chat.completions
+    returns 404 for that model). Not a general-purpose client — the
+    worker ensemble is for that.
+    """
+
+    def __init__(
+        self,
+        *,
+        model_id: str,
+        provider: str,
+        api_key: str,
+        api_base: Optional[str],
+        temperature: float,
+        max_tokens: int,
+        timeout: int,
+        retries: int,
+        retry_delay: int,
+    ) -> None:
+        self.model_id = model_id
+        self.provider = provider
+        self.api_key = api_key
+        self.api_base = api_base
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+        self.retries = retries
+        self.retry_delay = retry_delay
+        self._client = self._build_client()
+
+    def _build_client(self):
+        """Lazily construct the provider-specific client.
+
+        For anthropic we build an `AnthropicLLM` from the provider
+        module (same retry/timeout behavior as worker calls). For
+        openai we defer: `_openai_responses_call` creates the
+        `AsyncOpenAI` inline since it uses the Responses API, not
+        chat.completions.
+        """
+        if self.provider == "anthropic":
+            from reps.config import LLMModelConfig
+            from reps.llm.anthropic import AnthropicLLM
+
+            cfg = LLMModelConfig(
+                name=self.model_id,
+                api_key=self.api_key,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                timeout=self.timeout,
+                retries=self.retries,
+                retry_delay=self.retry_delay,
+                provider="anthropic",
+            )
+            return AnthropicLLM(cfg)
+        if self.provider == "openai":
+            # OpenAI path uses the Responses API — no persistent client
+            # needed; `_openai_responses_call` constructs AsyncOpenAI per
+            # call. We still validate the key is present here.
+            return None
+        raise ValueError(f"summarizer: unknown provider {self.provider!r}")
+
+    async def call(self, *, system_prompt: str, user_text: str) -> str:
+        """Invoke the summarizer. Returns the raw response text."""
+        if self.provider == "anthropic":
+            return await self._client.generate_with_context(
+                system_message=system_prompt,
+                messages=[{"role": "user", "content": user_text}],
+                temperature=self.temperature,
+            )
+        if self.provider == "openai":
+            return await _openai_responses_call(
+                model_id=self.model_id.removeprefix("openai/"),
+                api_key=self.api_key,
+                system_prompt=system_prompt,
+                user_text=user_text,
+            )
+        raise ValueError(f"summarizer: unknown provider {self.provider!r}")
+
+
+async def _openai_responses_call(
+    *, model_id: str, api_key: str, system_prompt: str, user_text: str
+) -> str:
     """Direct OpenAI Responses API call for gpt-* summarizer models.
 
     Uses `instructions=system_prompt` + `input=user_text` shape and returns
@@ -34,7 +164,7 @@ async def _openai_responses_call(*, model_id: str, system_prompt: str, user_text
     reasoning effort knob, no retries beyond what the SDK does internally.
     """
     from openai import AsyncOpenAI  # lazy import; only needed when routed here
-    client = AsyncOpenAI()  # picks up OPENAI_API_KEY from env
+    client = AsyncOpenAI(api_key=api_key)
     response = await client.responses.create(
         model=model_id,
         instructions=system_prompt,
@@ -119,17 +249,21 @@ async def summarize_program(
     parent_score: float,
     child_score: float,
     improved: bool,
-    llm_ensemble,
-    model_id: str = "claude-sonnet-4-6",
+    summarizer_llm: "SummarizerLLM",
     task_instructions: Optional[str] = None,
     recent_avoids: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Call Sonnet 4.6 to produce a structured per-program summary.
+    """Call the configured summarizer model to produce a structured per-program summary.
 
     Returns None on failure; callers should treat it as best-effort and
-    continue without a summary.
+    continue without a summary. The summarizer uses its OWN LLM client
+    (`summarizer_llm`) — not the worker ensemble — so its model is
+    independent of what workers are configured with.
 
     Args:
+        summarizer_llm: The dedicated summarizer LLM built at controller
+            startup via `build_summarizer_llm`. Failing to construct this
+            should surface at config-time, not here.
         task_instructions: Optional per-benchmark guardrails to append to
             the user message before the attempt data. Use this to inject
             correction guidance (e.g. "score=0 means overlap, not a broken
@@ -159,19 +293,10 @@ async def summarize_program(
     )
 
     try:
-        if model_id.startswith("gpt-") or model_id.startswith("openai/"):
-            resp_text = await _openai_responses_call(
-                model_id=model_id.removeprefix("openai/"),
-                system_prompt=_SYSTEM_PROMPT,
-                user_text=user_text,
-            )
-        else:
-            resp_text = await llm_ensemble.generate_with_context(
-                system_message=_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_text}],
-                model=model_id,
-                temperature=0.2,
-            )
+        resp_text = await summarizer_llm.call(
+            system_prompt=_SYSTEM_PROMPT,
+            user_text=user_text,
+        )
     except Exception as e:
         logger.warning(f"program summarizer call failed for {program_id[:8]}: {e}")
         return None

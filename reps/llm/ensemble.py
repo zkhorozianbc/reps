@@ -111,17 +111,30 @@ class LLMEnsemble:
         return getattr(self, "_last_model_name", None)
 
     def _select_model(self, **kwargs) -> LLMInterface:
-        """Select a model -- by name override if provided, otherwise by weighted sampling."""
+        """Select a model -- by name override if provided, otherwise by weighted sampling.
+
+        Raises `ValueError` if `model=` is passed but not found in the
+        ensemble. Previously this silently fell back to weighted sampling,
+        which masked real config mistakes (e.g. summarizer requesting a
+        model that wasn't in the worker ensemble would quietly run on the
+        worker primary instead — a 404 later). Callers that genuinely
+        want "use this model if present, else sample" should check
+        `self.models` explicitly before passing `model=`.
+        """
         model_override = kwargs.pop("model", None)
         if model_override:
             for m in self.models:
                 if getattr(m, "model", None) == model_override:
                     logger.info(f"Using model override: {model_override}")
                     return m
-            # No match found -- log warning and fall through to sampling
-            logger.warning(
-                f"Model override '{model_override}' not found in ensemble, "
-                f"falling back to weighted sampling"
+            # No match found — fail loudly so the caller sees its config
+            # error rather than a cryptic 404 three layers down.
+            available = [getattr(m, "model", "?") for m in self.models]
+            raise ValueError(
+                f"Model override {model_override!r} not found in ensemble. "
+                f"Available models: {available}. "
+                f"Either add the model to `llm.models` or build a dedicated "
+                f"LLM client for out-of-ensemble use."
             )
         return self._sample_model()
 

@@ -104,9 +104,12 @@ def test_ensemble_model_override_selection(mock_openai_cls):
     selected = ensemble._select_model(model="openai/gpt-4o-mini")
     assert selected.model == "openai/gpt-4o-mini"
 
-    # A non-existent override should fall back to sampling (still returns a model)
-    selected = ensemble._select_model(model="nonexistent/model")
-    assert selected.model in ("openai/gpt-4o-mini", "openai/gpt-4o")
+    # A non-existent override must raise — silent fallback masks real
+    # config errors (e.g. a summarizer asking for a model the ensemble
+    # doesn't have would silently run on the worker primary and then 404).
+    import pytest
+    with pytest.raises(ValueError, match="not found in ensemble"):
+        ensemble._select_model(model="nonexistent/model")
 
 
 # ---------------------------------------------------------------------------
