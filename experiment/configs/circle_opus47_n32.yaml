@@ -1,0 +1,128 @@
+# Circle packing n=32 — Opus 4.7 via native Anthropic API
+# No published SOTA for n=32; target 2.939 is a placeholder anchor for F6 SOTA steering
+harness: reps
+provider: anthropic
+task: ../benchmarks/circle_packing_n32
+max_iterations: 50
+log_level: INFO
+random_seed: 42
+
+# Opus produces long hardcoded coord-table programs; default 10k cap is too
+# tight (default rejects legit submissions outright). 30k matches push_sota_*.
+max_code_length: 30000
+
+llm:
+  primary_model: "anthropic/claude-opus-4-7"
+  primary_model_weight: 1.0
+  api_key: "${ANTHROPIC_API_KEY}"
+  temperature: 0.7
+  max_tokens: 16384
+  timeout: 300
+
+prompt:
+  num_top_programs: 3
+  use_template_stochasticity: true
+
+database:
+  population_size: 60
+  archive_size: 25
+  num_islands: 4
+  elite_selection_ratio: 0.3
+  exploitation_ratio: 0.7
+
+evaluator:
+  timeout: 300
+  cascade_evaluation: false
+  parallel_evaluations: 2
+
+diff_based_evolution: false
+
+reps:
+  enabled: true
+  batch_size: 5
+
+  reflection:
+    enabled: true
+    top_k: 3
+    bottom_k: 2
+
+  revisitation:
+    enabled: true
+    epsilon_start: 0.15
+    epsilon_end: 0.05
+    decay: "linear"
+    recency_window: 20
+
+  workers:
+    types:
+      - name: atr_exploiter
+        impl: anthropic_tool_runner
+        role: exploiter
+        model_id: claude-opus-4-7
+        temperature: 0.3
+        generation_mode: full
+        tools: [view_parent, view_program, edit_file, run_tests, submit_child, mark_converged]
+        max_turns: 30
+        uses_evaluator: true
+        owns_temperature: true
+        weight: 0.6
+        template_variations:
+          role_directive:
+            - "Refine the parent's existing approach. Keep the same algorithm family and same outer structure; find a concretely smaller mutation: tighten a tolerance, adjust a step-size schedule, improve a termination criterion, vectorize a hot inner loop, swap a solver call for a warmer-started one with the same arguments. The goal is strict numerical improvement on the parent's own basin — not a new idea."
+            - "Tune the parent's hyperparameters as if you were running a local coordinate-descent sweep in your head. Pick ONE constant (e.g. the LP/NLP tolerance, the basin-hopping step size, the SOCP rescaling factor, the max iterations per restart) and adjust it by a factor the parent has not yet tried. Keep everything else identical so the archive can cleanly attribute the delta to that single lever."
+            - "Polish the parent. If the parent already runs two stages (e.g. SOCP warm-start then SLSQP), tighten the handoff: pass tighter tolerances into the second stage, increase the number of SLSQP iterations, or add a final-projection step that respects the constraints more strictly. Do not replace either stage with a different algorithm — the point is strict, minimal improvement within the parent's scaffold."
+            - "Add one numerical safeguard the parent lacks, without changing the algorithm. Examples: use `method='trust-constr'` instead of a default L-BFGS for the constrained phase; clip intermediate iterates to the feasible box before re-projecting; call `scipy.optimize.minimize` with an explicit Jacobian instead of finite differences. Keep the overall flow verbatim — you are adding precision, not ideas."
+            - "Make ONE targeted improvement to the parent's weakest observed metric. Read the parent's metrics carefully (min_distance_violation, sum_of_radii, solver_wall_time, etc.) and ask which one is actually bottlenecking the combined score. Fix just that metric with a minimal change; do not refactor anything else."
+      - name: atr_explorer
+        impl: anthropic_tool_runner
+        role: explorer
+        model_id: claude-opus-4-7
+        temperature: 1.0
+        generation_mode: full
+        tools: [view_parent, view_program, edit_file, run_tests, submit_child, mark_converged]
+        max_turns: 30
+        uses_evaluator: true
+        owns_temperature: true
+        weight: 0.25
+        template_variations:
+          role_directive:
+            - "PIVOT OPTIMIZER FAMILY. Do NOT use whatever solver the parent uses. Replace it with CMA-ES (`cma` package) — treat circle centers as a high-dimensional continuous parameter vector, penalize overlap and container violations in the fitness, and let the covariance-matrix adaptation explore a correlated search space the parent's local solver cannot reach. Commit the CMA-ES child even if the first run is noisy; later iterations will tune it."
+            - "PIVOT TO A CONVEX RELAXATION. Reformulate the packing as a second-order cone program (SOCP) using `cvxpy`: pairwise non-overlap as `||x_i - x_j||_2 >= r_i + r_j` (relaxed via a McCormick-style lifting or a sum-of-squares certificate), container membership as affine bounds. Solve the relaxation to get a global lower bound and a warm-start, then project. This is a structurally different algorithm than local gradient descent — that's the point."
+            - "PIVOT TO A VORONOI / GEOMETRIC APPROACH. Drop the numerical optimizer entirely for the initial layout. Generate centers from a Lloyd-relaxed Voronoi diagram in the unit square (use `scipy.spatial.Voronoi` + a relaxation loop), then take the largest inscribed circle at each Voronoi cell. This gives a qualitatively different starting point that the parent's optimizer can then polish. If the parent ALREADY does Voronoi, pivot to a regular-polygon / lattice-packing seed instead."
+            - "PIVOT TO BASIN-HOPPING WITH LARGE JUMPS. Use `scipy.optimize.basinhopping` with a step size at least 10x the parent's, `niter >= 200`, and a `take_step` that perturbs a RANDOM SUBSET of circle positions (not all of them) per jump. The intent is to escape the parent's local basin entirely and find a different packing topology — measure success by whether the sorted-radius profile is noticeably different from the parent's, not only by score."
+            - "PIVOT TO A NON-GRADIENT METHOD. Use simulated annealing (`scipy.optimize.dual_annealing`) or particle swarm (`pyswarms` if available, else a hand-rolled swarm) over the joint center+radius vector. Temperature schedule must be aggressive in the first half. The parent almost certainly uses a gradient-based solver; the whole point here is to sample parameter space the gradient method cannot reach."
+            - "PIVOT THE REPRESENTATION. Parameterize each circle by (angle, radial_offset, radius) in polar coordinates around the container center, not by (x, y, r). Then run the parent's own solver (or any gradient solver) in this new space. Different parametrizations yield different local minima for the same objective — this often finds packings the Cartesian solver misses entirely, especially for layouts with approximate rotational symmetry."
+      - name: atr_crossover
+        impl: anthropic_tool_runner
+        role: crossover
+        model_id: claude-opus-4-7
+        generation_mode: full
+        tools: [view_parent, view_program, edit_file, run_tests, submit_child, mark_converged]
+        max_turns: 30
+        uses_evaluator: true
+        weight: 0.15
+        template_variations:
+          role_directive:
+            - "MERGE, do not refine. Read BOTH the parent and the second_parent end-to-end via view_program. Identify the ONE structural idea from second_parent that the parent lacks (e.g. second_parent does CMA-ES initialization, parent does SLSQP refinement). Produce a child that runs second_parent's idea FIRST, hands its output to parent's refinement stage, and keeps both scaffoldings intact. Do not merely copy the parent and tweak a constant."
+            - "GRAFT the second_parent's inner loop into the parent's outer loop (or vice-versa). Example: if parent does `for restart in range(N): scipy_minimize(...)` and second_parent does `cma.fmin(objective, x0, sigma)`, produce a child that uses parent's multi-restart shell but replaces each `scipy_minimize` call with a short CMA-ES run. The combined child should carry DNA from both lineages, visible in the code structure — if a reader can't tell which parent contributed which block, you didn't do the crossover."
+            - "SPLICE parametrization from one parent with solver from the other. If parent uses polar (angle, radial_offset, radius) parametrization but a weak solver, and second_parent uses Cartesian with a strong solver, write a child that converts between representations at the boundary: start in second_parent's representation, solve with second_parent's solver, then convert to parent's representation and run parent's final polish step. Preserve both parents' strengths."
+            - "RUN BOTH PARENTS IN PARALLEL AND PICK THE BETTER. Concretely: in the child's code, run parent_config and second_parent_config each as a callable; evaluate each locally on a reduced budget; choose whichever returns the higher score and polish that one. This is ensemble-style crossover — the child is a portfolio, not a blend. Good when the two parents solve different instances well and you don't know which applies."
+            - "COMBINE the two parents' CONSTRAINT HANDLING styles. E.g. if parent uses soft penalty terms and second_parent uses hard projection, write a child that does a soft-penalty phase first (cheap exploration) then hands off to a hard-projection phase (strict feasibility). The child's code must contain recognizable fragments of both parents' constraint logic — not a synthesis of vague ideas, but actual text that clearly came from each."
+
+  convergence:
+    enabled: true
+    window_size: 10
+    entropy_threshold_mild: 0.5
+    entropy_threshold_moderate: 0.3
+    entropy_threshold_severe: 0.15
+
+  contracts:
+    enabled: false
+
+  sota:
+    enabled: true
+    target_score: 2.939
+
+  annotations:
+    enabled: true
+    dead_end_awareness: true
