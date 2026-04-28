@@ -83,10 +83,6 @@ class LLMModelConfig:
     # Reasoning parameters
     reasoning_effort: Optional[str] = None
 
-    # Manual mode (human-in-the-loop)
-    manual_mode: Optional[bool] = None
-    _manual_queue_dir: Optional[str] = None
-
     # Per-model provider override (e.g. "openrouter", "anthropic")
     provider: Optional[str] = None
 
@@ -131,9 +127,6 @@ class LLMConfig(LLMModelConfig):
 
     # Reasoning parameters (inherited from LLMModelConfig but can be overridden)
     reasoning_effort: Optional[str] = None
-
-    # Manual mode switch
-    manual_mode: bool = False
 
     def __post_init__(self):
         """Post-initialization to set up model configurations"""
@@ -189,7 +182,6 @@ class LLMConfig(LLMModelConfig):
             "retry_delay": self.retry_delay,
             "random_seed": self.random_seed,
             "reasoning_effort": self.reasoning_effort,
-            "manual_mode": self.manual_mode,
         }
         self.update_model_params(shared_config)
 
@@ -221,11 +213,6 @@ class PromptConfig:
     # Template stochasticity
     use_template_stochasticity: bool = True
     template_variations: Dict[str, List[str]] = field(default_factory=dict)
-
-    # Meta-prompting
-    # Note: meta-prompting features not implemented
-    use_meta_prompting: bool = False
-    meta_prompt_weight: float = 0.1
 
     # Artifact rendering
     include_artifacts: bool = True
@@ -329,11 +316,6 @@ class EvaluatorConfig:
     timeout: int = 300  # Maximum evaluation time in seconds
     max_retries: int = 3
 
-    # Resource limits for evaluation
-    # Note: resource limits not implemented
-    memory_limit_mb: Optional[int] = None
-    cpu_limit: Optional[float] = None
-
     # Evaluation strategies
     cascade_evaluation: bool = True
     cascade_thresholds: List[float] = field(default_factory=lambda: [0.5, 0.75, 0.9])
@@ -344,8 +326,6 @@ class EvaluatorConfig:
     # Defaults to parallel_evaluations when unset. Controls how many worker
     # iterations the async controller dispatches concurrently.
     max_concurrent_iterations: Optional[int] = None
-    # Note: distributed evaluation not implemented
-    distributed: bool = False
 
     # LLM-based feedback
     use_llm_feedback: bool = False
@@ -354,20 +334,6 @@ class EvaluatorConfig:
     # Artifact handling
     enable_artifacts: bool = True
     max_artifact_storage: int = 100 * 1024 * 1024  # 100MB per program
-
-
-@dataclass
-class EvolutionTraceConfig:
-    """Configuration for evolution trace logging"""
-
-    enabled: bool = False
-    format: str = "jsonl"  # Options: "jsonl", "json", "hdf5"
-    include_code: bool = False
-    include_prompts: bool = True
-    include_turns: bool = False  # Include TurnRecord turns in evolution trace (Task 17)
-    output_path: Optional[str] = None
-    buffer_size: int = 10
-    compress: bool = False
 
 
 @dataclass
@@ -423,6 +389,11 @@ class REPSSOTAConfig:
     """F6: SOTA Steering config"""
     enabled: bool = False
     target_score: Optional[float] = None
+    # Optional: name of the metric F6 should compare against target_score. If
+    # unset, falls back to combined_score and then to a numeric-average of
+    # metrics. Set this when your evaluator's primary objective lives in a
+    # specific raw metric (e.g. "sum_radii") rather than combined_score.
+    target_metric: Optional[str] = None
 
 
 @dataclass
@@ -527,7 +498,6 @@ class Config:
     prompt: PromptConfig = field(default_factory=PromptConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     evaluator: EvaluatorConfig = field(default_factory=EvaluatorConfig)
-    evolution_trace: EvolutionTraceConfig = field(default_factory=EvolutionTraceConfig)
     reps: REPSConfig = field(default_factory=REPSConfig)
 
     # Evolution settings

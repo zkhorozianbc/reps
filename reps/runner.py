@@ -170,24 +170,18 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
             best_code_path.write_text(best.code)
             logger.info(f"Best program saved to {best_code_path}")
 
-            # Try to visualize the best packing
+            # Try to visualize via the benchmark's optional visualize.py
             try:
-                from experiment.benchmarks.circle_packing.visualize import visualize_from_program
-                viz_path = str(Path(output_dir) / "packing.png")
-                visualize_from_program(str(best_code_path), save_path=viz_path)
-            except Exception:
-                # Visualization is optional — don't fail the run
-                try:
-                    import importlib.util
-                    viz_module_path = Path(evaluator).parent / "visualize.py"
-                    if viz_module_path.exists():
-                        spec = importlib.util.spec_from_file_location("viz", str(viz_module_path))
-                        viz = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(viz)
-                        viz.visualize_from_program(str(best_code_path),
-                                                   save_path=str(Path(output_dir) / "packing.png"))
-                except Exception as e:
-                    logger.warning(f"Could not generate visualization: {e}")
+                import importlib.util
+                viz_module_path = Path(evaluator).parent / "visualize.py"
+                if viz_module_path.exists():
+                    spec = importlib.util.spec_from_file_location("viz", str(viz_module_path))
+                    viz = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(viz)
+                    viz.visualize_from_program(str(best_code_path),
+                                               save_path=str(Path(output_dir) / "packing.png"))
+            except Exception as e:
+                logger.warning(f"Could not generate visualization: {e}")
 
 
 def run_openevolve(config_path: str, initial_program: str, evaluator: str, output_dir: str, iterations: int):

@@ -76,6 +76,7 @@ reps:
   sota:
     enabled: true
     target_score: 2.6361
+    target_metric: sum_radii
 
   annotations:
     enabled: false

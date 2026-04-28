@@ -206,10 +206,6 @@ class WorkerPool:
         self._force_explorer_batches = num_batches
         logger.info(f"Forcing explorer majority for {num_batches} batches")
 
-    def force_model_switch(self):
-        """Signal that models should be switched (handled by contract selector)."""
-        logger.info("Model switch requested by convergence monitor")
-
     def get_alternative_worker_name(self, original: str) -> str:
         """Get a different worker name for revisitation."""
         names = [n for n in self._configs if n != original]

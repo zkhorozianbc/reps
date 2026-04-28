@@ -4,11 +4,10 @@
 
 <p align="center">
   <a href="https://colab.research.google.com/github/google-deepmind/alphaevolve_repository_of_problems/blob/main/experiments/packing_circles_max_sum_of_radii/packing_circle_max_sum_of_radii.ipynb"><img src="https://img.shields.io/badge/circle%20packing%20n%3D26-2.6359831%20%E2%9C%93-brightgreen" alt="Circle Packing Score"></a>
-  <a href="https://github.com/algorithmicsuperintelligence/openevolve"><img src="https://img.shields.io/badge/built%20on-OpenEvolve-blue" alt="Built on OpenEvolve"></a>
   <img src="https://img.shields.io/badge/python-3.12-blue" alt="Python 3.12">
 </p>
 
-REPS extends [OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve) with adaptive meta-cognition for evolutionary code search. Between iterations, the controller reflects on which mutations worked, rebalances search strategies, and steers compute based on distance to known targets.
+REPS is an evolutionary code search harness with adaptive meta-cognition. Between iterations, the controller reflects on which mutations worked, rebalances search strategies, and steers compute based on distance to known targets. It started as a fork of [OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve); the harness is now self-contained.
 
 ## Result: Circle Packing n=26
 
@@ -26,15 +25,15 @@ Verified against [DeepMind's official validator](https://colab.research.google.c
 
 ## What REPS Does
 
-Every iteration is still a single LLM call — one prompt in, one code edit out. REPS makes the controller smarter about orchestrating those calls:
+The controller orchestrates one Worker per iteration (see [Workers](#workers) for the four implementations). Between batches it runs adaptive features:
 
-- **Reflection (F1):** Every 5 iterations, an LLM analyzes what edits worked/failed and injects structured insight into future prompts
-- **Worker Diversity (F3):** Three mutation strategies — exploiter (small diffs, low temp), explorer (full rewrites, high temp), crossover (merges two parents from different islands)
-- **Convergence Detection (F4):** Measures Shannon entropy over edit types; forces diversification when the search collapses
-- **Contract Selection (F5):** Thompson-sampling bandit learns which model/temperature combos produce improvements
-- **SOTA Steering (F6):** When the target score is known, modulates exploration vs exploitation based on the gap
-- **Epsilon-Revisitation (F2):** Revisits high-scoring but underexplored programs with alternative worker types
-- **Annotations (F8):** Tags programs with dead-end warnings so future prompts avoid known failures
+- **Reflection (F1):** Every batch, an LLM analyzes which edits worked or failed and injects structured insight into future prompts.
+- **Worker Diversity (F3):** Multiple worker configs sampled by weight (e.g. exploiter / explorer / crossover) so the search keeps multiple strategies in play.
+- **Convergence Detection (F4):** Measures Shannon entropy over edit types; forces diversification when the search collapses.
+- **Contract Selection (F5):** Thompson-sampling bandit learns which model/temperature combos produce improvements.
+- **SOTA Steering (F6):** When the target score is known, modulates exploration vs exploitation based on the gap.
+- **Epsilon-Revisitation (F2):** Revisits high-scoring but underexplored programs with alternative worker types.
+- **Annotations (F8):** Tags programs with dead-end warnings so future prompts avoid known failures.
 
 ## Benchmarks
 
@@ -56,35 +55,50 @@ With Gemini flash models (cheaper, weaker):
 | Baseline (unmodified OpenEvolve) | 2.128300 | 100 | gemini-2.0-flash + gemini-2.5-flash-lite |
 | REPS | 2.219700 | 100 | gemini-2.0-flash + gemini-2.5-flash-lite |
 
-### Function Minimization
-
-Find the global minimum of f(x,y) = sin(x)cos(y) + sin(xy) + (x^2+y^2)/20.
-
-Both baseline and REPS saturate at combined_score ~1.4995 within 100 iterations. This benchmark is too easy to differentiate the approaches — both find simulated annealing and converge to the same ceiling.
-
 ## Architecture
 
 ```
 reps/
-├── config.py          # All config (evolution + REPS features)
-├── controller.py      # Evolution loop with REPS orchestration
-├── database.py        # Program database
-├── evaluator.py       # Program evaluator
-├── runner.py          # CLI entry point
-├── llm/               # LLM providers
-│   ├── openrouter.py  # OpenAI-compatible (OpenRouter, etc.)
-│   ├── anthropic.py   # Native Anthropic API
-│   └── ensemble.py    # Model ensemble
-├── prompt_sampler.py  # Prompt template building
+├── runner.py              # CLI entry (`reps-run`); dotenv, output versioning
+├── controller.py          # Async evolution loop with REPS orchestration
+├── config.py              # Dataclass-based YAML config (single source of truth)
+├── database.py            # In-memory MAP-Elites + island archive (with checkpoints)
+├── evaluator.py           # Cascade evaluator with per-iteration semaphore
+├── prompt_sampler.py      # Builds diff/full-rewrite prompts from templates
+├── prompt_templates.py    # Loads prompt_templates/ *.txt + fragments.json
+├── prompt_templates/      # The actual template text files
+├── runtime.py             # ContextVar program-id propagation for asyncio
+├── async_utils.py         # TaskPool helpers
 ├── reflection_engine.py   # F1
-├── worker_pool.py         # F3
+├── worker_pool.py         # F3 sampler / allocation / mutators
 ├── convergence_monitor.py # F4
-├── contract_selector.py   # F5
+├── contract_selector.py   # F5 Thompson sampler over (model, temp) arms
 ├── sota_controller.py     # F6
-└── metrics_logger.py      # Metrics CSV logging
+├── program_summarizer.py  # Per-iteration LLM summary used by F8 annotations
+├── metrics_logger.py      # CSV + JSONL emitters under output_dir/metrics/
+├── embedding.py           # OpenAI/Azure embeddings (optional novelty path)
+├── novelty_judge.py       # LLM-as-judge novelty check (optional)
+├── llm/
+│   ├── base.py            # LLMInterface ABC + retry helper
+│   ├── anthropic.py       # Native Anthropic client
+│   ├── openai_compatible.py  # OpenAI / OpenRouter / any OpenAI-shape gateway
+│   ├── ensemble.py        # Weighted-sample model ensemble
+│   ├── provider_of.py     # Heuristic: model_id → provider
+│   └── stream_print.py    # Pretty-print streaming chunks to stderr
+└── workers/
+    ├── base.py            # Worker Protocol + dataclasses (Config/Request/Result/TurnRecord)
+    ├── registry.py        # @register decorator + build_worker
+    ├── single_call.py     # One-shot LLM call (default minimal)
+    ├── anthropic_tool_runner.py  # Native Anthropic tool-use loop
+    ├── openai_tool_runner.py     # OpenAI Responses API tool-use loop
+    ├── dspy_react.py      # DSPy ReAct (Anthropic via LiteLLM)
+    ├── tools.py           # view_parent / edit_file / run_tests / submit_child / mark_converged
+    ├── edit_serializer.py # SEARCH/REPLACE block formatter
+    ├── _runner_common.py  # Shared helpers between the two tool runners
+    └── trace_render.py    # Pretty-print TurnRecord traces for logs
 ```
 
-REPS modules run in the controller process at batch boundaries. Workers are stateless — they execute whatever config they receive.
+REPS modules run in the controller process at batch boundaries. Workers handle one iteration each — single_call is one prompt → one edit; the tool-runner workers loop with tools (view_parent, edit_file, run_tests, submit_child) until they `submit_child` or hit `max_turns`.
 
 ## Quickstart
 
@@ -95,16 +109,16 @@ git clone https://github.com/zkhorozianbc/reps.git
 cd reps
 uv venv .venv --python 3.12
 uv pip install -e .
-# Optional: install OpenEvolve for baseline comparison
+# Optional: install OpenEvolve for baseline comparison via `harness: openevolve`
 uv pip install openevolve
 ```
 
-Set your API key:
+Set your API key — depending on provider:
 
 ```bash
-export OPENROUTER_API_KEY=sk-or-...
-# Or, to use the native Anthropic API instead:
-export ANTHROPIC_API_KEY=sk-ant-...
+export OPENROUTER_API_KEY=sk-or-...      # provider: openrouter
+export ANTHROPIC_API_KEY=sk-ant-...      # provider: anthropic
+export OPENAI_API_KEY=sk-...             # provider: openai (also used by openai_tool_runner)
 ```
 
 Run REPS on circle packing (n=26):
@@ -118,9 +132,95 @@ reps-run \
   --iterations 100
 ```
 
-Results go to the directory specified by `--output`. Best program is in `output/best/`.
+Results go to `--output/run_NNN/` (auto-versioned). The best program code lives at `<run>/best_program.py`.
 
-To run a baseline (unmodified OpenEvolve), use a config with `harness: openevolve`.
+To run a baseline (unmodified OpenEvolve), use a config with `harness: openevolve` (requires `pip install openevolve`).
+
+## Workers
+
+A *worker* runs one iteration: receives a parent program + prompt context, returns a child program. The worker is selected per-iteration by F3 (worker pool sampling). Configure under `reps.workers.types` in YAML.
+
+| Worker | When to use | Key options (`impl_options`) |
+|---|---|---|
+| `single_call` | One-shot LLM call. Cheapest, fastest. | `provider`, `api_key`, `api_base`, `model`, `temperature`, `max_tokens` |
+| `anthropic_tool_runner` | Native Anthropic tool-use loop. Best correctness via `edit_file` + `run_tests` + `submit_child`. Supports thinking blocks, server-side `code_execution`, and `web_search`. | `thinking_effort` (`low`/`medium`/`high`/`xhigh`), `code_execution` (bool), `web_search` (bool), `task_budget_total`, `max_tokens`, `timeout` |
+| `openai_tool_runner` | OpenAI Responses-API tool-use loop. Same protocol shape as anthropic_tool_runner but provider-native. | `reasoning_effort` (`low`/`medium`/`high`), `max_tokens`, `timeout` |
+| `dspy_react` | DSPy ReAct over Anthropic via LiteLLM. Research / experimental. | `temperature`, `max_tokens` |
+
+Each entry in `reps.workers.types` is a `WorkerConfig`:
+
+```yaml
+reps:
+  workers:
+    types:
+      - name: exploiter_atr
+        impl: anthropic_tool_runner
+        role: exploiter            # exploiter | explorer | crossover
+        weight: 0.7
+        model_id: claude-sonnet-4-6
+        temperature: 0.4
+        max_turns: 12
+        generation_mode: diff      # "diff" or "full"
+        tools: [view_parent, edit_file, run_tests, submit_child]
+        impl_options:
+          thinking_effort: high
+          code_execution: false
+      - name: explorer_single
+        impl: single_call
+        role: explorer
+        weight: 0.3
+        model_id: claude-sonnet-4-6
+        temperature: 0.9
+        generation_mode: full
+```
+
+See `experiment/configs/verify_*.yaml` for a working example of each worker impl.
+
+## Configuration
+
+All configuration is a single dacite-deserialized dataclass tree rooted at `Config` in `reps/config.py`. The major sections:
+
+| YAML key | Purpose |
+|---|---|
+| `provider`, `harness`, `reasoning`, `task` | Top-level run shape |
+| `max_iterations`, `checkpoint_interval`, `random_seed` | Run lifecycle |
+| `llm:` | Default model(s), API base/key, retries, ensemble |
+| `prompt:` | Template directory, num_top/diverse programs, artifact rendering |
+| `database:` | Population/archive sizes, MAP-Elites feature dimensions, island migration, embedding-based novelty |
+| `evaluator:` | Timeout, cascade thresholds, `parallel_evaluations`, LLM feedback |
+| `reps.reflection` (F1) | `enabled`, `top_k`, `bottom_k`, `model` |
+| `reps.revisitation` (F2) | `enabled`, `epsilon_start/end`, `decay`, `recency_window` |
+| `reps.workers` (F3) | `types: [WorkerConfig, ...]` (see above) |
+| `reps.convergence` (F4) | `enabled`, `window_size`, entropy thresholds |
+| `reps.contracts` (F5) | `enabled`, `models`, `temperatures` |
+| `reps.sota` (F6) | `enabled`, `target_score`, `target_metric` |
+| `reps.annotations` (F8) | `enabled`, `dead_end_awareness` |
+| `reps.summarizer` | Per-iteration program summarizer model (`model_id`, `task_instructions`, optional `provider`/`api_key`) |
+
+`reps/config.py` is the source of truth for every field, default, and forward compat note.
+
+### Providers
+
+- `provider: openrouter` → `OPENROUTER_API_KEY`, served via `reps/llm/openai_compatible.py`.
+- `provider: anthropic` → `ANTHROPIC_API_KEY`, served via `reps/llm/anthropic.py`.
+- `provider: openai` → `OPENAI_API_KEY`, served via `reps/llm/openai_compatible.py` (api_base defaults to OpenAI Direct).
+
+The native tool-runner workers (`anthropic_tool_runner`, `openai_tool_runner`) bypass `LLMInterface` and use their provider's SDK directly to access raw content blocks (thinking, tool_use, tool_result) and Responses-API features. They take their own API key via `impl_options.api_key` (falls back to env).
+
+## Metrics output
+
+Each run writes to `<output>/run_NNN/metrics/`:
+
+| File | Contents |
+|---|---|
+| `score_trajectory.csv` | Per-iteration best/last scores |
+| `cost.csv` | Per-iteration cumulative tokens in/out (per provider) |
+| `worker_yield.csv` | Per-iteration yield rate per worker |
+| `diversity.csv` | Per-batch edit-entropy and worker-allocation snapshot |
+| `convergence_events.jsonl` | Each time the convergence monitor escalates (MILD_BOOST, MODERATE_DIVERSIFY, SEVERE_RESTART) |
+| `reflection_log.jsonl` | F1 reflection JSON per batch |
+
+The full program archive lives at `<run>/programs/<id>.json` (one file per program) plus the snapshot `database.json`. Best program code: `<run>/best_program.py`.
 
 ## Adding a Benchmark
 
@@ -168,6 +268,8 @@ The evaluator is loaded once per worker process. It receives the path to a tempo
 
 For cascade evaluation (early rejection of bad candidates), optionally define `evaluate_stage1(program_path)` and `evaluate_stage2(program_path)` alongside the main `evaluate()`.
 
+If you have a primary objective metric distinct from `combined_score` (e.g. `sum_radii`), set `reps.sota.target_metric: <name>` in the config so F6 SOTA steering compares against the right value.
+
 ### `initial_program.py`
 
 The seed code the LLM starts evolving from. Wrap the evolvable portion in `EVOLVE-BLOCK` markers:
@@ -187,37 +289,6 @@ if __name__ == "__main__":
     print(solve())
 ```
 
-### Config
-
-Create a YAML config in `experiment/configs/` that references your benchmark. The initial program and evaluator are passed as CLI args, not in the config. The config controls the LLM, REPS features, and evolution parameters:
-
-```yaml
-harness: reps              # "reps" or "openevolve"
-provider: openrouter       # "openrouter" or "anthropic"
-max_iterations: 100
-
-llm:
-  primary_model: "anthropic/claude-sonnet-4.6"
-  api_key: "${OPENROUTER_API_KEY}"
-  temperature: 0.7
-  max_tokens: 8192
-  timeout: 120
-
-prompt:
-  system_message: |
-    You are an expert at <domain>. Improve the solve() function to ...
-  num_top_programs: 3
-
-evaluator:
-  timeout: 60
-  parallel_evaluations: 4
-
-reps:
-  enabled: true
-  batch_size: 5
-  # ... (see experiment/configs/ for full examples)
-```
-
 ### Run
 
 ```bash
@@ -233,16 +304,15 @@ See `experiment/benchmarks/circle_packing/` for a complete working example.
 
 ## Configs
 
-All configs are in `experiment/configs/`. Each pair is identical except for the `reps:` section.
+All configs are in `experiment/configs/`. Examples worth knowing:
 
-| Config | Model | REPS |
-|---|---|---|
-| `circle_sonnet_base.yaml` | claude-sonnet-4.6 | off |
-| `circle_sonnet_reps.yaml` | claude-sonnet-4.6 | on |
-| `circle_base.yaml` | gemini-2.0-flash | off |
-| `circle_reps.yaml` | gemini-2.0-flash | on |
+- **Reference / starting points**: `reps_full.yaml`, `circle_sonnet_reps.yaml`, `circle_opus47_anthropic.yaml`.
+- **Worker-impl smoke configs**: `verify_single_call.yaml`, `verify_anthropic_tool_runner.yaml`, `verify_openai_tool_runner.yaml`, `verify_dspy_react.yaml` — minimal configs exercising one worker each.
+- **OpenEvolve baselines**: `circle_base.yaml`, `circle_sonnet_base.yaml` — `harness: openevolve`.
+- **n=32 variants**: `circle_*_n32.yaml`.
+- **SOTA-push runs**: `push_sota_opus.yaml`, `push_sota_sonnet.yaml`.
 
-All configs use OpenRouter as the default provider. To use the native Anthropic API, set `provider: anthropic` in the config and export `ANTHROPIC_API_KEY`.
+Provider can be `openrouter`, `anthropic`, or `openai`. Configs that target the native Anthropic API set `provider: anthropic` and rely on `ANTHROPIC_API_KEY`.
 
 ## Tests
 

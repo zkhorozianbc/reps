@@ -216,6 +216,7 @@ def evaluate(program_path):
         self.config.reps.workers.types = _default_reps_workers()
         self.config.reps.sota.enabled = True
         self.config.reps.sota.target_score = 2.635
+        self.config.reps.sota.target_metric = "sum_radii"
         self.config.reps.convergence.enabled = False
         self.config.reps.contracts.enabled = False
         self.config.reps.reflection.enabled = False

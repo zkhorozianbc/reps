@@ -14,7 +14,6 @@ abstraction now would be premature.
 from __future__ import annotations
 
 import asyncio
-import difflib
 import json
 import logging
 import os
@@ -44,6 +43,11 @@ from reps.workers.base import (
     WorkerRequest,
     WorkerResult,
 )
+from reps.workers._runner_common import (
+    compute_applied_edit,
+    reject_placeholder_submission,
+    strip_full_rewrite_tail,
+)
 from reps.workers.edit_serializer import serialize_diff_blocks
 from reps.workers.registry import register
 from reps.workers.tools import (
@@ -55,29 +59,6 @@ from reps.workers.tools import (
 logger = logging.getLogger(__name__)
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "prompt_templates"
-
-
-def _strip_full_rewrite_tail(user_text: str) -> str:
-    """Remove the full-rewrite task framing that the sampler's
-    full_rewrite_user.txt template appends. The tool-runner uses edit_file
-    mechanics; a "Provide the complete new program code" instruction plus a
-    ```python # Your rewritten program here ``` skeleton pushes the model
-    toward full-rewrite dumps instead of targeted edits.
-
-    See the anthropic_tool_runner counterpart for the full rationale.
-    """
-    if not user_text:
-        return user_text
-    idx = user_text.find("\n# Task\n")
-    if idx == -1:
-        skel = user_text.find("# Your rewritten program here")
-        if skel == -1:
-            return user_text
-        fence = user_text.rfind("```", 0, skel)
-        if fence != -1:
-            return user_text[:fence].rstrip() + "\n"
-        return user_text[:skel].rstrip() + "\n"
-    return user_text[:idx].rstrip() + "\n"
 
 
 def _anthropic_schema_to_openai(schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -275,23 +256,8 @@ class OpenAIToolRunnerWorker:
                     # BEFORE attempting to compile. Parallel to the Anthropic
                     # tool-runner safeguard — prevents clobbering the parent
                     # with sentinel strings ("...", "TODO", placeholder tokens).
-                    stripped = (code or "").strip()
-                    _placeholders = {
-                        "code_placeholder",
-                        "PLACEHOLDER_USE_INFLIGHT",
-                        "TODO",
-                        "...",
-                    }
-                    if (
-                        not stripped
-                        or stripped in _placeholders
-                        or len(stripped) < 30
-                    ):
-                        err_text = (
-                            f"REJECTED: submitted code is empty / placeholder / "
-                            f"too short (len={len(stripped)}). Retry with actual "
-                            f"program code."
-                        )
+                    err_text = reject_placeholder_submission(code)
+                    if err_text is not None:
                         tool_outputs.append({
                             "type": "function_call_output",
                             "call_id": call_id,
@@ -432,7 +398,12 @@ class OpenAIToolRunnerWorker:
                 if edit_accumulator:
                     applied = serialize_diff_blocks(edit_accumulator)
                 else:
-                    applied = self._compute_applied_edit(submitted_code, request)
+                    applied = compute_applied_edit(
+                        submitted_code,
+                        request.parent.code,
+                        request.parent.id,
+                        self.config.generation_mode,
+                    )
                 return WorkerResult(
                     child_code=submitted_code,
                     changes_description=submitted_desc,
@@ -459,11 +430,21 @@ class OpenAIToolRunnerWorker:
             # usage_total>) as a text input item alongside tool_outputs.
             # Deferred — too invasive for the current PROMPT-team scope.
 
-        # Turn budget exhausted without submit_child. Clean MAX_TURNS_HIT surface —
-        # no final nudge (parallel to the Anthropic worker's fix).
-        return self._fail(
-            WorkerError(kind="MAX_TURNS_HIT", detail=f"max_turns={self.config.max_turns}"),
-            turns, usage_total, t0,
+        # Turn budget exhausted without submit_child or mark_converged.
+        # Auto-eject: synthesize a mark_converged result so the iteration
+        # closes cleanly. (Parallel to anthropic_tool_runner's fix.)
+        return WorkerResult(
+            child_code="",
+            turns=turns,
+            turn_count=len(turns),
+            usage=usage_total,
+            wall_clock_seconds=time.monotonic() - t0,
+            error=None,
+            converged=True,
+            converged_reason=(
+                f"auto-ejected: turn budget {self.config.max_turns} "
+                "exhausted without submit_child or mark_converged"
+            ),
         )
 
     # -------------------------------------------- helpers
@@ -512,8 +493,8 @@ class OpenAIToolRunnerWorker:
         )
 
         # Drop the sampler's full-rewrite task framing; the tool-runner uses
-        # edit_file. See _strip_full_rewrite_tail docstring for rationale.
-        user_text = _strip_full_rewrite_tail(user_text)
+        # edit_file. See strip_full_rewrite_tail docstring for rationale.
+        user_text = strip_full_rewrite_tail(user_text)
 
         # Append un-consumed prompt_extras (mirrors single_call.py:80-84).
         # Skip when the value is already substring-present in user_text
@@ -729,19 +710,6 @@ class OpenAIToolRunnerWorker:
             cached = getattr(in_details, "cached_tokens", 0) or 0
             out["cache_read_input_tokens"] = int(cached)
         return out
-
-    def _compute_applied_edit(self, code: str, request: WorkerRequest) -> str:
-        if self.config.generation_mode == "full":
-            return code
-        parent = request.parent.code.splitlines(keepends=True)
-        child = code.splitlines(keepends=True)
-        diff = "".join(difflib.unified_diff(
-            parent, child,
-            fromfile=f"parent/{request.parent.id}",
-            tofile="child/new",
-            n=3,
-        ))
-        return diff or "# no textual change"
 
     def _fail(self, we: WorkerError, turns, usage_total, t0) -> WorkerResult:
         return WorkerResult(

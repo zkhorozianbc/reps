@@ -6,7 +6,6 @@ instance for connection pooling across iterations."""
 from __future__ import annotations
 
 import asyncio
-import difflib
 import json
 import logging
 import os
@@ -34,6 +33,11 @@ from reps.workers.base import (
     WorkerRequest,
     WorkerResult,
 )
+from reps.workers._runner_common import (
+    compute_applied_edit,
+    reject_placeholder_submission,
+    strip_full_rewrite_tail,
+)
 from reps.workers.edit_serializer import serialize_diff_blocks
 from reps.workers.registry import register
 from reps.workers.tools import (
@@ -51,51 +55,16 @@ _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "prompt_templates"
 # turn with the allowlisted fields; leaking extras (e.g. `citations`) fails
 # with 400. When Anthropic introduces a new server tool, add its result
 # type here so the echo-back + trace conversion paths cover it.
+#
+# Naming kept as `_CODE_EXECUTION_RESULT_TYPES` for backwards compat with
+# external imports/diff-readability; the tuple now also covers web_search
+# server-tool results.
 _CODE_EXECUTION_RESULT_TYPES = (
     "code_execution_tool_result",
     "bash_code_execution_tool_result",
     "text_editor_code_execution_tool_result",
+    "web_search_tool_result",
 )
-
-
-def _strip_full_rewrite_tail(user_text: str) -> str:
-    """Remove the full-rewrite task framing that the sampler's
-    full_rewrite_user.txt template appends. The tool-runner uses edit_file
-    mechanics, so instructions telling the model to "provide the complete
-    new program code" and a trailing ```python # Your rewritten program
-    here ``` skeleton are actively harmful — they encourage the model to
-    dump a full-rewrite body instead of making targeted edits.
-
-    The template's tail looks like:
-        ...
-        # Task
-        Rewrite the program to improve its FITNESS SCORE.
-        ...
-        Provide the complete new program code.
-        IMPORTANT: Make sure your rewritten program maintains the same ...
-        ```python
-        # Your rewritten program here
-        ```
-
-    Strategy: locate the "# Task" header that precedes this rewrite block.
-    If found, cut from that point to the end. This also drops the fitness-
-    dimension boilerplate, which is already expressed in the system prompt
-    for the tool-runner.
-    """
-    if not user_text:
-        return user_text
-    idx = user_text.find("\n# Task\n")
-    if idx == -1:
-        # Fallback: try to find the skeleton itself and trim from there.
-        skel = user_text.find("# Your rewritten program here")
-        if skel == -1:
-            return user_text
-        # Walk backwards to the start of the ```<lang> fence.
-        fence = user_text.rfind("```", 0, skel)
-        if fence != -1:
-            return user_text[:fence].rstrip() + "\n"
-        return user_text[:skel].rstrip() + "\n"
-    return user_text[:idx].rstrip() + "\n"
 
 
 @register("anthropic_tool_runner")
@@ -121,6 +90,16 @@ class AnthropicToolRunnerWorker:
         self.max_tokens = int(config.impl_options.get("max_tokens", 16000))
         # Opt-in code execution server tool → enables programmatic tool calling.
         self.use_code_execution = bool(config.impl_options.get("code_execution", False))
+        # Opt-in Anthropic server-side web_search. When enabled, the model
+        # gains access to a `web_search` server tool that returns
+        # `web_search_tool_result` blocks (handled in echo-back +
+        # trace-render paths via _CODE_EXECUTION_RESULT_TYPES).
+        self.use_web_search = bool(config.impl_options.get("web_search", False))
+        # Tunables for web_search; defaults match the academic-research use
+        # case (no domain filtering, generous max_uses for paper crawling).
+        self.web_search_max_uses = int(config.impl_options.get("web_search_max_uses", 10))
+        self.web_search_allowed_domains = config.impl_options.get("web_search_allowed_domains")
+        self.web_search_blocked_domains = config.impl_options.get("web_search_blocked_domains")
         # Task Budgets (beta, Opus 4.7 only): total token budget for the full agentic loop.
         # The model sees a running countdown and self-moderates. Minimum per Anthropic docs
         # is 20,000 tokens; we clamp silently rather than hard-fail.
@@ -150,6 +129,21 @@ class AnthropicToolRunnerWorker:
             # Server-side code execution tool. Also enables programmatic tool calling
             # for any custom tool that declares `allowed_callers: ["code_execution_20260120"]`.
             tool_schemas.insert(0, {"type": "code_execution_20260120", "name": "code_execution"})
+        if self.use_web_search:
+            # Server-side web_search tool (basic variant; the dynamic-filtering
+            # variant `web_search_20260209` requires code_execution to also be
+            # enabled). Result blocks have type `web_search_tool_result` and
+            # are accepted via _CODE_EXECUTION_RESULT_TYPES.
+            ws_schema: Dict[str, Any] = {
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": self.web_search_max_uses,
+            }
+            if self.web_search_allowed_domains:
+                ws_schema["allowed_domains"] = list(self.web_search_allowed_domains)
+            if self.web_search_blocked_domains:
+                ws_schema["blocked_domains"] = list(self.web_search_blocked_domains)
+            tool_schemas.insert(0, ws_schema)
         container_id: Optional[str] = None  # reused across turns for state persistence
 
         # In-flight child code starts as parent; edit_file mutates it.
@@ -221,6 +215,7 @@ class AnthropicToolRunnerWorker:
             ))
 
             stop_reason = response.stop_reason
+            logger.info("stop_reason=%s", stop_reason)
 
             if stop_reason == "refusal":
                 return self._fail(
@@ -244,27 +239,43 @@ class AnthropicToolRunnerWorker:
                     turns, usage_total, t0,
                 )
 
-            if stop_reason == "pause_turn":
-                # Server-side loop (code_execution / web search) reached its iteration cap.
-                # Re-send the conversation as-is to resume — no tool dispatch required.
-                messages.append({"role": "assistant", "content": assistant_blocks_for_message})
-                continue
-
             if stop_reason == "stop_sequence":
                 return self._fail(
                     WorkerError(kind="PARSE_ERROR", detail="unexpected stop_sequence"),
                     turns, usage_total, t0,
                 )
 
-            if stop_reason == "end_turn":
+            # Identify any client tool_use blocks needing dispatch (direct or
+            # programmatic — `caller=code_execution_20260120`). server_tool_use
+            # blocks (web_search/code_execution) are NOT dispatched by us;
+            # the API resolves them server-side and emits result blocks
+            # inline in this same assistant turn.
+            client_tool_uses = [
+                raw for raw in response.content
+                if getattr(raw, "type", None) == "tool_use"
+            ]
+
+            if stop_reason == "pause_turn":
+                # Server-side sampling loop (web_search / code_execution) hit its
+                # iteration cap. Per the stop-reasons doc, re-send the assistant
+                # response as-is to let Claude continue. EXCEPTION: if the pause
+                # left an unresolved client tool_use (programmatic call from
+                # code_execution awaiting a tool_result), we must dispatch and
+                # supply the tool_result first — otherwise the next request has
+                # an unanswered tool_use and the API rejects it.
+                if not client_tool_uses:
+                    messages.append({"role": "assistant", "content": assistant_blocks_for_message})
+                    continue
+                # else fall through to the dispatch block below.
+
+            elif stop_reason == "end_turn":
                 # Defensive: if a terminal tool (submit_child or mark_converged)
                 # was called (e.g. from inside a code_execution block) and the
                 # final stop_reason wraps up as end_turn, let the tool_use
                 # dispatch path below process it.
                 has_terminal = any(
-                    getattr(raw, "type", None) == "tool_use"
-                    and raw.name in ("submit_child", "mark_converged")
-                    for raw in response.content
+                    raw.name in ("submit_child", "mark_converged")
+                    for raw in client_tool_uses
                 )
                 if not has_terminal:
                     return self._fail(
@@ -273,7 +284,17 @@ class AnthropicToolRunnerWorker:
                     )
                 # Fall through into the tool_use dispatch block below.
 
-            if stop_reason != "tool_use":
+            elif stop_reason == "tool_use":
+                # Standard direct tool-use dispatch path. If there are no
+                # client tool_use blocks (e.g. the model only emitted server
+                # tool calls and the API still classified the stop as tool_use
+                # because of an in-flight server tool), treat like pause_turn:
+                # re-send as-is.
+                if not client_tool_uses:
+                    messages.append({"role": "assistant", "content": assistant_blocks_for_message})
+                    continue
+
+            else:
                 return self._fail(
                     WorkerError(kind="PARSE_ERROR", detail=f"unexpected stop_reason={stop_reason}"),
                     turns, usage_total, t0,
@@ -295,9 +316,7 @@ class AnthropicToolRunnerWorker:
             tool_result_blocks: List[Dict[str, Any]] = []
             tool_result_turn_blocks: List[ContentBlock] = []
             terminated = False
-            for raw in response.content:
-                if getattr(raw, "type", None) != "tool_use":
-                    continue
+            for raw in client_tool_uses:
                 name = raw.name
                 tid = raw.id
                 args = raw.input or {}
@@ -310,23 +329,8 @@ class AnthropicToolRunnerWorker:
                     # sentinel strings ("code_placeholder", "...", "TODO")
                     # instead of the real program body; letting those through
                     # clobbers the parent with garbage and burns an iteration.
-                    stripped = (code or "").strip()
-                    _placeholders = {
-                        "code_placeholder",
-                        "PLACEHOLDER_USE_INFLIGHT",
-                        "TODO",
-                        "...",
-                    }
-                    if (
-                        not stripped
-                        or stripped in _placeholders
-                        or len(stripped) < 30
-                    ):
-                        err_text = (
-                            f"REJECTED: submitted code is empty / placeholder / "
-                            f"too short (len={len(stripped)}). Retry with actual "
-                            f"program code."
-                        )
+                    err_text = reject_placeholder_submission(code)
+                    if err_text is not None:
                         tool_result_blocks.append({
                             "type": "tool_result",
                             "tool_use_id": tid,
@@ -479,7 +483,12 @@ class AnthropicToolRunnerWorker:
                 if edit_accumulator:
                     applied = serialize_diff_blocks(edit_accumulator)
                 else:
-                    applied = self._compute_applied_edit(submitted_code, request)
+                    applied = compute_applied_edit(
+                        submitted_code,
+                        request.parent.code,
+                        request.parent.id,
+                        self.config.generation_mode,
+                    )
                 return WorkerResult(
                     child_code=submitted_code,
                     changes_description=submitted_desc,
@@ -492,16 +501,24 @@ class AnthropicToolRunnerWorker:
                     error=None,
                 )
 
-        # Turn budget exhausted without submit_child. Surface it as a clean
-        # MAX_TURNS_HIT; if the model needs more turns, raise max_turns in the
-        # config. (A prior version appended a "final nudge" user message here,
-        # which produced two consecutive user turns and tripped Anthropic's
-        # programmatic-tool-calling contract: when the last assistant turn had
-        # a tool_use with caller=code_execution_20260120, the next user turn
-        # must contain only tool_result blocks.)
-        return self._fail(
-            WorkerError(kind="MAX_TURNS_HIT", detail=f"max_turns={self.config.max_turns}"),
-            turns, usage_total, t0,
+        # Turn budget exhausted without submit_child or mark_converged.
+        # Auto-eject: synthesize a mark_converged result so the iteration
+        # closes cleanly instead of raising MAX_TURNS_HIT (which the
+        # controller currently records as an error and discards). The
+        # worker spent its turns exploring without committing — that's
+        # equivalent to "no productive child found in this basin."
+        return WorkerResult(
+            child_code="",
+            turns=turns,
+            turn_count=len(turns),
+            usage=usage_total,
+            wall_clock_seconds=time.monotonic() - t0,
+            error=None,
+            converged=True,
+            converged_reason=(
+                f"auto-ejected: turn budget {self.config.max_turns} "
+                "exhausted without submit_child or mark_converged"
+            ),
         )
 
     # -------------------------------------------- helpers
@@ -567,7 +584,7 @@ class AnthropicToolRunnerWorker:
         # edit_file-based workflow. Chose to post-process (Team 2 scope
         # forbids creating new templates). Strip the rewrite task block and
         # its code-skeleton suffix; keep everything above.
-        user_text = _strip_full_rewrite_tail(user_text)
+        user_text = strip_full_rewrite_tail(user_text)
 
         # Append un-consumed prompt_extras (mirrors single_call.py:80-84).
         # The sampler may have already rendered these via template slots;
@@ -844,7 +861,18 @@ class AnthropicToolRunnerWorker:
             content = getattr(raw, "content", None)
             if content is not None:
                 if hasattr(content, "model_dump"):
+                    # Single object (e.g. code-execution result, or a web_search
+                    # error envelope).
                     out["content"] = content.model_dump(exclude_none=True)
+                elif isinstance(content, list):
+                    # web_search_tool_result.content is a List[WebSearchResultBlock]
+                    # for the success path. The list itself has no model_dump;
+                    # serialize each item. Items without model_dump (already
+                    # plain dicts / strings) pass through verbatim.
+                    out["content"] = [
+                        item.model_dump(exclude_none=True) if hasattr(item, "model_dump") else item
+                        for item in content
+                    ]
                 else:
                     out["content"] = content
             return out
@@ -894,7 +922,18 @@ class AnthropicToolRunnerWorker:
             )
         if t in _CODE_EXECUTION_RESULT_TYPES:
             content_payload = getattr(raw, "content", None)
-            body = content_payload.model_dump() if hasattr(content_payload, "model_dump") else content_payload
+            if hasattr(content_payload, "model_dump"):
+                body = content_payload.model_dump()
+            elif isinstance(content_payload, list):
+                # web_search_tool_result.content is a List[WebSearchResultBlock]
+                # — serialize each pydantic item so the trace persists as plain
+                # dicts (renderers downstream don't need to import SDK types).
+                body = [
+                    item.model_dump() if hasattr(item, "model_dump") else item
+                    for item in content_payload
+                ]
+            else:
+                body = content_payload
             return ContentBlock(
                 type="tool_result",
                 tool_result_for_id=getattr(raw, "tool_use_id", None),
@@ -926,19 +965,6 @@ class AnthropicToolRunnerWorker:
             ),
             "cache_read_input_tokens": int(getattr(usage, "cache_read_input_tokens", 0) or 0),
         }
-
-    def _compute_applied_edit(self, code: str, request: WorkerRequest) -> str:
-        if self.config.generation_mode == "full":
-            return code
-        parent = request.parent.code.splitlines(keepends=True)
-        child = code.splitlines(keepends=True)
-        diff = "".join(difflib.unified_diff(
-            parent, child,
-            fromfile=f"parent/{request.parent.id}",
-            tofile="child/new",
-            n=3,
-        ))
-        return diff or "# no textual change"
 
     def _fail(self, we: WorkerError, turns, usage_total, t0) -> WorkerResult:
         return WorkerResult(

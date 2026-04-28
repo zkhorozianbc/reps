@@ -34,8 +34,9 @@ logger = logging.getLogger(__name__)
 def _classify_outcome(metrics: Dict[str, Any], child_score: float, parent_score: float) -> str:
     """Produce a short verdict tag for the iteration log.
 
-    Distinguishes genuine crashes from strict-vs-tolerant edge cases that
-    otherwise look identical (both score 0) so the log inspires confidence.
+    Honors evaluators that emit strict_pass/tolerant_pass (a useful pattern for
+    distinguishing genuine crashes from strict-vs-tolerant edge cases). Generic
+    otherwise.
     """
     if not metrics:
         return "NO_METRICS"
@@ -45,9 +46,6 @@ def _classify_outcome(metrics: Dict[str, Any], child_score: float, parent_score:
     strict = metrics.get("strict_pass")
     tolerant = metrics.get("tolerant_pass")
     if validity == 0.0 and tolerant == 1.0 and strict == 0.0:
-        reported = metrics.get("reported_sum_radii")
-        if isinstance(reported, (int, float)) and reported == reported:
-            return f"STRICT_FAIL (tolerant OK, reported≈{reported:.3f})"
         return "STRICT_FAIL (tolerant OK)"
     if validity == 0.0:
         return "INVALID"
@@ -165,14 +163,12 @@ class ProcessParallelController:
         config: Config,
         evaluation_file: str,
         database: ProgramDatabase,
-        evolution_tracer=None,
         file_suffix: str = ".py",
         output_dir: Optional[str] = None,
     ):
         self.config = config
         self.evaluation_file = evaluation_file
         self.database = database
-        self.evolution_tracer = evolution_tracer
         self.file_suffix = file_suffix
         self.output_dir = output_dir
         self._reps_metrics = None
@@ -961,32 +957,6 @@ class ProcessParallelController:
                                 child_program.id[:8], persist_exc,
                             )
 
-                        if self.evolution_tracer:
-                            parent_program = (
-                                self.database.get(result.parent_id)
-                                if result.parent_id
-                                else None
-                            )
-                            if parent_program:
-                                island_id = child_program.metadata.get(
-                                    "island", self.database.current_island
-                                )
-                                self.evolution_tracer.log_trace(
-                                    iteration=completed_iteration,
-                                    parent_program=parent_program,
-                                    child_program=child_program,
-                                    prompt=result.prompt,
-                                    llm_response=result.llm_response,
-                                    artifacts=result.artifacts,
-                                    island_id=island_id,
-                                    metadata={
-                                        "iteration_time": result.iteration_time,
-                                        "changes": child_program.metadata.get(
-                                            "changes", ""
-                                        ),
-                                    },
-                                )
-
                         if result.prompt:
                             self.database.log_prompt(
                                 template_key=(
@@ -1253,17 +1223,19 @@ class ProcessParallelController:
     def _reps_get_sota_score(self, program: Optional[Program]) -> Optional[float]:
         """Return the metric F6 should compare against the configured target score.
 
-        Prefer raw objective metrics when available, since `combined_score` may be a
-        normalized surrogate used for selection rather than the metric the target is
-        expressed in.
+        Prefer the configured target_metric when available, since `combined_score`
+        may be a normalized surrogate used for selection rather than the metric the
+        target is expressed in.
         """
         if program is None or not program.metrics:
             return None
 
         metrics = program.metrics
-        raw_score = metrics.get("sum_radii")
-        if isinstance(raw_score, (int, float)) and not isinstance(raw_score, bool):
-            return float(raw_score)
+        target_metric = self.config.reps.sota.target_metric
+        if target_metric:
+            raw = metrics.get(target_metric)
+            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                return float(raw)
 
         combined_score = metrics.get("combined_score")
         if isinstance(combined_score, (int, float)) and not isinstance(combined_score, bool):
@@ -1578,7 +1550,6 @@ class ProcessParallelController:
             self._reps_worker_pool.force_explorer_majority(5)
         elif action == ConvergenceAction.SEVERE_RESTART:
             self._reps_epsilon = min(0.5, self._reps_epsilon * 2)
-            self._reps_worker_pool.force_model_switch()
 
         # F6: SOTA-driven worker reallocation
         if self._reps_sota.enabled and self._reps_sota.target is not None:
