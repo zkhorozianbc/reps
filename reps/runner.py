@@ -251,15 +251,15 @@ def main():
             "Examples: -o max_iterations=50  -o llm.temperature=0.9  -o reps.batch_size=10"
         ),
     )
+    parser.add_argument("--config", required=True, help="Path to YAML config")
     parser.add_argument(
         "initial_program", nargs="?", default=None,
-        help="Path to initial program (optional if config sets task:)",
+        help="(optional) Override config.task / config.initial_program",
     )
     parser.add_argument(
         "evaluator", nargs="?", default=None,
-        help="Path to evaluator script (optional if config sets task:)",
+        help="(optional) Override config.task / config.evaluator_path",
     )
-    parser.add_argument("--config", required=True, help="Path to YAML config")
     parser.add_argument("--output", default=None,
                         help="Output base directory (defaults to experiment/results/<config-stem>/)")
     parser.add_argument("--iterations", type=int, default=None,
@@ -290,8 +290,8 @@ def main():
         evaluator = evaluator or str(task_dir / "evaluator.py")
     if not initial_program or not evaluator:
         parser.error(
-            "Must provide `initial_program` and `evaluator` as positional args, "
-            "set them in the config, or set `task:` in the config to the benchmark directory."
+            "Config must set `task: <benchmark_dir>` (recommended) or `initial_program:` + "
+            "`evaluator_path:`. Alternatively pass them as positional args to reps-run."
         )
 
     # Auto-version the output directory
