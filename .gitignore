@@ -8,6 +8,7 @@ openevolve/.venv/
 openevolve/results/
 openevolve/openevolve_output/
 *.egg-info/
+docs/history/
 
 # Experiment results — keep configs and best programs, skip logs/checkpoints
 experiment/results/*/seed_*/logs/
