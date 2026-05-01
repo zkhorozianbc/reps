@@ -552,6 +552,44 @@ class ProgramDatabase:
         )
         return parent, inspirations
 
+    def walk_lineage(
+        self,
+        program_id: Optional[str],
+        max_depth: int = 5,
+    ) -> List[Program]:
+        """Walk parent_id pointers up to `max_depth` programs deep.
+
+        Returns the chain ordered OLDEST-FIRST (root → near-most). The chain
+        includes the starting program at the end and stops at:
+          - max_depth programs collected,
+          - parent_id is None (root reached),
+          - parent not found in self.programs (broken link),
+          - a previously-visited id (cycle protection).
+
+        Returns [] when program_id is None or not in self.programs.
+        Used by trace_reflection to surface a parent's recent ancestral
+        history (Phase 5).
+        """
+        if program_id is None or program_id not in self.programs:
+            return []
+        if max_depth <= 0:
+            return []
+
+        chain: List[Program] = []
+        visited: Set[str] = set()
+        current_id: Optional[str] = program_id
+        while current_id is not None and len(chain) < max_depth:
+            if current_id in visited:
+                break  # cycle
+            prog = self.programs.get(current_id)
+            if prog is None:
+                break  # broken link
+            chain.append(prog)
+            visited.add(current_id)
+            current_id = prog.parent_id
+        chain.reverse()  # oldest first
+        return chain
+
     def get_best_program(self, metric: Optional[str] = None) -> Optional[Program]:
         """
         Get the best program based on a metric

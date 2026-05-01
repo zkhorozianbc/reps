@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from reps.database import Program
 from reps.llm.base import LLMInterface
@@ -50,10 +50,62 @@ def _excerpt_code(code: str, max_chars: int) -> str:
     return code[:half] + "\n... [omitted middle] ...\n" + code[-half:]
 
 
-def _build_user_message(parent: Program, max_code_chars: int) -> str:
+def _format_score(metrics: Optional[dict]) -> str:
+    """Render a Program's combined_score for the lineage block."""
+    if not metrics:
+        return "?"
+    score = metrics.get("combined_score")
+    if score is None:
+        return "?"
+    try:
+        return f"{float(score):.4f}"
+    except (TypeError, ValueError):
+        return str(score)
+
+
+def _build_lineage_block(ancestors: List[Program]) -> str:
+    """Render a compact ancestral history (oldest first) for the prompt.
+
+    Each line: `gen N | score X.XXXX | "<changes_description>"
+                       [prior directive: "..."]`.
+    Returns "" for an empty list so the caller can drop the section entirely.
+    """
+    if not ancestors:
+        return ""
+
+    lines = []
+    for prog in ancestors:
+        score = _format_score(prog.metrics)
+        changes = (prog.changes_description or "").strip() or "(no description)"
+        # Truncate long changes_description so one ancestor doesn't dominate.
+        if len(changes) > 120:
+            changes = changes[:117] + "..."
+        line = f'  - gen {prog.generation} | score {score} | "{changes}"'
+        if prog.mutation_directive:
+            directive = prog.mutation_directive.strip().replace("\n", " ")
+            if len(directive) > 100:
+                directive = directive[:97] + "..."
+            line += f'\n      [prior directive: "{directive}"]'
+        lines.append(line)
+    return "Recent ancestor lineage (oldest first):\n" + "\n".join(lines)
+
+
+def _build_user_message(
+    parent: Program,
+    max_code_chars: int,
+    ancestors: Optional[List[Program]] = None,
+) -> str:
     scores_json = json.dumps(parent.per_instance_scores, indent=2, sort_keys=True)
     code_excerpt = _excerpt_code(parent.code or "", max_code_chars)
+
+    lineage = ""
+    if ancestors:
+        lineage_block = _build_lineage_block(ancestors)
+        if lineage_block:
+            lineage = lineage_block + "\n\n"
+
     return (
+        f"{lineage}"
         f"Per-objective scores (each in [0, 1] unless noted):\n{scores_json}\n\n"
         f"Diagnostic feedback from the evaluator:\n{parent.feedback}\n\n"
         f"Current program (excerpt):\n```\n{code_excerpt}\n```\n\n"
@@ -89,6 +141,7 @@ async def generate_directive(
     *,
     min_feedback_length: int = 20,
     max_code_chars: int = 4000,
+    ancestors: Optional[List[Program]] = None,
 ) -> Optional[str]:
     """Run one LLM call to produce a mutation_directive for `parent`.
 
@@ -96,13 +149,27 @@ async def generate_directive(
     or when the LLM call fails. The caller is responsible for caching the
     result on `parent.mutation_directive` if non-None.
 
+    `ancestors` (Phase 5): optional ancestral chain of `parent`, oldest-first
+    and NOT including `parent` itself. When provided, a compact lineage
+    block (each ancestor's generation, score, changes_description, and
+    cached mutation_directive) is prepended to the user message so the LLM
+    can see what's been tried and how it scored. Pass [] or None to disable.
+
+    Note: `ancestors` is NOT part of the cache key. The directive is
+    cached on `parent.mutation_directive` after the first non-empty
+    response, so re-sampling the same parent with a different lineage
+    later in the run will not regenerate. This is intentional — the
+    directive targets the parent's own sub-objective, not its ancestry.
+
     The LLM call uses `generate_with_context` with a fixed system message
     (cache-friendly) and a per-parent user message. No streaming, no tool use.
     """
     if not should_generate_directive(parent, min_feedback_length=min_feedback_length):
         return None
 
-    user_message = _build_user_message(parent, max_code_chars=max_code_chars)
+    user_message = _build_user_message(
+        parent, max_code_chars=max_code_chars, ancestors=ancestors,
+    )
 
     try:
         response = await llm.generate_with_context(

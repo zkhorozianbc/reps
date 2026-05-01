@@ -744,12 +744,23 @@ class ProcessParallelController:
         if not should_generate_directive(parent, min_feedback_length=cfg.min_feedback_length):
             return ""
 
+        # Phase 5: optional ancestral history. Walk the parent's parent_id
+        # chain (NOT including the parent itself, since its info is already
+        # in the prompt) up to `lineage_depth` programs. Empty list when
+        # disabled or the parent is a seed.
+        ancestors: List[Program] = []
+        if cfg.lineage_depth > 0:
+            ancestors = self.database.walk_lineage(
+                parent.parent_id, max_depth=cfg.lineage_depth,
+            )
+
         try:
             directive = await generate_directive(
                 parent,
                 self.llm_ensemble,
                 min_feedback_length=cfg.min_feedback_length,
                 max_code_chars=cfg.max_code_chars,
+                ancestors=ancestors,
             )
         except Exception as e:
             logger.warning(

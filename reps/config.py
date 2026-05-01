@@ -365,11 +365,18 @@ class REPSTraceReflectionConfig:
 
     Disabled by default — opt-in until live runs validate the prompt is
     pulling its weight (token spend vs score improvement).
+
+    `lineage_depth` (Phase 5): when > 0, prepend a compact ancestral
+    history of up to N programs (the parent's parent, grandparent, etc.)
+    to the reflection prompt. Each line shows generation, score,
+    changes_description, and the ancestor's prior directive (when set).
+    0 disables (Phase 3 behavior — no lineage context).
     """
     enabled: bool = False
     model: Optional[str] = None  # None = use the worker LLM ensemble
     min_feedback_length: int = 20
     max_code_chars: int = 4000
+    lineage_depth: int = 3
 
 
 @dataclass
