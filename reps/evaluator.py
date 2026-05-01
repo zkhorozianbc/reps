@@ -620,7 +620,15 @@ class Evaluator:
             merged_artifacts.update(stage1_eval_result.artifacts)
             merged_artifacts.update(stage2_eval_result.artifacts)
 
-            merged_result = EvaluationResult(metrics=merged_metrics, artifacts=merged_artifacts)
+            # Preserve GEPA-style ASI from stage2 (the full-evaluation stage).
+            # Stage1 is a fast filter and typically returns a plain dict with
+            # neither field set; stage2 is where they originate.
+            merged_result = EvaluationResult(
+                metrics=merged_metrics,
+                artifacts=merged_artifacts,
+                per_instance_scores=stage2_eval_result.per_instance_scores,
+                feedback=stage2_eval_result.feedback,
+            )
 
             # Check threshold for stage 3
             if len(self.config.cascade_thresholds) < 2 or not self._passes_threshold(
@@ -676,6 +684,12 @@ class Evaluator:
                     merged_result.metrics[name] = float(value)
 
             merged_result.artifacts.update(stage3_eval_result.artifacts)
+
+            # Stage 3 (if it emits ASI) is the most authoritative.
+            if stage3_eval_result.per_instance_scores is not None:
+                merged_result.per_instance_scores = stage3_eval_result.per_instance_scores
+            if stage3_eval_result.feedback is not None:
+                merged_result.feedback = stage3_eval_result.feedback
 
             return merged_result
 

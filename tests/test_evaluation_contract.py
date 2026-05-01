@@ -184,3 +184,46 @@ class TestProgramFields:
         loaded = Program.from_dict(json.loads(path.read_text()))
         assert loaded.per_instance_scores == {"i0": 1.0, "i1": 0.5}
         assert loaded.feedback == "i1 partial"
+
+
+class TestCascadeAsiPreservation:
+    """Cascade evaluation merges multiple stages — ASI fields from stage2/3
+    must survive the merge step, otherwise they never reach the Program."""
+
+    def test_stage2_asi_survives_merge(self, tmp_path: Path):
+        import asyncio
+        from reps.config import EvaluatorConfig
+        from reps.evaluator import Evaluator
+
+        # Tiny inline benchmark: stage1 returns metrics dict only;
+        # evaluate (stage2) returns full EvaluationResult with ASI.
+        bench = tmp_path / "bench_asi.py"
+        bench.write_text(
+            "from reps.evaluation_result import EvaluationResult\n"
+            "def evaluate_stage1(program_path, **kw):\n"
+            "    return {'combined_score': 0.6, 'validity': 1.0}\n"
+            "def evaluate(program_path, **kw):\n"
+            "    return EvaluationResult(\n"
+            "        metrics={'combined_score': 0.6, 'validity': 1.0},\n"
+            "        per_instance_scores={'task_a': 0.7, 'task_b': 0.5},\n"
+            "        feedback='task_b regressed',\n"
+            "    )\n"
+            "def evaluate_stage2(program_path, **kw):\n"
+            "    return evaluate(program_path)\n"
+        )
+        prog = tmp_path / "prog.py"
+        prog.write_text("def f(): return 1\n")
+
+        cfg = EvaluatorConfig(
+            cascade_evaluation=True,
+            cascade_thresholds=[0.0, 0.0],
+            timeout=10,
+            parallel_evaluations=1,
+            max_retries=0,
+        )
+        evaluator = Evaluator(cfg, str(bench))
+        outcome = asyncio.run(
+            evaluator.evaluate_isolated(prog.read_text(), program_id="t")
+        )
+        assert outcome.per_instance_scores == {"task_a": 0.7, "task_b": 0.5}
+        assert outcome.feedback == "task_b regressed"
