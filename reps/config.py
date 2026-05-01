@@ -266,6 +266,15 @@ class DatabaseConfig:
     # Note: diversity_metric fixed to "edit_distance"
     diversity_metric: str = "edit_distance"  # Options: "edit_distance", "feature_based"
 
+    # GEPA-style Pareto selection (Phase 2). When `selection_strategy` is
+    # "mixed", a fraction `pareto_fraction` of parent picks comes from the
+    # Pareto frontier of per_instance_scores; the rest use existing
+    # MAP-Elites/exploration/exploitation logic. "pareto" = always Pareto;
+    # "map_elites" = never Pareto (status quo). Inspirations are unchanged.
+    selection_strategy: str = "map_elites"  # "map_elites" | "pareto" | "mixed"
+    pareto_fraction: float = 0.0  # only used when selection_strategy == "mixed"
+    pareto_instance_keys: Optional[List[str]] = None  # restrict frontier to these keys
+
     # Feature map dimensions for MAP-Elites
     # Default to complexity and diversity for better exploration
     # CRITICAL: For custom dimensions, evaluators must return RAW VALUES, not bin indices

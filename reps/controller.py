@@ -693,6 +693,22 @@ class ProcessParallelController:
                 logger.exception(f"iteration {iteration} failed in spawn")
                 return SerializableResult(error=str(e), iteration=iteration)
 
+    def _should_sample_pareto(self) -> bool:
+        """Decide whether the next parent pick should come from the Pareto
+        frontier rather than MAP-Elites/exploration sampling.
+
+        - "map_elites" (default): always False — status quo behavior.
+        - "pareto":               always True.
+        - "mixed":                True with probability `pareto_fraction`.
+        """
+        strategy = self.database.config.selection_strategy
+        if strategy == "pareto":
+            return True
+        if strategy == "mixed":
+            frac = max(0.0, min(1.0, self.database.config.pareto_fraction))
+            return random.random() < frac
+        return False
+
     def _pick_iteration_inputs(
         self, iteration: int, island_id: int, reps_iter_config: Optional["IterationConfig"]
     ):
@@ -740,6 +756,12 @@ class ProcessParallelController:
                 _, inspirations = self.database.sample_from_island(
                     island_id=target_island,
                     num_inspirations=self.config.prompt.num_top_programs,
+                )
+            elif self._should_sample_pareto():
+                parent, inspirations = self.database.sample_pareto_from_island(
+                    island_id=target_island,
+                    num_inspirations=self.config.prompt.num_top_programs,
+                    instance_keys=self.database.config.pareto_instance_keys,
                 )
             else:
                 parent, inspirations = self.database.sample_from_island(

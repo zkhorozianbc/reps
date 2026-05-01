@@ -491,6 +491,61 @@ class ProgramDatabase:
         )
         return parent, inspirations
 
+    def sample_pareto_from_island(
+        self,
+        island_id: int,
+        num_inspirations: Optional[int] = None,
+        instance_keys: Optional[List[str]] = None,
+    ) -> Tuple[Program, List[Program]]:
+        """Pick a parent from the Pareto frontier of `island_id` (GEPA-style).
+
+        Mirrors `sample_from_island` but routes parent selection through
+        `reps.pareto.compute_frontier` over the island's programs. Inspirations
+        use the same island-local random pick as `sample_from_island`.
+
+        Falls back to `sample_from_island` when:
+          - the island has no programs, or
+          - the Pareto frontier is empty (shouldn't happen if island is non-empty,
+            but defensive).
+
+        `instance_keys`: optional restriction to a subset of per_instance_scores
+        keys; when None, the union across island programs is used (with
+        combined_score as fallback for programs lacking per-instance data).
+        """
+        from reps.pareto import compute_frontier  # local import: keep base DB import-light
+
+        island_id = island_id % len(self.islands)
+        island_pids = list(self.islands[island_id])
+        island_programs = [self.programs[pid] for pid in island_pids if pid in self.programs]
+
+        if not island_programs:
+            return self.sample_from_island(island_id, num_inspirations)
+
+        frontier = compute_frontier(island_programs, instance_keys=instance_keys)
+        if not frontier:
+            # Empty frontier shouldn't be reachable from a non-empty island, but
+            # don't take the workers down if it happens.
+            return self.sample_from_island(island_id, num_inspirations)
+
+        parent = random.choice(frontier)
+
+        if num_inspirations is None:
+            num_inspirations = 5
+
+        other_programs = [pid for pid in island_pids if pid != parent.id]
+        if len(other_programs) < num_inspirations:
+            inspiration_ids = other_programs
+        else:
+            inspiration_ids = random.sample(other_programs, num_inspirations)
+        inspirations = [self.programs[pid] for pid in inspiration_ids if pid in self.programs]
+
+        logger.debug(
+            f"Pareto-sampled parent {parent.id} from frontier of {len(frontier)}/"
+            f"{len(island_programs)} on island {island_id}; "
+            f"{len(inspirations)} inspirations"
+        )
+        return parent, inspirations
+
     def get_best_program(self, metric: Optional[str] = None) -> Optional[Program]:
         """
         Get the best program based on a metric
