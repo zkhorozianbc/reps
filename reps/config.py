@@ -355,6 +355,24 @@ class REPSReflectionConfig:
 
 
 @dataclass
+class REPSTraceReflectionConfig:
+    """Phase 3 (GEPA-inspired): per-candidate trace-grounded reflection.
+
+    When enabled, parents with `feedback` (Phase 1.2 ASI) at least
+    `min_feedback_length` chars and non-empty `per_instance_scores` get
+    a one-shot LLM call to produce a `mutation_directive` that gets
+    injected into the next mutation prompt for that lineage.
+
+    Disabled by default — opt-in until live runs validate the prompt is
+    pulling its weight (token spend vs score improvement).
+    """
+    enabled: bool = False
+    model: Optional[str] = None  # None = use the worker LLM ensemble
+    min_feedback_length: int = 20
+    max_code_chars: int = 4000
+
+
+@dataclass
 class REPSRevisitationConfig:
     """F2: epsilon-Revisitation config"""
     enabled: bool = True
@@ -465,6 +483,7 @@ class REPSConfig:
     sota: REPSSOTAConfig = field(default_factory=REPSSOTAConfig)
     annotations: REPSAnnotationsConfig = field(default_factory=REPSAnnotationsConfig)
     summarizer: REPSSummarizerConfig = field(default_factory=REPSSummarizerConfig)
+    trace_reflection: REPSTraceReflectionConfig = field(default_factory=REPSTraceReflectionConfig)
 
 
 @dataclass

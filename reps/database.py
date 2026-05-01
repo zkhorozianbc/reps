@@ -81,6 +81,12 @@ class Program:
     per_instance_scores: Optional[Dict[str, float]] = None
     feedback: Optional[str] = None
 
+    # GEPA-style trace-grounded reflection directive (Phase 3, optional).
+    # Produced lazily by reps.trace_reflection.generate_directive when this
+    # program is sampled as a parent and has non-trivial feedback. Cached
+    # here so a re-sampled parent doesn't pay for the LLM call twice.
+    mutation_directive: Optional[str] = None
+
     # Derived features
     complexity: float = 0.0
     diversity: float = 0.0
