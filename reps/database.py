@@ -74,6 +74,13 @@ class Program:
     # Performance metrics
     metrics: Dict[str, float] = field(default_factory=dict)
 
+    # GEPA-style ASI (Phase 1, optional). per_instance_scores enables Pareto
+    # selection over individual instances rather than scalar combined_score;
+    # feedback carries free-form text for trace-grounded reflection. Both None
+    # when the evaluator does not emit them — fully backward compatible.
+    per_instance_scores: Optional[Dict[str, float]] = None
+    feedback: Optional[str] = None
+
     # Derived features
     complexity: float = 0.0
     diversity: float = 0.0
@@ -1339,6 +1346,12 @@ class ProgramDatabase:
                     timestamp=time.time(),
                     iteration_found=self.last_iteration,
                     metrics=best_program.metrics.copy(),
+                    per_instance_scores=(
+                        dict(best_program.per_instance_scores)
+                        if best_program.per_instance_scores is not None
+                        else None
+                    ),
+                    feedback=best_program.feedback,
                     complexity=best_program.complexity,
                     diversity=best_program.diversity,
                     metadata={"island": self.current_island},
@@ -1385,6 +1398,12 @@ class ProgramDatabase:
                     timestamp=time.time(),
                     iteration_found=self.last_iteration,
                     metrics=best_program.metrics.copy(),
+                    per_instance_scores=(
+                        dict(best_program.per_instance_scores)
+                        if best_program.per_instance_scores is not None
+                        else None
+                    ),
+                    feedback=best_program.feedback,
                     complexity=best_program.complexity,
                     diversity=best_program.diversity,
                     metadata={"island": self.current_island},
@@ -1889,6 +1908,12 @@ class ProgramDatabase:
                         parent_id=migrant.id,
                         generation=migrant.generation,
                         metrics=migrant.metrics.copy(),
+                        per_instance_scores=(
+                            dict(migrant.per_instance_scores)
+                            if migrant.per_instance_scores is not None
+                            else None
+                        ),
+                        feedback=migrant.feedback,
                         metadata={**migrant.metadata, "island": target_island, "migrant": True},
                     )
 

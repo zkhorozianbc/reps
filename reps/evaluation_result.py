@@ -4,7 +4,7 @@ Evaluation result structures for REPS (extracted from OpenEvolve)
 
 import json
 from dataclasses import dataclass, field
-from typing import Dict, Union
+from typing import Dict, Optional, Union
 
 
 @dataclass
@@ -22,10 +22,20 @@ class EvaluationResult:
     Examples:
         Correct: {"combined_score": 0.85, "prompt_length": 1247, "execution_time": 0.234}
         Wrong:   {"combined_score": 0.85, "prompt_length": 7, "execution_time": 3}
+
+    Optional fields (Phase 1, GEPA-style ASI):
+        per_instance_scores: per-test/per-example scalar scores keyed by instance id.
+            Used by the Pareto sampler and trace-grounded reflection. None means the
+            evaluator does not expose per-instance breakdown.
+        feedback: free-form textual diagnostic intended for the reflection LLM
+            (errors, profiler output, intermediate reasoning). None means no feedback
+            available.
     """
 
     metrics: Dict[str, float]  # mandatory - existing contract
     artifacts: Dict[str, Union[str, bytes]] = field(default_factory=dict)  # optional side-channel
+    per_instance_scores: Optional[Dict[str, float]] = None
+    feedback: Optional[str] = None
 
     @classmethod
     def from_dict(cls, metrics: Dict[str, float]) -> "EvaluationResult":

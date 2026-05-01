@@ -636,6 +636,8 @@ class ProcessParallelController:
             parent_id=parent.id,
             generation=parent.generation + 1,
             metrics=outcome.metrics,
+            per_instance_scores=outcome.per_instance_scores,
+            feedback=outcome.feedback,
             iteration_found=iteration,
             metadata=child_metadata,
         )

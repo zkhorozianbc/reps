@@ -33,10 +33,17 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class EvaluationOutcome:
-    """Result of one isolated evaluation call — metrics + artifacts + id."""
+    """Result of one isolated evaluation call — metrics + artifacts + id.
+
+    Optional GEPA-style ASI fields (Phase 1):
+        per_instance_scores: per-instance scalar scores from the benchmark evaluator.
+        feedback: free-form textual diagnostic for the reflection LLM.
+    """
     metrics: Dict[str, float]
     artifacts: Dict[str, Union[str, bytes]] = field(default_factory=dict)
     program_id: str = ""
+    per_instance_scores: Optional[Dict[str, float]] = None
+    feedback: Optional[str] = None
 
 
 # Per-call artifact collection scoped via asyncio Task-local contextvar.
@@ -188,13 +195,19 @@ class Evaluator:
                 if run_dir is not None:
                     call_env["REPS_RUN_DIR"] = run_dir
 
-                metrics = await self._evaluate_code_with_env(
+                eval_result = await self._evaluate_code_with_env(
                     program_code=program_code,
                     program_id=pid,
                     env=call_env,
                 )
                 artifacts = dict(_call_artifacts.get() or {})
-                return EvaluationOutcome(metrics=metrics, artifacts=artifacts, program_id=pid)
+                return EvaluationOutcome(
+                    metrics=eval_result.metrics,
+                    artifacts=artifacts,
+                    program_id=pid,
+                    per_instance_scores=eval_result.per_instance_scores,
+                    feedback=eval_result.feedback,
+                )
             finally:
                 reset_current_program_id(token_pid)
                 _call_artifacts.reset(token_artifacts)
@@ -204,12 +217,17 @@ class Evaluator:
         program_code: str,
         program_id: str,
         env: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, float]:
+    ) -> EvaluationResult:
         """Run the full retry/cascade evaluation pipeline.
 
         This is the implementation behind evaluate_isolated — it carries `env`
         through to subprocess-spawning benchmark evaluators so each concurrent
         call gets the correct REPS_PROGRAM_ID without touching os.environ.
+
+        Returns the full EvaluationResult so optional fields (per_instance_scores,
+        feedback) survive back to evaluate_isolated. Artifacts are still routed
+        through the contextvar side-channel; the returned EvaluationResult.artifacts
+        dict is not consulted by the caller.
         """
         start_time = time.time()
         program_id_str = f" {program_id}" if program_id else ""
@@ -330,8 +348,9 @@ class Evaluator:
                     f"{format_metrics_safe(eval_result.metrics)}"
                 )
 
-                # Return just metrics for backward compatibility
-                return eval_result.metrics
+                # Return the full EvaluationResult so per_instance_scores and
+                # feedback survive back to evaluate_isolated.
+                return eval_result
 
             except asyncio.TimeoutError:
                 # Handle timeout specially - don't retry, just return timeout result
@@ -351,7 +370,7 @@ class Evaluator:
                     else:
                         self._pending_artifacts[program_id] = timeout_data
 
-                return {"error": 0.0, "timeout": True}
+                return EvaluationResult(metrics={"error": 0.0, "timeout": True})
 
             except Exception as e:
                 last_exception = e
@@ -387,7 +406,7 @@ class Evaluator:
         logger.error(
             f"All evaluation attempts failed for program{program_id_str}. Last error: {str(last_exception)}"
         )
-        return {"error": 0.0}
+        return EvaluationResult(metrics={"error": 0.0})
 
     def _process_evaluation_result(self, result: Any) -> EvaluationResult:
         """
