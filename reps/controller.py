@@ -401,6 +401,25 @@ class ProcessParallelController:
             iteration_config.prompt_extras["trace_directive"] = trace_directive_block
 
         parent_island = parent.metadata.get("island", self.database.current_island)
+
+        # Phase 4.2: system-aware merge for crossover iterations. When merge is
+        # enabled, override the WorkerPool's random distant-island pick with a
+        # Pareto-complementary partner. No-op when merge is disabled, the
+        # iteration isn't a crossover (second_parent_id is None), or the primary
+        # has no per_instance_scores. crossover_context is rendered ONLY when
+        # we actually performed system-aware selection — legacy random
+        # crossovers keep their existing empty crossover_context behavior.
+        if iteration_config.second_parent_id is not None:
+            complementary_id = self._maybe_select_complementary_partner(
+                parent, parent_island
+            )
+            if complementary_id is not None:
+                iteration_config.second_parent_id = complementary_id
+                partner_program = self.database.programs.get(complementary_id)
+                if partner_program is not None:
+                    ctx_block = self._build_crossover_context(parent, partner_program)
+                    if ctx_block:
+                        iteration_config.prompt_extras["crossover_context"] = ctx_block
         island_pids = list(self.database.islands[parent_island])
         island_programs = [
             self.database.programs[p]
@@ -750,6 +769,85 @@ class ProcessParallelController:
         return (
             "## Suggested next change (from trace reflection)\n"
             f"{directive}"
+        )
+
+    def _other_island_candidates(self, primary_island: int) -> List["Program"]:
+        """Programs on islands other than `primary_island`. Used by the
+        system-aware merge selector."""
+        from reps.database import Program  # local import: keep top-level small
+        candidates: List[Program] = []
+        for i, island in enumerate(self.database.islands):
+            if i == primary_island:
+                continue
+            for pid in island:
+                prog = self.database.programs.get(pid)
+                if prog is not None:
+                    candidates.append(prog)
+        return candidates
+
+    def _maybe_select_complementary_partner(
+        self, parent: "Program", primary_island: int
+    ) -> Optional[str]:
+        """Phase 4.2: pick a system-aware merge partner for a crossover
+        iteration. Returns the candidate id, or None to fall back to the
+        WorkerPool's random distant-island pick.
+
+        No-op (returns None) when:
+          - REPS or merge is disabled,
+          - primary has no per_instance_scores,
+          - no candidates exist on other islands,
+          - select_complementary_partner returns None (degenerate case).
+        """
+        if not self._reps_enabled:
+            return None
+        cfg = self.config.reps.merge
+        if not cfg.enabled:
+            return None
+        if not parent.per_instance_scores:
+            return None
+
+        candidates = self._other_island_candidates(primary_island)
+        if not candidates:
+            return None
+
+        from reps.pareto import select_complementary_partner
+        partner = select_complementary_partner(
+            parent, candidates, instance_keys=cfg.instance_keys
+        )
+        return partner.id if partner else None
+
+    def _build_crossover_context(
+        self, primary: "Program", partner: "Program"
+    ) -> str:
+        """Render a short crossover_context block naming each parent's
+        strong dimensions. Returns "" when neither parent has per-instance
+        scores (legacy random crossover — no signal to render).
+        """
+        if not primary.per_instance_scores and not partner.per_instance_scores:
+            return ""
+
+        threshold = self.config.reps.merge.strong_score_threshold
+
+        def _strong_keys(scores: Optional[Dict[str, float]]) -> List[str]:
+            if not scores:
+                return []
+            return sorted(
+                k for k, v in scores.items()
+                if isinstance(v, (int, float)) and v >= threshold
+            )
+
+        primary_strong = _strong_keys(primary.per_instance_scores)
+        partner_strong = _strong_keys(partner.per_instance_scores)
+
+        primary_desc = ", ".join(primary_strong) if primary_strong else "no clear strengths"
+        partner_desc = ", ".join(partner_strong) if partner_strong else "no clear strengths"
+
+        return (
+            "## Crossover hint (system-aware merge)\n"
+            f"Primary parent excels on: {primary_desc}.\n"
+            f"Partner parent excels on: {partner_desc}.\n"
+            "Combine: keep the primary's strengths and adopt the partner's "
+            "approach for the dimensions where the partner is stronger.\n"
         )
 
     def _should_sample_pareto(self) -> bool:

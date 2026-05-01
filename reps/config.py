@@ -373,6 +373,32 @@ class REPSTraceReflectionConfig:
 
 
 @dataclass
+class REPSMergeConfig:
+    """Phase 4 (GEPA-inspired): system-aware merge for crossover workers.
+
+    When enabled, the second parent for a crossover iteration is chosen to
+    maximize per-instance complementarity with the primary instead of the
+    random distant-island pick used otherwise. Candidate pool is all
+    programs on islands other than the primary's (same scope as the
+    legacy random pick, just selected differently).
+
+    Falls back to the legacy random pick when:
+      - the primary has no per_instance_scores (pre-Phase-1.2 benchmarks),
+      - the candidate pool from other islands is empty.
+
+    `instance_keys`: optional restriction to a subset of per_instance_scores
+    keys when computing complementary gain. None means use the union of
+    keys present across primary + candidates.
+
+    `strong_score_threshold`: scores at or above this value qualify a
+    dimension as a parent's "strong" dim when rendering crossover_context.
+    """
+    enabled: bool = False
+    instance_keys: Optional[List[str]] = None
+    strong_score_threshold: float = 0.8
+
+
+@dataclass
 class REPSRevisitationConfig:
     """F2: epsilon-Revisitation config"""
     enabled: bool = True
@@ -484,6 +510,7 @@ class REPSConfig:
     annotations: REPSAnnotationsConfig = field(default_factory=REPSAnnotationsConfig)
     summarizer: REPSSummarizerConfig = field(default_factory=REPSSummarizerConfig)
     trace_reflection: REPSTraceReflectionConfig = field(default_factory=REPSTraceReflectionConfig)
+    merge: REPSMergeConfig = field(default_factory=REPSMergeConfig)
 
 
 @dataclass
