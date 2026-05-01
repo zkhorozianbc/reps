@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 import random
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 from reps.database import Program
 
@@ -131,3 +131,115 @@ def sample_pareto(
         return None
     chooser = rng if rng is not None else random
     return chooser.choice(frontier)
+
+
+# ---------------------------------------------------------------------------
+# System-aware merge (Phase 4): given a primary parent, pick a partner whose
+# strengths most complement primary's weaknesses. Definition of "complementary"
+# is the total per-dim *gain* over primary:
+#
+#   gain(primary, candidate) = sum_k max(0, c.scores[k] - p.scores[k])
+#
+# The candidate that maximizes this contributes the most non-overlapping
+# strength. Ties (e.g. primary dominates every candidate so gain=0) are
+# broken uniformly at random — the merge worker still gets *some* partner.
+# ---------------------------------------------------------------------------
+
+
+def _complementary_gain(primary_vec: List[float], candidate_vec: List[float]) -> float:
+    """Sum of per-dim positive gain candidate has over primary.
+
+    Non-finite scores (e.g. -inf produced by `_safe_score` from NaN evaluations)
+    are clamped to 0.0 *for gain accounting only* — `dominates` still treats
+    them as -inf so failed evals stay off the frontier. The clamp here means a
+    finite candidate gets full credit over a broken-eval primary instead of
+    being silently rejected by `isfinite(inf)==False`.
+    """
+    total = 0.0
+    for p, c in zip(primary_vec, candidate_vec):
+        p_clean = p if math.isfinite(p) else 0.0
+        c_clean = c if math.isfinite(c) else 0.0
+        diff = c_clean - p_clean
+        if diff > 0.0:
+            total += diff
+    return total
+
+
+def select_complementary_partner(
+    primary: Program,
+    candidates: List[Program],
+    instance_keys: Optional[List[str]] = None,
+    rng: Optional[random.Random] = None,
+) -> Optional[Program]:
+    """Pick the candidate that most complements `primary`'s strengths.
+
+    Excludes `primary` itself from `candidates` (matched by id, falling back
+    to identity for ad-hoc programs without ids). Returns None when no other
+    candidate is available.
+
+    When multiple candidates tie on gain (e.g. primary already dominates them
+    all — gain=0 across the board), picks one uniformly at random so the
+    merge worker still has a partner.
+    """
+    if not candidates:
+        return None
+
+    others = [
+        c for c in candidates
+        if (primary.id and c.id != primary.id) or (not primary.id and c is not primary)
+    ]
+    if not others:
+        return None
+
+    keys = instance_keys if instance_keys is not None else collect_instance_keys(
+        [primary, *others]
+    )
+    primary_vec = program_score_vector(primary, keys)
+
+    scored = [(_complementary_gain(primary_vec, program_score_vector(c, keys)), c)
+              for c in others]
+
+    best_gain = max(g for g, _ in scored)
+    best_candidates = [c for g, c in scored if g == best_gain]
+
+    chooser = rng if rng is not None else random
+    return chooser.choice(best_candidates)
+
+
+def select_complementary_pair(
+    frontier: List[Program],
+    instance_keys: Optional[List[str]] = None,
+    rng: Optional[random.Random] = None,
+) -> Optional[Tuple[Program, Program]]:
+    """Pick two frontier members whose strengths are most disjoint.
+
+    Searches all ordered pairs; the result is `(a, b)` maximizing
+    `_complementary_gain(a, b)`. Returns None when the frontier has fewer
+    than 2 programs. Ties broken uniformly at random.
+
+    O(n²) over the frontier — fine for typical Pareto-front sizes (<50).
+    """
+    if not frontier or len(frontier) < 2:
+        return None
+
+    keys = instance_keys if instance_keys is not None else collect_instance_keys(frontier)
+    vectors = {id(p): program_score_vector(p, keys) for p in frontier}
+
+    best_gain = -1.0
+    best_pairs: List[Tuple[Program, Program]] = []
+    for a in frontier:
+        for b in frontier:
+            if a is b:
+                continue
+            gain = _complementary_gain(vectors[id(a)], vectors[id(b)])
+            if gain > best_gain:
+                best_gain = gain
+                best_pairs = [(a, b)]
+            elif gain == best_gain:
+                best_pairs.append((a, b))
+
+    if not best_pairs:
+        return None
+
+    chooser = rng if rng is not None else random
+    return chooser.choice(best_pairs)

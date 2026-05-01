@@ -14,6 +14,8 @@ from reps.pareto import (
     dominates,
     program_score_vector,
     sample_pareto,
+    select_complementary_pair,
+    select_complementary_partner,
 )
 
 
@@ -217,3 +219,129 @@ class TestSamplePareto:
         s1 = [sample_pareto([a, b, c], rng=random.Random(42)).id for _ in range(10)]
         s2 = [sample_pareto([a, b, c], rng=random.Random(42)).id for _ in range(10)]
         assert s1 == s2
+
+
+class TestSelectComplementaryPartner:
+    def test_returns_none_for_empty_candidates(self):
+        primary = _prog("p", {"x": 0.5})
+        assert select_complementary_partner(primary, []) is None
+
+    def test_returns_none_when_only_primary_in_candidates(self):
+        primary = _prog("p", {"x": 0.5})
+        # Same id excludes the candidate.
+        assert select_complementary_partner(primary, [primary]) is None
+
+    def test_picks_candidate_with_most_complementary_strength(self):
+        # primary excels on x; among partners, c2 excels on y (perfectly
+        # complementary) and c1 excels on x (overlapping).
+        primary = _prog("p", {"x": 1.0, "y": 0.0})
+        c1 = _prog("c1", {"x": 0.9, "y": 0.0})  # gain = 0 (no dim better)
+        c2 = _prog("c2", {"x": 0.0, "y": 1.0})  # gain = 1.0 (y dim)
+        c3 = _prog("c3", {"x": 0.0, "y": 0.5})  # gain = 0.5
+        assert select_complementary_partner(primary, [c1, c2, c3]).id == "c2"
+
+    def test_breaks_ties_uniformly(self):
+        # primary dominates everyone → all gains = 0 → uniform random pick.
+        primary = _prog("p", {"x": 1.0, "y": 1.0})
+        c1 = _prog("c1", {"x": 0.0, "y": 0.0})
+        c2 = _prog("c2", {"x": 0.5, "y": 0.5})
+        seen = set()
+        rng = random.Random(0)
+        for _ in range(100):
+            picked = select_complementary_partner(primary, [c1, c2], rng=rng)
+            seen.add(picked.id)
+        assert seen == {"c1", "c2"}
+
+    def test_excludes_primary_by_id(self):
+        primary = _prog("p", {"x": 1.0, "y": 0.0})
+        clone = _prog("p", {"x": 0.0, "y": 1.0})  # same id
+        c2 = _prog("c2", {"x": 0.5, "y": 0.5})
+        rng = random.Random(0)
+        # `clone` would otherwise win on complementarity, but same-id excludes it.
+        for _ in range(20):
+            assert select_complementary_partner(primary, [clone, c2], rng=rng).id == "c2"
+
+    def test_excludes_primary_by_identity_when_no_id(self):
+        primary = _prog("", {"x": 1.0, "y": 0.0})
+        # Empty id falls back to identity check.
+        rng = random.Random(0)
+        partner = _prog("", {"x": 0.0, "y": 1.0})
+        # primary is excluded; partner is the only candidate left.
+        assert select_complementary_partner(primary, [primary, partner], rng=rng) is partner
+
+    def test_explicit_instance_keys(self):
+        # Restricting to {x} only — y dimension ignored.
+        primary = _prog("p", {"x": 1.0, "y": 0.0})
+        c_x = _prog("c_x", {"x": 0.0, "y": 0.0})  # gain on {x} only = 0
+        c_y = _prog("c_y", {"x": 0.0, "y": 1.0})  # gain on {x} only = 0
+        # On {x}: both candidates tie at 0, so uniform pick.
+        rng = random.Random(0)
+        seen = set()
+        for _ in range(100):
+            seen.add(select_complementary_partner(primary, [c_x, c_y], ["x"], rng=rng).id)
+        assert seen == {"c_x", "c_y"}
+
+    def test_works_without_per_instance_scores(self):
+        # combined_score broadcast: complementary gain is essentially 0 unless
+        # candidate has a higher combined_score on the broadcast dim.
+        primary = _prog("p", combined=0.7)
+        c_lo = _prog("c_lo", combined=0.3)  # gain = 0
+        c_hi = _prog("c_hi", combined=0.9)  # gain > 0
+        assert select_complementary_partner(primary, [c_lo, c_hi]).id == "c_hi"
+
+    def test_finite_partner_compensates_for_broken_primary(self):
+        # If primary's eval failed (NaN → -inf via _safe_score), a finite
+        # candidate must still receive gain credit. The naive `isfinite(inf)`
+        # check would reject that case and return 0 gain, leaving the
+        # uniform-tie-break to pick at random — a regression vs intent.
+        primary = _prog("p", {"x": float("nan"), "y": 0.0})
+        c_finite = _prog("c_finite", {"x": 0.5, "y": 0.5})
+        c_broken = _prog("c_broken", {"x": float("nan"), "y": float("nan")})
+        # c_finite contributes 1.0 total gain (0.5 on each dim, primary clamped
+        # to 0). c_broken contributes 0.
+        rng = random.Random(0)
+        for _ in range(20):
+            assert select_complementary_partner(
+                primary, [c_finite, c_broken], rng=rng
+            ).id == "c_finite"
+
+
+class TestSelectComplementaryPair:
+    def test_returns_none_for_empty_or_single(self):
+        assert select_complementary_pair([]) is None
+        assert select_complementary_pair([_prog("a", {"x": 0.5})]) is None
+
+    def test_picks_most_disjoint_pair(self):
+        # a and b are complementary; c is dominated.
+        a = _prog("a", {"x": 1.0, "y": 0.0})
+        b = _prog("b", {"x": 0.0, "y": 1.0})
+        c = _prog("c", {"x": 0.5, "y": 0.5})
+        result = select_complementary_pair([a, b, c])
+        assert result is not None
+        first, second = result
+        # The {a, b} pair has gain=1.0 in either direction (max disjointness);
+        # any pair involving c yields gain=0.5 max. So one of them is from {a, b}.
+        # Specifically the maximizer is (a→b) or (b→a) since gain=1.0.
+        assert {first.id, second.id} == {"a", "b"}
+
+    def test_three_dim_disjoint(self):
+        # Three perfectly orthogonal programs — any of the 6 ordered pairs
+        # has gain=1.0. All should be reachable.
+        a = _prog("a", {"x": 1.0, "y": 0.0, "z": 0.0})
+        b = _prog("b", {"x": 0.0, "y": 1.0, "z": 0.0})
+        c = _prog("c", {"x": 0.0, "y": 0.0, "z": 1.0})
+        rng = random.Random(0)
+        seen_pairs = set()
+        for _ in range(200):
+            r = select_complementary_pair([a, b, c], rng=rng)
+            seen_pairs.add((r[0].id, r[1].id))
+        # All 6 ordered pairs should appear over many draws.
+        assert len(seen_pairs) == 6
+
+    def test_deterministic_with_seeded_rng(self):
+        a = _prog("a", {"x": 1.0, "y": 0.0})
+        b = _prog("b", {"x": 0.0, "y": 1.0})
+        c = _prog("c", {"x": 0.5, "y": 0.5})
+        s1 = [select_complementary_pair([a, b, c], rng=random.Random(7)) for _ in range(10)]
+        s2 = [select_complementary_pair([a, b, c], rng=random.Random(7)) for _ in range(10)]
+        assert [(p[0].id, p[1].id) for p in s1] == [(p[0].id, p[1].id) for p in s2]
