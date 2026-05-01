@@ -393,6 +393,13 @@ class ProcessParallelController:
             if pid in self.database.programs
         ]
 
+        # Phase 3.2: per-candidate trace-grounded reflection. Generates + caches
+        # mutation_directive on the parent (no-op when disabled or parent lacks
+        # ASI signal). Resulting block is injected via prompt_extras below.
+        trace_directive_block = await self._maybe_generate_trace_directive(parent)
+        if trace_directive_block:
+            iteration_config.prompt_extras["trace_directive"] = trace_directive_block
+
         parent_island = parent.metadata.get("island", self.database.current_island)
         island_pids = list(self.database.islands[parent_island])
         island_programs = [
@@ -692,6 +699,58 @@ class ProcessParallelController:
             except Exception as e:
                 logger.exception(f"iteration {iteration} failed in spawn")
                 return SerializableResult(error=str(e), iteration=iteration)
+
+    async def _maybe_generate_trace_directive(self, parent: Program) -> str:
+        """Per-candidate trace-grounded reflection (Phase 3.2).
+
+        Returns prompt-ready text (header + directive) when:
+          - reps.trace_reflection.enabled is True
+          - the parent qualifies (per `should_generate_directive`)
+          - the LLM call returned a non-empty directive
+
+        Otherwise returns "". Caches the directive on `parent.mutation_directive`
+        so a re-sampled parent doesn't pay for the LLM call again.
+
+        Best-effort: any failure returns "" — the iteration proceeds with the
+        parent's existing prompt unchanged.
+        """
+        if not self._reps_enabled:
+            return ""
+        cfg = self.config.reps.trace_reflection
+        if not cfg.enabled:
+            return ""
+
+        from reps.trace_reflection import generate_directive, should_generate_directive
+
+        if not should_generate_directive(parent, min_feedback_length=cfg.min_feedback_length):
+            return ""
+
+        try:
+            directive = await generate_directive(
+                parent,
+                self.llm_ensemble,
+                min_feedback_length=cfg.min_feedback_length,
+                max_code_chars=cfg.max_code_chars,
+            )
+        except Exception as e:
+            logger.warning(
+                "trace_reflection: unexpected error for parent %s: %s",
+                parent.id[:8] if parent.id else "?", e,
+            )
+            return ""
+
+        if not directive:
+            return ""
+
+        # Cache on the live Program so a re-sampled parent doesn't repeat the
+        # call. The new directive is also written to the child's metadata
+        # downstream so it's persisted with the program.
+        parent.mutation_directive = directive
+
+        return (
+            "## Suggested next change (from trace reflection)\n"
+            f"{directive}"
+        )
 
     def _should_sample_pareto(self) -> bool:
         """Decide whether the next parent pick should come from the Pareto

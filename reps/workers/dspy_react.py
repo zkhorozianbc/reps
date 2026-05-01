@@ -74,7 +74,7 @@ def _fmt_programs(programs) -> str:
 
 def _fmt_extras(extras: Dict[str, str]) -> str:
     parts = []
-    for k in ("reflection", "sota_injection", "dead_end_warnings"):
+    for k in ("reflection", "sota_injection", "dead_end_warnings", "trace_directive"):
         v = extras.get(k, "")
         if v:
             parts.append(f"[{k}]\n{v}")
