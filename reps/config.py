@@ -344,6 +344,12 @@ class EvaluatorConfig:
     enable_artifacts: bool = True
     max_artifact_storage: int = 100 * 1024 * 1024  # 100MB per program
 
+    # Forward-compat field for Phase 6 of the GEPA plan (per-iteration
+    # minibatch sampling). Currently unused by the evaluator itself —
+    # exposed so the v1 `reps.REPS(minibatch_size=...)` kwarg has a stable
+    # landing slot until the runner consumes it.
+    minibatch_size: Optional[int] = None
+
 
 @dataclass
 class REPSReflectionConfig:

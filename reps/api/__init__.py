@@ -6,6 +6,9 @@ is a thin facade.
 """
 
 from reps.api.lm import LM
+from reps.api.optimizer import REPS
+from reps.api.result import OptimizationResult
+from reps.evaluation_result import EvaluationResult
 
-__all__ = ["LM"]
+__all__ = ["LM", "REPS", "OptimizationResult", "EvaluationResult"]
 

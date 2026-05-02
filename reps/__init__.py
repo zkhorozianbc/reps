@@ -20,9 +20,15 @@ from reps.contract_selector import ContractSelector, Contract
 from reps.sota_controller import SOTAController, SearchRegime
 from reps.metrics_logger import MetricsLogger
 
-# v1 public API. The api package is a thin facade over reps/llm/* and
-# reps/runner.py — internals stay in their existing modules.
+# v1 public API. The api package is a thin facade over reps/llm/*,
+# reps/runner.py, and reps/database.py — internals stay in their existing
+# modules. Power users who relied on the previous flat namespace
+# (`reps.ReflectionEngine`, etc.) keep working both via this top-level
+# re-export and via `reps.internal.*`.
 from reps.api.lm import LM
+from reps.api.optimizer import REPS
+from reps.api.result import OptimizationResult
+from reps.evaluation_result import EvaluationResult
 
 __all__ = [
     "IterationConfig",
@@ -37,4 +43,7 @@ __all__ = [
     "SearchRegime",
     "MetricsLogger",
     "LM",
+    "REPS",
+    "OptimizationResult",
+    "EvaluationResult",
 ]
