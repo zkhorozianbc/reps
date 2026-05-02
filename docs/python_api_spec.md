@@ -1,0 +1,637 @@
+# REPS Python API Spec
+
+## Goals
+
+Expose REPS as a Python package with an ergonomic, programmatic API
+similar in shape to `dspy.LM` and `dspy.GEPA`. A user should be able to:
+
+```python
+import reps
+
+lm = reps.LM("anthropic/claude-sonnet-4.6")
+optimizer = reps.REPS(
+    lm=lm,
+    metric=my_metric,
+    max_iterations=50,
+    selection_strategy="mixed",
+    pareto_fraction=0.3,
+    trace_reflection=True,
+    merge=True,
+)
+result = optimizer.compile(initial=open("seed.py").read(), trainset=examples)
+print(result.best_code)
+print(result.best_score)
+```
+
+…without writing a YAML file, an `evaluator.py` module, or running a CLI.
+
+## Non-goals
+
+- We are NOT implementing the dspy `Module` / `Predict` / `Signature` model.
+  REPS optimizes whole programs (or artifacts via Phase 7 adapters), not
+  structured DSPy programs. A `dspy.Module`-flavored API is a thin layer
+  someone could build on top later.
+- We are NOT replacing the existing `reps-run` CLI or the YAML config
+  path. They remain the right entry point for batch experiments and
+  power-user runs. The Python API is the right entry point for notebook
+  prototyping, library integration, and CI checks.
+- We are NOT trying to be GEPA. We borrow naming where it's natural;
+  we keep REPS's distinctive features (convergence monitor, SOTA
+  steering, worker pool, all of Phases 1-5) intact.
+
+## Status
+
+This is a spec. Nothing is implemented yet. Phases 1-5 of the
+[GEPA implementation plan](./gepa_implementation_plan.md) provide the
+infrastructure that this API will surface; Phase 7 (the adapter pattern)
+is the natural complement that lets `reps.REPS` optimize non-Python
+artifacts.
+
+## Working conventions (mirroring the GEPA plan)
+
+- Branch: a new feature branch per phase of this work.
+- Per-phase gate: unit tests pass, focused integration test exercises the
+  new path, subagent review, commit.
+- Default-off: existing CLI and YAML paths must keep working. The Python
+  API is purely additive — a new entry point.
+- Two-commit phases: pure module(s) first, wiring/integration second.
+
+## Public surface (top-level `reps` namespace)
+
+The `reps/__init__.py` module currently exports internal building blocks
+(`ReflectionEngine`, `ConvergenceMonitor`, etc.). Those move to a
+`reps.internal` submodule (still importable for power users) and the
+top-level becomes user-facing:
+
+```python
+# Configuration & LLM
+reps.LM                    # LLM wrapper, ~ dspy.LM
+reps.configure             # process-wide defaults (lm, output_dir, log_level)
+
+# Optimizer
+reps.REPS                  # the headline optimizer class
+reps.OptimizationResult    # what compile()/optimize() returns
+
+# Adapter / artifact extension (Phase 7 work; sketched here for completeness)
+reps.Adapter               # ABC for non-Python artifacts
+reps.PythonSourceAdapter   # default — current REPS behavior
+
+# Evaluation primitives (already exist; re-exported for convenience)
+reps.EvaluationResult      # ASI-rich return shape from evaluators
+
+# Internals (existing modules, kept for power users)
+reps.internal.ReflectionEngine
+reps.internal.WorkerPool
+# ... etc.
+```
+
+`from reps import LM, REPS` is the canonical import.
+
+## `reps.LM`
+
+A thin wrapper around the existing `reps.llm` providers. Mirrors
+`dspy.LM`'s constructor shape so users can copy patterns from the dspy
+ecosystem.
+
+### Signature
+
+```python
+reps.LM(
+    model: str,                      # "<provider>/<model>" or just "<model>"
+    *,
+    api_key: Optional[str] = None,   # falls back to provider env var
+    api_base: Optional[str] = None,  # for OpenRouter, Azure, custom gateways
+    temperature: float = 1.0,
+    max_tokens: Optional[int] = None,
+    timeout: int = 600,
+    retries: int = 2,
+    retry_delay: int = 5,
+    extended_thinking: Optional[str] = None,  # "off"|"low"|"medium"|"high"|"xhigh"|"max"
+    **provider_kwargs: Any,          # passed through to provider client
+)
+```
+
+### Behavior
+
+- The `model` string is parsed as `"<provider>/<id>"` (e.g.
+  `"anthropic/claude-sonnet-4.6"`) or just `"<id>"`. If the provider
+  isn't given, fall back to `reps.llm.provider_of.provider_of_model(id)`
+  which already does this inference.
+- `api_key=None` ⇒ env-var fallback per provider:
+  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`. Fail
+  loudly at construction if no key is resolvable (matches the existing
+  `program_summarizer.build_summarizer_llm` behavior).
+- `extended_thinking` is the existing `reasoning` knob renamed for
+  consistency with how the field is described in user docs.
+- `**provider_kwargs` is passed verbatim to the underlying client
+  constructor so users can opt into provider-specific features
+  (e.g. `cache_control`, `top_p`) without us enumerating them.
+- The wrapper is async-first internally (existing `LLMInterface`) but
+  exposes both sync and async call surfaces:
+
+```python
+lm = reps.LM("anthropic/claude-sonnet-4.6")
+
+# Sync
+text = lm("Hello")                            # __call__ is sync wrapper
+text = lm.generate("Hello")                   # explicit sync
+# Async
+text = await lm.agenerate("Hello")
+text = await lm.agenerate_with_context(system_message=..., messages=...)
+```
+
+`__call__` is the dspy-flavored shortcut. The `agenerate` /
+`agenerate_with_context` methods preserve full async semantics for
+callers that need them (e.g. tools or batch dispatch).
+
+### Implementation notes
+
+- Most of this exists in `reps/llm/{anthropic,openai_compatible,base}.py`.
+  `reps.LM` is a thin façade over those (~50 lines).
+- The sync wrappers use `asyncio.run` if no loop is running, else
+  `asyncio.run_coroutine_threadsafe(...)` to avoid the "asyncio.run can't
+  be called from a running event loop" trap.
+- Existing `LLMEnsemble` stays as the multi-model abstraction; users who
+  want ensembling can pass `reps.LM(model="ensemble", models=[...])`
+  (see "Ensembles" below).
+
+### Ensembles
+
+```python
+ensemble = reps.LM.ensemble([
+    reps.LM("anthropic/claude-sonnet-4.6", weight=0.7),
+    reps.LM("openai/gpt-5", weight=0.3),
+])
+optimizer = reps.REPS(lm=ensemble, ...)
+```
+
+`reps.LM.ensemble(...)` is a classmethod that returns an object
+implementing the same interface as `reps.LM` but routing each call
+through `LLMEnsemble`. Existing `LLMEnsemble` already does this — the
+classmethod is a constructor sugar.
+
+## `reps.REPS`
+
+The headline optimizer. Mirrors `dspy.GEPA`'s pattern:
+
+> ```python
+> optimizer = dspy.GEPA(metric=..., max_metric_calls=150,
+>                       reflection_lm="openai/gpt-5")
+> optimized = optimizer.compile(student=MyProgram(),
+>                               trainset=trainset, valset=valset)
+> ```
+
+…but with REPS's own concepts surfaced as constructor knobs.
+
+### Signature
+
+```python
+reps.REPS(
+    *,
+    # LLMs
+    lm: Union[reps.LM, "LLMEnsemble"],          # primary worker LLM
+    reflection_lm: Optional[reps.LM] = None,    # F1 batch reflection (defaults to lm)
+    summarizer_lm: Optional[reps.LM] = None,    # F8 per-iteration summary
+    trace_reflection_lm: Optional[reps.LM] = None,  # Phase 3 directive (defaults to lm)
+
+    # Search budget
+    max_iterations: int = 100,
+    max_metric_calls: Optional[int] = None,     # alternative budget (mirrors GEPA)
+    target_score: Optional[float] = None,       # early-stop threshold
+    early_stopping_patience: Optional[int] = None,
+
+    # GEPA-style features (Phases 1-5)
+    selection_strategy: str = "map_elites",     # "map_elites" | "pareto" | "mixed"
+    pareto_fraction: float = 0.0,               # for "mixed"
+    pareto_instance_keys: Optional[List[str]] = None,
+    trace_reflection: bool = False,             # Phase 3
+    lineage_depth: int = 3,                     # Phase 5
+    merge: bool = False,                        # Phase 4
+    minibatch_size: Optional[int] = None,       # Phase 6
+
+    # Population / archive
+    num_islands: int = 5,
+    population_size: int = 1000,
+    archive_size: int = 100,
+    feature_dimensions: Optional[List[str]] = None,
+
+    # REPS feature toggles (preserved)
+    reflection: bool = True,                    # F1
+    revisitation: bool = True,                  # F2
+    convergence_monitor: bool = True,           # F4
+    contracts: bool = True,                     # F5 Thompson bandit
+    sota_steering: bool = False,                # F6
+
+    # Workers
+    workers: Optional[List[Dict[str, Any]]] = None,  # [{name, role, model_id, ...}]
+
+    # Output / persistence
+    output_dir: Optional[str] = None,           # None ⇒ tempdir, no persistence
+    save_checkpoints: bool = False,
+    checkpoint_interval: int = 50,
+    log_level: str = "INFO",
+
+    # Adapter (Phase 7)
+    adapter: Optional[reps.Adapter] = None,     # None ⇒ PythonSourceAdapter
+)
+```
+
+The constructor builds an internal `reps.config.Config` from these args.
+Keeping the constructor explicit (rather than `**config: Any` or a
+`Config` dataclass argument) gives users discoverability and IDE
+autocomplete; it also forces us to evolve the public surface
+deliberately.
+
+### `compile()` — the dspy-flavored entry point
+
+```python
+result: reps.OptimizationResult = optimizer.compile(
+    initial: str,                            # seed code / artifact
+    trainset: Optional[List[Any]] = None,    # examples for the metric
+    valset: Optional[List[Any]] = None,      # held-out validation set
+    metric: Optional[Callable] = None,       # overrides the constructor's metric
+    *,
+    seed: Optional[int] = None,              # deterministic RNG seed
+    callbacks: Optional[List["Callback"]] = None,
+)
+```
+
+Either `metric` is provided to the constructor or `compile()`. The
+`trainset` / `valset` split is dspy-flavored convention; REPS uses both
+during evolution (training) and at the end for held-out scoring. When
+not provided, evaluations skip the train/val split and the metric runs
+against whatever fixed test it always has.
+
+### `optimize()` — REPS-native entry point
+
+For users with an existing evaluator file or a callable that doesn't fit
+the `metric(example, prediction) -> float` shape, the REPS-native path:
+
+```python
+result = optimizer.optimize(
+    initial: str,
+    evaluate: Callable[..., reps.EvaluationResult],  # full ASI return
+)
+```
+
+`evaluate` matches today's benchmark `evaluate(program_path, env=None,
+instances=None)` signature (file path, optional env, optional minibatch
+subset for Phase 6) and returns a `reps.EvaluationResult` (with
+`per_instance_scores` and `feedback` for full GEPA value).
+
+`compile()` is a thin shim over `optimize()`: it builds an evaluator
+from `(metric, trainset, valset)` and delegates.
+
+### `acompile()` / `aoptimize()` — async variants
+
+Same signature, returning the awaitable. For notebook / library users
+who already have an event loop running.
+
+## Metric interface
+
+Two metric interfaces are supported:
+
+### dspy-flavored
+
+```python
+def metric(example, prediction, *, trace=None) -> float:
+    """example: an item from trainset/valset.
+       prediction: whatever the program produced for that example.
+       trace: per-prediction trace (for ASI feedback)."""
+```
+
+REPS wraps this in a synthetic evaluator. Each example becomes one
+instance with key `f"ex_{i}"`. The `combined_score` is the mean across
+examples; `per_instance_scores` is the per-example score dict;
+`feedback` is built from the bottom-K example traces (configurable).
+
+This is the dspy-compatibility path — drop in a metric you already wrote
+for `dspy.Evaluate`, get GEPA-style ASI for free.
+
+### REPS-native
+
+```python
+def evaluate(program_path: str, env=None, instances=None) -> reps.EvaluationResult:
+    """Returns an EvaluationResult with metrics, per_instance_scores,
+       feedback, and (optionally) artifacts."""
+```
+
+This is what existing benchmarks already implement. The Python API just
+exposes it without requiring a YAML config or CLI invocation.
+
+## `reps.OptimizationResult`
+
+```python
+@dataclass
+class OptimizationResult:
+    best_code: str                                  # winning artifact text
+    best_score: float                               # combined_score
+    best_metrics: Dict[str, float]                  # full metrics dict
+    best_per_instance_scores: Optional[Dict[str, float]]
+    best_feedback: Optional[str]
+    iterations_run: int
+    total_metric_calls: int
+    total_tokens: Dict[str, int]                    # {"in": N, "out": M}
+    history: List["IterationRecord"]                # per-iteration record
+    output_dir: Optional[str]                       # if persisted
+    converged_early: bool
+    early_stopping_reason: Optional[str]
+
+    def save(self, path: str) -> None: ...
+    @classmethod
+    def load(cls, path: str) -> "OptimizationResult": ...
+```
+
+`history` is a list of compact iteration records (parent id, child id,
+score delta, worker name, fidelity tag, optional directive). Useful for
+plotting trajectories and post-hoc analysis without re-reading the
+on-disk database.
+
+## `reps.configure`
+
+Mirrors `dspy.configure(lm=...)` for process-wide defaults:
+
+```python
+reps.configure(
+    lm: Optional[reps.LM] = None,
+    output_dir: Optional[str] = None,
+    log_level: Optional[str] = None,
+)
+```
+
+Sets module-level defaults. `reps.REPS()` constructor uses these when an
+explicit value isn't passed. Useful in notebooks where users instantiate
+many optimizers with the same LLM.
+
+## Callbacks
+
+```python
+class Callback(Protocol):
+    def on_iteration(self, record: "IterationRecord") -> None: ...
+    def on_batch(self, batch: List["IterationRecord"]) -> None: ...
+    def on_complete(self, result: "OptimizationResult") -> None: ...
+```
+
+Built-ins shipped with the package:
+- `reps.callbacks.ProgressBar` — tqdm progress
+- `reps.callbacks.JSONLogger` — append iteration records to a JSONL file
+- `reps.callbacks.WandbLogger` — opt-in W&B integration
+- `reps.callbacks.MLflowLogger` — opt-in MLflow integration
+
+This is also the extension point for users to integrate with their own
+experiment trackers without forking REPS.
+
+## `reps.Adapter` (Phase 7 placeholder)
+
+This API surface lands when Phase 7 ships. The spec is in the GEPA
+implementation plan; this section pins the shape for the public API:
+
+```python
+class Adapter(ABC):
+    @abstractmethod
+    def evaluate(self, artifact: str, env=None, instances=None) -> EvaluationResult: ...
+
+    @abstractmethod
+    def parse_mutation(self, raw_response: str) -> str: ...
+
+    @abstractmethod
+    def initial_artifact(self) -> str: ...
+
+    def render_in_prompt(self, artifact: str) -> str:
+        return f"```\n{artifact}\n```"
+
+    @property
+    def language(self) -> str:
+        return "text"
+```
+
+Users pick:
+- `reps.PythonSourceAdapter()` (default) — current REPS behavior.
+- `reps.PromptAdapter()` — optimize a single system prompt against a
+  metric.
+- `reps.ConfigAdapter(schema=...)` — optimize a JSON/YAML config.
+
+…or implement their own. `reps.REPS(adapter=my_adapter, ...)` is the
+hook point.
+
+Until Phase 7 ships, `adapter=None` defaults to current code-only
+behavior. The constructor accepts `adapter=...` from day one so the
+field is forward-compatible.
+
+## Worked examples
+
+### Minimum viable
+
+```python
+import reps
+
+def metric(example, prediction):
+    return float(prediction.strip() == example["answer"])
+
+optimizer = reps.REPS(
+    lm=reps.LM("anthropic/claude-sonnet-4.6"),
+    metric=metric,
+    max_iterations=20,
+)
+result = optimizer.compile(
+    initial=open("seed.py").read(),
+    trainset=load_questions(),
+)
+print(result.best_score, result.best_code)
+```
+
+### GEPA-style (all features on)
+
+```python
+import reps
+
+reps.configure(
+    lm=reps.LM("anthropic/claude-sonnet-4.6"),
+    output_dir="./runs/circle_packing",
+)
+
+def evaluate(program_path, env=None, instances=None):
+    # custom evaluator returning EvaluationResult with per_instance_scores
+    ...
+
+optimizer = reps.REPS(
+    metric=None,                              # using REPS-native evaluate
+    max_iterations=200,
+    selection_strategy="mixed",
+    pareto_fraction=0.3,
+    trace_reflection=True,
+    lineage_depth=3,
+    merge=True,
+    minibatch_size=2,                         # Phase 6
+    num_islands=4,
+    workers=[
+        {"name": "exploiter", "role": "exploiter", "temperature": 0.3, "weight": 0.5},
+        {"name": "explorer",  "role": "explorer",  "temperature": 1.2, "weight": 0.3},
+        {"name": "merger",    "role": "crossover", "temperature": 0.6, "weight": 0.2},
+    ],
+    save_checkpoints=True,
+)
+result = optimizer.optimize(
+    initial=open("initial_program.py").read(),
+    evaluate=evaluate,
+)
+```
+
+### Async / library
+
+```python
+async def run():
+    optimizer = reps.REPS(
+        lm=reps.LM("anthropic/claude-sonnet-4.6"),
+        metric=metric,
+        max_iterations=20,
+    )
+    return await optimizer.acompile(initial=seed, trainset=train, valset=val)
+
+asyncio.run(run())
+```
+
+### Migration from CLI
+
+Before:
+```bash
+reps-run experiment/benchmarks/circle_packing/initial_program.py \
+         experiment/benchmarks/circle_packing/evaluator.py \
+         --config experiment/configs/circle_sonnet_reps.yaml \
+         --output runs/cp \
+         --iterations 100
+```
+
+After:
+```python
+import reps
+import yaml
+
+cfg = yaml.safe_load(open("experiment/configs/circle_sonnet_reps.yaml"))
+optimizer = reps.REPS.from_config_dict(cfg)
+optimizer.optimize_path(
+    initial_program="experiment/benchmarks/circle_packing/initial_program.py",
+    evaluator="experiment/benchmarks/circle_packing/evaluator.py",
+    output_dir="runs/cp",
+    iterations=100,
+)
+```
+
+`reps.REPS.from_config_dict(...)` is the bridge for users with existing
+YAML configs. `optimize_path(...)` is a convenience that loads
+`initial_program` from disk and imports `evaluator` as a module.
+
+## Implementation phases
+
+### A — `reps.LM` + `reps.configure`
+
+Pure shim over existing `reps.llm.*`. ~150 LOC + tests with mocked
+HTTP. No internal changes. Lands first because it's a dependency for
+phase B and is independently useful for users who only want REPS's
+provider abstraction.
+
+Files:
+- New `reps/api/__init__.py` — public surface module.
+- New `reps/api/lm.py` — `LM` class + ensemble factory.
+- New `reps/api/configure.py` — process-wide defaults.
+- Update `reps/__init__.py` — re-export `LM`, `configure`.
+- Tests `tests/test_api_lm.py`.
+
+### B — `reps.REPS` skeleton + `optimize()`
+
+Builds the optimizer constructor + REPS-native `optimize()` entry point.
+Internally, this constructs a `Config`, instantiates a controller +
+database + evaluator, and runs the existing async event loop. The
+controller is unchanged — this is purely the new entry path.
+
+Files:
+- New `reps/api/optimizer.py` — `REPS` class, `optimize()`,
+  `aoptimize()`, `OptimizationResult`.
+- New `reps/api/result.py` — `OptimizationResult` dataclass + helpers.
+- Tests `tests/test_api_optimize.py` — end-to-end with a mock LLM and a
+  trivial in-Python evaluator that doesn't need a benchmark file.
+
+### C — `compile()` + dspy-flavored metric
+
+The `compile()` shim. Builds a synthetic evaluator from a
+`metric(example, prediction)` callable + `trainset` + `valset`. The
+synthetic evaluator runs the program on each example, collects
+per-example scores into `per_instance_scores`, and synthesizes
+`feedback` from bottom-K traces.
+
+Files:
+- New `reps/api/synthetic_evaluator.py`.
+- Update `reps/api/optimizer.py` — `compile()` method.
+- Tests `tests/test_api_compile.py`.
+
+### D — Callbacks + result history + persistence
+
+`Callback` Protocol, built-in callbacks, `OptimizationResult.save/load`,
+`from_config_dict` for YAML migration.
+
+Files:
+- New `reps/api/callbacks.py`.
+- Update `reps/api/optimizer.py` — callback dispatch hooks at iteration
+  and batch boundaries.
+- Update `reps/api/result.py` — JSON serialization.
+- Tests `tests/test_api_callbacks.py`.
+
+### E — Adapter integration (lands with Phase 7 of the GEPA plan)
+
+`reps.REPS(adapter=...)` becomes meaningful once `reps.Adapter` and
+`reps.PythonSourceAdapter` exist. Until then, the constructor accepts
+the kwarg and ignores it — forward-compatible.
+
+## Open design decisions
+
+1. **Module layout.** Top-level `reps.LM` / `reps.REPS` (shortest user
+   import) vs `reps.api.LM` / `reps.api.REPS` (clean separation from
+   internals). Recommendation: top-level for users, with `reps.internal`
+   re-exporting current internals for power users who already import
+   `reps.ReflectionEngine` etc.
+
+2. **`compile()` semantics.** dspy returns a *new program* (a
+   `dspy.Module` subclass instance with optimized prompts). REPS returns
+   text (the optimized code). Should we wrap that in a callable
+   "compiled program" object that loads + invokes the optimized code?
+   - Pro: matches dspy's `optimized(input)` ergonomics.
+   - Con: requires importing arbitrary user-supplied code; security and
+     correctness concerns.
+   - Recommendation: start with returning `OptimizationResult` (just
+     text + metadata) and let the user decide how to load it. We can
+     add `result.as_callable()` in a follow-up.
+
+3. **Sync wrappers.** `asyncio.run()` from inside a running loop raises
+   `RuntimeError` in modern Python. We need `nest_asyncio`-style or
+   thread-pool fallback. Recommendation: detect a running loop and
+   raise a clear error pointing the user to `acompile()` /
+   `aoptimize()`. Don't silently nest loops.
+
+4. **`max_iterations` vs `max_metric_calls`.** GEPA uses metric-call
+   budget; REPS has used iteration budget. Both are useful. Support
+   both — the run terminates when *either* limit is hit. Document the
+   difference clearly so users pick the right one.
+
+5. **YAML compatibility.** `REPS.from_config_dict(cfg)` is the bridge.
+   Should it be exact or lenient with old fields? Recommendation: exact
+   — fail loudly on unrecognized keys with a helpful diff against the
+   current schema, so users notice when their YAMLs go stale.
+
+6. **Provider strings.** Should `reps.LM("claude-sonnet-4.6")` (no
+   provider prefix) be allowed? Yes — fall back to
+   `provider_of_model(model)`. But fail loudly if inference is
+   ambiguous (e.g. a model name shared between providers).
+
+7. **What about `dspy.Evaluate` / `dspy.assertion` interop?** Out of
+   scope for this spec, but the metric API is intentionally
+   compatible with `dspy.Evaluate`'s callable shape so a user can lift
+   their dspy metric into REPS without refactoring. A formal
+   `from_dspy_metric(...)` adapter is a follow-up.
+
+## Append-only changelog
+
+Updated as phases of this spec ship.
+
+| Date | Phase | Commit | Notes |
+|------|-------|--------|-------|
+| —    | —     | —      | (spec only — no implementation yet) |
