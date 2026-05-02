@@ -2,42 +2,59 @@
 
 ## Goals
 
-Expose REPS as a Python package with an ergonomic, programmatic API
-similar in shape to `dspy.LM` and `dspy.GEPA`. A user should be able to:
+Expose REPS as a Python package with an ergonomic, programmatic API.
+For the LLM wrapper we follow `dspy.LM`'s shape; for the optimizer we
+follow GEPA's `optimize_anything` (the artifact-text-in / score-out API
+in the standalone `gepa-ai/gepa` package). A user should be able to:
 
 ```python
 import reps
 
 lm = reps.LM("anthropic/claude-sonnet-4.6")
+
+def evaluate(code: str) -> reps.EvaluationResult:
+    # run the code, score it, optionally produce per_instance_scores +
+    # feedback for GEPA-style ASI.
+    ...
+
 optimizer = reps.REPS(
     lm=lm,
-    metric=my_metric,
     max_iterations=50,
     selection_strategy="mixed",
     pareto_fraction=0.3,
     trace_reflection=True,
     merge=True,
 )
-result = optimizer.compile(initial=open("seed.py").read(), trainset=examples)
-print(result.best_code)
-print(result.best_score)
+result = optimizer.optimize(
+    initial=open("seed.py").read(),
+    evaluate=evaluate,
+)
+print(result.best_code, result.best_score)
 ```
 
 …without writing a YAML file, an `evaluator.py` module, or running a CLI.
 
+The evaluator takes the artifact text directly and returns a score (or a
+richer `EvaluationResult` with per-instance scores and free-form
+feedback for the Phase 1-5 ASI features). There is no separate "runner"
+or "predict-then-score" decomposition. This matches the spirit of
+`gepa.optimize_anything(seed_candidate, evaluator=...)` and aligns with
+how REPS already works internally.
+
 ## Non-goals
 
-- We are NOT implementing the dspy `Module` / `Predict` / `Signature` model.
-  REPS optimizes whole programs (or artifacts via Phase 7 adapters), not
-  structured DSPy programs. A `dspy.Module`-flavored API is a thin layer
-  someone could build on top later.
+- We are NOT modeling `dspy.GEPA.compile()` directly. That API requires
+  a `dspy.Module` (a callable program) and a per-example metric, which
+  pre-supposes a "predictor" abstraction REPS does not have. A
+  `dspy.Module`-flavored `compile()` shim is a thin layer someone could
+  build on top later — see "DSPy-compatibility shim" below.
 - We are NOT replacing the existing `reps-run` CLI or the YAML config
   path. They remain the right entry point for batch experiments and
   power-user runs. The Python API is the right entry point for notebook
   prototyping, library integration, and CI checks.
-- We are NOT trying to be GEPA. We borrow naming where it's natural;
-  we keep REPS's distinctive features (convergence monitor, SOTA
-  steering, worker pool, all of Phases 1-5) intact.
+- We are NOT trying to be GEPA. We borrow naming and shape where it's
+  natural; we keep REPS's distinctive features (convergence monitor,
+  SOTA steering, worker pool, all of Phases 1-5) intact.
 
 ## Status
 
@@ -242,50 +259,88 @@ Keeping the constructor explicit (rather than `**config: Any` or a
 autocomplete; it also forces us to evolve the public surface
 deliberately.
 
-### `compile()` — the dspy-flavored entry point
+### `optimize()` — primary entry point
+
+This is the headline API and matches `gepa.optimize_anything`'s shape:
+artifact text in, score out. The user supplies one callable that knows
+how to run the artifact (whatever that means for their problem — execute
+code, render a prompt, parse a config) and return a score.
 
 ```python
-result: reps.OptimizationResult = optimizer.compile(
-    initial: str,                            # seed code / artifact
-    trainset: Optional[List[Any]] = None,    # examples for the metric
-    valset: Optional[List[Any]] = None,      # held-out validation set
-    metric: Optional[Callable] = None,       # overrides the constructor's metric
+result = optimizer.optimize(
+    initial: str,                                # seed artifact (code, prompt, config, ...)
+    evaluate: Callable[..., reps.EvaluationResult | float | dict],
     *,
-    seed: Optional[int] = None,              # deterministic RNG seed
+    seed: Optional[int] = None,                  # deterministic RNG seed
     callbacks: Optional[List["Callback"]] = None,
 )
 ```
 
-Either `metric` is provided to the constructor or `compile()`. The
-`trainset` / `valset` split is dspy-flavored convention; REPS uses both
-during evolution (training) and at the end for held-out scoring. When
-not provided, evaluations skip the train/val split and the metric runs
-against whatever fixed test it always has.
+`evaluate` is called with the artifact text. Three accepted return
+shapes, in order of richness:
 
-### `optimize()` — REPS-native entry point
+1. `float` — just a scalar score. REPS treats it as `combined_score` and
+   skips Pareto / trace-reflection / merge (no per-instance signal).
+2. `dict` — must include `combined_score`; may include `validity`,
+   `per_instance_scores`, `feedback`, `error`. Auto-wrapped in
+   `EvaluationResult`.
+3. `reps.EvaluationResult` — full ASI surface, recommended for users who
+   want the Phase 1-5 features to actually fire.
 
-For users with an existing evaluator file or a callable that doesn't fit
-the `metric(example, prediction) -> float` shape, the REPS-native path:
+The signature is permissive on inputs too — REPS introspects the
+callable and passes whichever of these the function declares:
+
+- `evaluate(code)` — minimum.
+- `evaluate(code, *, env=None)` — for evaluators that spawn subprocesses
+  with controlled env vars (matches today's benchmark `evaluator.py`
+  pattern).
+- `evaluate(code, *, env=None, instances=None)` — Phase 6 minibatch.
+- `evaluate(program_path, ...)` — for legacy file-path-based evaluators.
+  REPS detects the parameter name `program_path` and writes the artifact
+  to a temp file before calling.
+
+This is one explicit callable that turns the artifact into a score.
+There is no "predict on each example, then score" decomposition — that
+would force a "runner" abstraction we don't think REPS needs at the
+public-API level.
+
+### `aoptimize()` — async variant
+
+Same signature, returning an awaitable. For notebook / library users who
+already have an event loop running.
+
+### `compile()` — DSPy-compatibility shim
+
+A *thin* shim for users who already have a dspy-style metric and a
+sample-by-sample evaluation pattern. NOT the primary API.
 
 ```python
-result = optimizer.optimize(
+result = optimizer.compile(
     initial: str,
-    evaluate: Callable[..., reps.EvaluationResult],  # full ASI return
+    metric: Callable[[Example, Prediction], float],
+    trainset: List[Example],
+    valset: Optional[List[Example]] = None,
+    runner: Callable[[str, Example], Any],         # required: how to run the artifact on one example
+    *,
+    seed: Optional[int] = None,
+    callbacks: Optional[List["Callback"]] = None,
 )
 ```
 
-`evaluate` matches today's benchmark `evaluate(program_path, env=None,
-instances=None)` signature (file path, optional env, optional minibatch
-subset for Phase 6) and returns a `reps.EvaluationResult` (with
-`per_instance_scores` and `feedback` for full GEPA value).
+Three callables instead of one because dspy's pattern is
+`predict-then-score`, and REPS — unlike `dspy.Module` — does not know how
+to run an arbitrary string of Python source on an `Example`. The user
+must say what "running the artifact" means via `runner`; the metric
+scores the resulting prediction.
 
-`compile()` is a thin shim over `optimize()`: it builds an evaluator
-from `(metric, trainset, valset)` and delegates.
+Internally this is a synthetic `evaluate` built on top of `optimize()`:
+each example becomes one instance with key `f"ex_{i}"`,
+`combined_score` is the mean of per-example scores,
+`per_instance_scores` is the dict, and `feedback` is built from the
+bottom-K example traces. So you get full ASI via the synthetic path —
+just at the cost of three callables instead of one.
 
-### `acompile()` / `aoptimize()` — async variants
-
-Same signature, returning the awaitable. For notebook / library users
-who already have an event loop running.
+If you don't already have a dspy-shaped metric, prefer `optimize()`.
 
 ## Metric interface
 
@@ -420,22 +475,25 @@ field is forward-compatible.
 
 ## Worked examples
 
-### Minimum viable
+### Minimum viable — scalar evaluator
 
 ```python
 import reps
+import subprocess
 
-def metric(example, prediction):
-    return float(prediction.strip() == example["answer"])
+def evaluate(code: str) -> float:
+    # Run the candidate, return a scalar. No per-instance signal —
+    # Pareto/trace-reflection/merge will degrade gracefully.
+    result = subprocess.run(["python", "-c", code], capture_output=True)
+    return 1.0 if result.returncode == 0 else 0.0
 
 optimizer = reps.REPS(
     lm=reps.LM("anthropic/claude-sonnet-4.6"),
-    metric=metric,
     max_iterations=20,
 )
-result = optimizer.compile(
+result = optimizer.optimize(
     initial=open("seed.py").read(),
-    trainset=load_questions(),
+    evaluate=evaluate,
 )
 print(result.best_score, result.best_code)
 ```
@@ -450,12 +508,12 @@ reps.configure(
     output_dir="./runs/circle_packing",
 )
 
-def evaluate(program_path, env=None, instances=None):
-    # custom evaluator returning EvaluationResult with per_instance_scores
+def evaluate(code: str, env=None, instances=None) -> reps.EvaluationResult:
+    # Custom evaluator emitting full ASI (per-objective scores + feedback).
+    # `instances` is the Phase 6 minibatch subset (None ⇒ full set).
     ...
 
 optimizer = reps.REPS(
-    metric=None,                              # using REPS-native evaluate
     max_iterations=200,
     selection_strategy="mixed",
     pareto_fraction=0.3,
@@ -483,13 +541,41 @@ result = optimizer.optimize(
 async def run():
     optimizer = reps.REPS(
         lm=reps.LM("anthropic/claude-sonnet-4.6"),
-        metric=metric,
         max_iterations=20,
     )
-    return await optimizer.acompile(initial=seed, trainset=train, valset=val)
+    return await optimizer.aoptimize(initial=seed, evaluate=evaluate)
 
 asyncio.run(run())
 ```
+
+### DSPy-compatibility shim
+
+For users porting from dspy who already have a `metric(example, prediction)`
+callable, `compile()` requires an explicit `runner` because REPS does not
+know how to run a code string against a sample.
+
+```python
+def runner(code: str, example) -> str:
+    # User-supplied: import the artifact and call whatever entry point
+    # makes sense for their problem.
+    ns: dict = {}
+    exec(code, ns)
+    return ns["answer"](example["question"])
+
+def metric(example, prediction) -> float:
+    return float(prediction.strip() == example["answer"])
+
+optimizer = reps.REPS(lm=reps.LM("anthropic/claude-sonnet-4.6"), max_iterations=20)
+result = optimizer.compile(
+    initial=open("seed.py").read(),
+    trainset=load_questions(),
+    metric=metric,
+    runner=runner,
+)
+```
+
+If you don't already have a `metric(example, prediction)` callable, just
+write `evaluate(code) -> EvaluationResult` and use `optimize()`.
 
 ### Migration from CLI
 
@@ -539,30 +625,50 @@ Files:
 
 ### B — `reps.REPS` skeleton + `optimize()`
 
-Builds the optimizer constructor + REPS-native `optimize()` entry point.
-Internally, this constructs a `Config`, instantiates a controller +
-database + evaluator, and runs the existing async event loop. The
-controller is unchanged — this is purely the new entry path.
+Builds the optimizer constructor + the primary `optimize()` entry point
+(matching `gepa.optimize_anything`). Internally constructs a `Config`,
+instantiates a controller + database + evaluator, and runs the existing
+async event loop. The controller is unchanged — this is purely the new
+entry path.
+
+Includes the introspection logic that detects the `evaluate` callable's
+signature and dispatches:
+- `evaluate(code)` ⇒ pass artifact text directly.
+- `evaluate(code, *, env=None, instances=None)` ⇒ pass through.
+- `evaluate(program_path, ...)` ⇒ write artifact to a temp file first
+  (legacy file-path-based evaluators).
+
+Also includes the return-shape coercion: `float | dict |
+EvaluationResult` — auto-wraps to `EvaluationResult` so the controller
+sees a consistent type.
 
 Files:
 - New `reps/api/optimizer.py` — `REPS` class, `optimize()`,
   `aoptimize()`, `OptimizationResult`.
 - New `reps/api/result.py` — `OptimizationResult` dataclass + helpers.
+- New `reps/api/evaluate_dispatch.py` — signature introspection +
+  return-shape coercion.
 - Tests `tests/test_api_optimize.py` — end-to-end with a mock LLM and a
   trivial in-Python evaluator that doesn't need a benchmark file.
+  Includes one test per signature variant and one per return shape.
 
-### C — `compile()` + dspy-flavored metric
+### C — `compile()` DSPy-compat shim
 
-The `compile()` shim. Builds a synthetic evaluator from a
-`metric(example, prediction)` callable + `trainset` + `valset`. The
-synthetic evaluator runs the program on each example, collects
-per-example scores into `per_instance_scores`, and synthesizes
-`feedback` from bottom-K traces.
+The `compile()` shim — a `(runner, metric, trainset, valset)` quadruple
+synthesized into an `optimize()`-style evaluator. The synthetic
+evaluator iterates `trainset`, calls `runner(code, example)`,
+calls `metric(example, prediction)`, builds `per_instance_scores` from
+the per-example scores, and synthesizes `feedback` from bottom-K
+example/prediction pairs.
 
 Files:
 - New `reps/api/synthetic_evaluator.py`.
 - Update `reps/api/optimizer.py` — `compile()` method.
 - Tests `tests/test_api_compile.py`.
+
+This phase is independent of B; it could ship later or be deprioritized
+entirely if the dspy-compatibility path doesn't earn its keep. Phase A
++ B is the minimum viable public API.
 
 ### D — Callbacks + result history + persistence
 
@@ -590,16 +696,13 @@ the kwarg and ignores it — forward-compatible.
    re-exporting current internals for power users who already import
    `reps.ReflectionEngine` etc.
 
-2. **`compile()` semantics.** dspy returns a *new program* (a
-   `dspy.Module` subclass instance with optimized prompts). REPS returns
-   text (the optimized code). Should we wrap that in a callable
-   "compiled program" object that loads + invokes the optimized code?
-   - Pro: matches dspy's `optimized(input)` ergonomics.
-   - Con: requires importing arbitrary user-supplied code; security and
-     correctness concerns.
-   - Recommendation: start with returning `OptimizationResult` (just
-     text + metadata) and let the user decide how to load it. We can
-     add `result.as_callable()` in a follow-up.
+2. **Return shape.** `gepa.optimize_anything` returns a `GEPAResult`
+   carrying the best candidate text + metadata. `dspy.GEPA.compile()`
+   returns a *new `dspy.Module`* — a callable program. REPS optimizes
+   raw text, so returning `OptimizationResult` (text + metadata)
+   matches `optimize_anything`'s shape. No deviation. Keeping as the
+   default; we can add `result.as_callable()` later if users ask for
+   it (with a clear note that it `exec()`s arbitrary code).
 
 3. **Sync wrappers.** `asyncio.run()` from inside a running loop raises
    `RuntimeError` in modern Python. We need `nest_asyncio`-style or
@@ -623,10 +726,18 @@ the kwarg and ignores it — forward-compatible.
    ambiguous (e.g. a model name shared between providers).
 
 7. **What about `dspy.Evaluate` / `dspy.assertion` interop?** Out of
-   scope for this spec, but the metric API is intentionally
-   compatible with `dspy.Evaluate`'s callable shape so a user can lift
-   their dspy metric into REPS without refactoring. A formal
-   `from_dspy_metric(...)` adapter is a follow-up.
+   scope for this spec, but the `compile()` shim's
+   `metric(example, prediction)` signature matches `dspy.Evaluate`'s so a
+   user can lift a dspy metric into REPS by adding a `runner`. A formal
+   `from_dspy_module(module)` helper that auto-derives the runner from
+   a `dspy.Module`'s `__call__` is a follow-up.
+
+8. **`compile()` worth shipping at all?** Phase C is independent of A+B
+   and could be deprioritized. If `optimize()` covers the GEPA-style
+   pattern most users want, `compile()` only matters for users with an
+   existing dspy `metric(example, prediction)` callable they want to
+   reuse. We could ship A+B first, gather feedback, and decide whether
+   to invest in C based on demand.
 
 ## Append-only changelog
 
