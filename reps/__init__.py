@@ -20,6 +20,10 @@ from reps.contract_selector import ContractSelector, Contract
 from reps.sota_controller import SOTAController, SearchRegime
 from reps.metrics_logger import MetricsLogger
 
+# v1 public API. The api package is a thin facade over reps/llm/* and
+# reps/runner.py — internals stay in their existing modules.
+from reps.api.lm import LM
+
 __all__ = [
     "IterationConfig",
     "IterationResult",
@@ -32,4 +36,5 @@ __all__ = [
     "SOTAController",
     "SearchRegime",
     "MetricsLogger",
+    "LM",
 ]
