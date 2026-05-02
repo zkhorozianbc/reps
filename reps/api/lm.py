@@ -134,9 +134,33 @@ class LM:
 
     def _build_client(self) -> LLMInterface:
         if self.provider == "anthropic":
-            return AnthropicLLM(self._model_cfg)
+            wrapper = AnthropicLLM(self._model_cfg)
+            if self.provider_kwargs:
+                # Forward extra kwargs to the underlying SDK client. We rebuild
+                # the SDK client on the wrapper rather than threading kwargs
+                # through AnthropicLLM.__init__ so we don't change the
+                # signature used by existing internal call sites.
+                import anthropic
+                wrapper.client = anthropic.Anthropic(
+                    api_key=wrapper.api_key,
+                    timeout=wrapper.timeout,
+                    max_retries=0,
+                    **self.provider_kwargs,
+                )
+            return wrapper
         # openai + openrouter both ride the OpenAI-compatible client.
-        return OpenAICompatibleLLM(self._model_cfg)
+        wrapper = OpenAICompatibleLLM(self._model_cfg)
+        if self.provider_kwargs:
+            import openai
+            max_retries = wrapper.retries if wrapper.retries is not None else 0
+            wrapper.client = openai.OpenAI(
+                api_key=wrapper.api_key,
+                base_url=wrapper.api_base,
+                timeout=wrapper.timeout,
+                max_retries=max_retries,
+                **self.provider_kwargs,
+            )
+        return wrapper
 
     # --- sync API -------------------------------------------------------
 

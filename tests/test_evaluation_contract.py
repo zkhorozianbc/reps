@@ -45,6 +45,53 @@ class TestEvaluationResultFields:
         assert r.per_instance_scores is None
         assert r.feedback is None
 
+    def test_from_dict_peels_top_level_per_instance_scores(self):
+        """When a user's evaluator returns a dict with `per_instance_scores`
+        at the top level, from_dict must extract it into the dedicated
+        field — not leave it inside `metrics` where the controller can't
+        see it (and where it'd silently break GEPA Phases 2-5)."""
+        r = EvaluationResult.from_dict({
+            "combined_score": 0.5,
+            "validity": 1.0,
+            "per_instance_scores": {"task_a": 0.7, "task_b": 0.3},
+        })
+        assert r.per_instance_scores == {"task_a": 0.7, "task_b": 0.3}
+        # And NOT smuggled inside metrics.
+        assert "per_instance_scores" not in r.metrics
+        # Other metrics are untouched.
+        assert r.metrics == {"combined_score": 0.5, "validity": 1.0}
+
+    def test_from_dict_peels_top_level_feedback(self):
+        r = EvaluationResult.from_dict({
+            "combined_score": 0.0,
+            "feedback": "task_a failed: TypeError",
+        })
+        assert r.feedback == "task_a failed: TypeError"
+        assert "feedback" not in r.metrics
+        assert r.metrics == {"combined_score": 0.0}
+
+    def test_from_dict_peels_both_when_present(self):
+        r = EvaluationResult.from_dict({
+            "combined_score": 0.4,
+            "per_instance_scores": {"a": 0.8, "b": 0.0},
+            "feedback": "b regressed",
+        })
+        assert r.per_instance_scores == {"a": 0.8, "b": 0.0}
+        assert r.feedback == "b regressed"
+        assert r.metrics == {"combined_score": 0.4}
+
+    def test_from_dict_does_not_mutate_input(self):
+        """Caller's dict must not be mutated — they may keep using it
+        after passing it in."""
+        original = {
+            "combined_score": 0.4,
+            "per_instance_scores": {"a": 0.8},
+            "feedback": "msg",
+        }
+        before = dict(original)
+        EvaluationResult.from_dict(original)
+        assert original == before
+
 
 class TestEvaluationOutcomeFields:
     def test_defaults_when_omitted(self):

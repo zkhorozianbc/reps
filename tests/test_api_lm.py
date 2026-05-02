@@ -345,6 +345,52 @@ def test_no_provider_kwargs_yields_empty_dict(mock_anth):
     assert lm.provider_kwargs == {}
 
 
+@patch("reps.llm.anthropic.anthropic.Anthropic")
+def test_provider_kwargs_forwarded_to_anthropic_sdk_client(mock_anth):
+    """Spec contract: kwargs are 'passed verbatim to the underlying client
+    constructor'. The wrapper rebuilds the SDK client when provider_kwargs
+    are non-empty so the forwarded kwargs land in the final
+    anthropic.Anthropic(...) call. Storage-only is not enough."""
+    LM(
+        "anthropic/claude-sonnet-4.6",
+        api_key="k",
+        default_headers={"X-Foo": "bar"},
+        cache_control="test-flag",
+    )
+    # The wrapper's __init__ calls Anthropic(...) once with the standard
+    # args; our forwarding rebuild calls it a second time with the extra
+    # kwargs merged in. Inspect the LAST call.
+    final_kwargs = mock_anth.call_args.kwargs
+    assert final_kwargs.get("default_headers") == {"X-Foo": "bar"}
+    assert final_kwargs.get("cache_control") == "test-flag"
+    # Standard fields preserved.
+    assert final_kwargs.get("api_key") == "k"
+    assert final_kwargs.get("max_retries") == 0
+
+
+@patch("reps.llm.openai_compatible.openai.OpenAI")
+def test_provider_kwargs_forwarded_to_openai_sdk_client(mock_oai):
+    LM(
+        "openai/gpt-4o",
+        api_key="k",
+        default_headers={"X-Org": "test"},
+        organization="org-123",
+    )
+    final_kwargs = mock_oai.call_args.kwargs
+    assert final_kwargs.get("default_headers") == {"X-Org": "test"}
+    assert final_kwargs.get("organization") == "org-123"
+    assert final_kwargs.get("api_key") == "k"
+
+
+@patch("reps.llm.anthropic.anthropic.Anthropic")
+def test_no_provider_kwargs_does_not_rebuild_sdk_client(mock_anth):
+    """When the caller passes nothing extra, the wrapper's own
+    Anthropic(...) construction is the only call — we should not re-invoke
+    the SDK constructor unnecessarily."""
+    LM("anthropic/claude-sonnet-4.6", api_key="k")
+    assert mock_anth.call_count == 1
+
+
 # ---------------------------------------------------------------------------
 # ADVERSARIAL — extended_thinking edge values
 # ---------------------------------------------------------------------------

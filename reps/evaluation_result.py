@@ -38,9 +38,29 @@ class EvaluationResult:
     feedback: Optional[str] = None
 
     @classmethod
-    def from_dict(cls, metrics: Dict[str, float]) -> "EvaluationResult":
-        """Auto-wrap dict returns for backward compatibility"""
-        return cls(metrics=metrics)
+    def from_dict(cls, data: Dict[str, float]) -> "EvaluationResult":
+        """Auto-wrap dict returns. Pre-Phase-1.1 callers passed flat dicts where
+        every key is a metric. Phase 1.1+ allows top-level `per_instance_scores`
+        and `feedback` keys; when present they're peeled out into the
+        corresponding ASI fields and excluded from `metrics`. The input dict is
+        not mutated (callers may keep using their own copy)."""
+        if not isinstance(data, dict):
+            return cls(metrics=data)  # let dataclass raise if it's truly bad
+
+        per_instance_scores = data.get("per_instance_scores")
+        feedback = data.get("feedback")
+        if per_instance_scores is None and feedback is None:
+            return cls(metrics=data)
+
+        metrics = {
+            k: v for k, v in data.items()
+            if k not in ("per_instance_scores", "feedback")
+        }
+        return cls(
+            metrics=metrics,
+            per_instance_scores=per_instance_scores,
+            feedback=feedback,
+        )
 
     def to_dict(self) -> Dict[str, float]:
         """Backward compatibility - return just metrics"""
