@@ -119,10 +119,15 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
     # Load, evaluate, and add initial program
     initial_code = Path(initial_program).read_text()
 
-    # Evaluate the seed program so it enters the database with real metrics
+    # Evaluate the seed program so it enters the database with real metrics.
+    # Use evaluate_isolated so per_instance_scores and feedback (if the
+    # benchmark emits them) reach the seed Program, not just evolved children.
     from reps.evaluator import Evaluator
     seed_evaluator = Evaluator(config.evaluator, evaluator)
-    seed_metrics = await seed_evaluator.evaluate_program(initial_code, "initial")
+    seed_outcome = await seed_evaluator.evaluate_isolated(initial_code, program_id="initial")
+    seed_metrics = seed_outcome.metrics
+    if seed_outcome.artifacts:
+        seed_evaluator._pending_artifacts.setdefault("initial", {}).update(seed_outcome.artifacts)
     logger.info(f"Seed program metrics: {seed_metrics}")
     if not seed_metrics or seed_metrics.get("combined_score", 0) == 0:
         logger.warning("Seed program scored 0 — check that it runs correctly with the evaluator")
@@ -132,6 +137,8 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
         code=initial_code,
         language=config.language or "python",
         metrics=seed_metrics or {},
+        per_instance_scores=seed_outcome.per_instance_scores,
+        feedback=seed_outcome.feedback,
         iteration_found=0,
     )
     db.add(initial_prog)

@@ -266,6 +266,15 @@ class DatabaseConfig:
     # Note: diversity_metric fixed to "edit_distance"
     diversity_metric: str = "edit_distance"  # Options: "edit_distance", "feature_based"
 
+    # GEPA-style Pareto selection (Phase 2). When `selection_strategy` is
+    # "mixed", a fraction `pareto_fraction` of parent picks comes from the
+    # Pareto frontier of per_instance_scores; the rest use existing
+    # MAP-Elites/exploration/exploitation logic. "pareto" = always Pareto;
+    # "map_elites" = never Pareto (status quo). Inspirations are unchanged.
+    selection_strategy: str = "map_elites"  # "map_elites" | "pareto" | "mixed"
+    pareto_fraction: float = 0.0  # only used when selection_strategy == "mixed"
+    pareto_instance_keys: Optional[List[str]] = None  # restrict frontier to these keys
+
     # Feature map dimensions for MAP-Elites
     # Default to complexity and diversity for better exploration
     # CRITICAL: For custom dimensions, evaluators must return RAW VALUES, not bin indices
@@ -335,6 +344,12 @@ class EvaluatorConfig:
     enable_artifacts: bool = True
     max_artifact_storage: int = 100 * 1024 * 1024  # 100MB per program
 
+    # Forward-compat field for Phase 6 of the GEPA plan (per-iteration
+    # minibatch sampling). Currently unused by the evaluator itself —
+    # exposed so the v1 `reps.REPS(minibatch_size=...)` kwarg has a stable
+    # landing slot until the runner consumes it.
+    minibatch_size: Optional[int] = None
+
 
 @dataclass
 class REPSReflectionConfig:
@@ -343,6 +358,57 @@ class REPSReflectionConfig:
     top_k: int = 3
     bottom_k: int = 2
     model: Optional[str] = None  # model to use for reflection; None = use default ensemble
+
+
+@dataclass
+class REPSTraceReflectionConfig:
+    """Phase 3 (GEPA-inspired): per-candidate trace-grounded reflection.
+
+    When enabled, parents with `feedback` (Phase 1.2 ASI) at least
+    `min_feedback_length` chars and non-empty `per_instance_scores` get
+    a one-shot LLM call to produce a `mutation_directive` that gets
+    injected into the next mutation prompt for that lineage.
+
+    Disabled by default — opt-in until live runs validate the prompt is
+    pulling its weight (token spend vs score improvement).
+
+    `lineage_depth` (Phase 5): when > 0, prepend a compact ancestral
+    history of up to N programs (the parent's parent, grandparent, etc.)
+    to the reflection prompt. Each line shows generation, score,
+    changes_description, and the ancestor's prior directive (when set).
+    0 disables (Phase 3 behavior — no lineage context).
+    """
+    enabled: bool = False
+    model: Optional[str] = None  # None = use the worker LLM ensemble
+    min_feedback_length: int = 20
+    max_code_chars: int = 4000
+    lineage_depth: int = 3
+
+
+@dataclass
+class REPSMergeConfig:
+    """Phase 4 (GEPA-inspired): system-aware merge for crossover workers.
+
+    When enabled, the second parent for a crossover iteration is chosen to
+    maximize per-instance complementarity with the primary instead of the
+    random distant-island pick used otherwise. Candidate pool is all
+    programs on islands other than the primary's (same scope as the
+    legacy random pick, just selected differently).
+
+    Falls back to the legacy random pick when:
+      - the primary has no per_instance_scores (pre-Phase-1.2 benchmarks),
+      - the candidate pool from other islands is empty.
+
+    `instance_keys`: optional restriction to a subset of per_instance_scores
+    keys when computing complementary gain. None means use the union of
+    keys present across primary + candidates.
+
+    `strong_score_threshold`: scores at or above this value qualify a
+    dimension as a parent's "strong" dim when rendering crossover_context.
+    """
+    enabled: bool = False
+    instance_keys: Optional[List[str]] = None
+    strong_score_threshold: float = 0.8
 
 
 @dataclass
@@ -456,6 +522,8 @@ class REPSConfig:
     sota: REPSSOTAConfig = field(default_factory=REPSSOTAConfig)
     annotations: REPSAnnotationsConfig = field(default_factory=REPSAnnotationsConfig)
     summarizer: REPSSummarizerConfig = field(default_factory=REPSSummarizerConfig)
+    trace_reflection: REPSTraceReflectionConfig = field(default_factory=REPSTraceReflectionConfig)
+    merge: REPSMergeConfig = field(default_factory=REPSMergeConfig)
 
 
 @dataclass

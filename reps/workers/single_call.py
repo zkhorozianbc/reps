@@ -96,7 +96,7 @@ class SingleCallWorker:
             prompt["user"] = insights_text + "\n\n" + prompt["user"]
 
         # Append un-consumed prompt_extras (existing behavior from controller.py:287)
-        for key in ("reflection", "sota_injection", "dead_end_warnings"):
+        for key in ("reflection", "sota_injection", "dead_end_warnings", "trace_directive"):
             text = request.prompt_extras.get(key, "")
             if text and "{" + key + "}" not in prompt.get("user", ""):
                 prompt["user"] = prompt["user"] + "\n\n" + text

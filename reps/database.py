@@ -74,6 +74,19 @@ class Program:
     # Performance metrics
     metrics: Dict[str, float] = field(default_factory=dict)
 
+    # GEPA-style ASI (Phase 1, optional). per_instance_scores enables Pareto
+    # selection over individual instances rather than scalar combined_score;
+    # feedback carries free-form text for trace-grounded reflection. Both None
+    # when the evaluator does not emit them — fully backward compatible.
+    per_instance_scores: Optional[Dict[str, float]] = None
+    feedback: Optional[str] = None
+
+    # GEPA-style trace-grounded reflection directive (Phase 3, optional).
+    # Produced lazily by reps.trace_reflection.generate_directive when this
+    # program is sampled as a parent and has non-trivial feedback. Cached
+    # here so a re-sampled parent doesn't pay for the LLM call twice.
+    mutation_directive: Optional[str] = None
+
     # Derived features
     complexity: float = 0.0
     diversity: float = 0.0
@@ -483,6 +496,99 @@ class ProgramDatabase:
             f"(mode: {sampling_mode}, rand_val: {rand_val:.3f})"
         )
         return parent, inspirations
+
+    def sample_pareto_from_island(
+        self,
+        island_id: int,
+        num_inspirations: Optional[int] = None,
+        instance_keys: Optional[List[str]] = None,
+    ) -> Tuple[Program, List[Program]]:
+        """Pick a parent from the Pareto frontier of `island_id` (GEPA-style).
+
+        Mirrors `sample_from_island` but routes parent selection through
+        `reps.pareto.compute_frontier` over the island's programs. Inspirations
+        use the same island-local random pick as `sample_from_island`.
+
+        Falls back to `sample_from_island` when:
+          - the island has no programs, or
+          - the Pareto frontier is empty (shouldn't happen if island is non-empty,
+            but defensive).
+
+        `instance_keys`: optional restriction to a subset of per_instance_scores
+        keys; when None, the union across island programs is used (with
+        combined_score as fallback for programs lacking per-instance data).
+        """
+        from reps.pareto import compute_frontier  # local import: keep base DB import-light
+
+        island_id = island_id % len(self.islands)
+        island_pids = list(self.islands[island_id])
+        island_programs = [self.programs[pid] for pid in island_pids if pid in self.programs]
+
+        if not island_programs:
+            return self.sample_from_island(island_id, num_inspirations)
+
+        frontier = compute_frontier(island_programs, instance_keys=instance_keys)
+        if not frontier:
+            # Empty frontier shouldn't be reachable from a non-empty island, but
+            # don't take the workers down if it happens.
+            return self.sample_from_island(island_id, num_inspirations)
+
+        parent = random.choice(frontier)
+
+        if num_inspirations is None:
+            num_inspirations = 5
+
+        other_programs = [pid for pid in island_pids if pid != parent.id]
+        if len(other_programs) < num_inspirations:
+            inspiration_ids = other_programs
+        else:
+            inspiration_ids = random.sample(other_programs, num_inspirations)
+        inspirations = [self.programs[pid] for pid in inspiration_ids if pid in self.programs]
+
+        logger.debug(
+            f"Pareto-sampled parent {parent.id} from frontier of {len(frontier)}/"
+            f"{len(island_programs)} on island {island_id}; "
+            f"{len(inspirations)} inspirations"
+        )
+        return parent, inspirations
+
+    def walk_lineage(
+        self,
+        program_id: Optional[str],
+        max_depth: int = 5,
+    ) -> List[Program]:
+        """Walk parent_id pointers up to `max_depth` programs deep.
+
+        Returns the chain ordered OLDEST-FIRST (root → near-most). The chain
+        includes the starting program at the end and stops at:
+          - max_depth programs collected,
+          - parent_id is None (root reached),
+          - parent not found in self.programs (broken link),
+          - a previously-visited id (cycle protection).
+
+        Returns [] when program_id is None or not in self.programs.
+        Used by trace_reflection to surface a parent's recent ancestral
+        history (Phase 5).
+        """
+        if program_id is None or program_id not in self.programs:
+            return []
+        if max_depth <= 0:
+            return []
+
+        chain: List[Program] = []
+        visited: Set[str] = set()
+        current_id: Optional[str] = program_id
+        while current_id is not None and len(chain) < max_depth:
+            if current_id in visited:
+                break  # cycle
+            prog = self.programs.get(current_id)
+            if prog is None:
+                break  # broken link
+            chain.append(prog)
+            visited.add(current_id)
+            current_id = prog.parent_id
+        chain.reverse()  # oldest first
+        return chain
 
     def get_best_program(self, metric: Optional[str] = None) -> Optional[Program]:
         """
@@ -1339,6 +1445,12 @@ class ProgramDatabase:
                     timestamp=time.time(),
                     iteration_found=self.last_iteration,
                     metrics=best_program.metrics.copy(),
+                    per_instance_scores=(
+                        dict(best_program.per_instance_scores)
+                        if best_program.per_instance_scores is not None
+                        else None
+                    ),
+                    feedback=best_program.feedback,
                     complexity=best_program.complexity,
                     diversity=best_program.diversity,
                     metadata={"island": self.current_island},
@@ -1385,6 +1497,12 @@ class ProgramDatabase:
                     timestamp=time.time(),
                     iteration_found=self.last_iteration,
                     metrics=best_program.metrics.copy(),
+                    per_instance_scores=(
+                        dict(best_program.per_instance_scores)
+                        if best_program.per_instance_scores is not None
+                        else None
+                    ),
+                    feedback=best_program.feedback,
                     complexity=best_program.complexity,
                     diversity=best_program.diversity,
                     metadata={"island": self.current_island},
@@ -1889,6 +2007,12 @@ class ProgramDatabase:
                         parent_id=migrant.id,
                         generation=migrant.generation,
                         metrics=migrant.metrics.copy(),
+                        per_instance_scores=(
+                            dict(migrant.per_instance_scores)
+                            if migrant.per_instance_scores is not None
+                            else None
+                        ),
+                        feedback=migrant.feedback,
                         metadata={**migrant.metadata, "island": target_island, "migrant": True},
                     )
 

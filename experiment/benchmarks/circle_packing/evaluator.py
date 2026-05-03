@@ -307,8 +307,11 @@ def _compute_constraint_diagnostics(centers: np.ndarray, radii: np.ndarray) -> d
                     "slack": float(min_slack),
                 }
             )
-    # Worst (most-negative slack) first, cap.
+    # Worst (most-negative slack) first, cap. Record the uncapped total so
+    # per_instance_scores can reflect true severity even when the visible
+    # list is truncated for prompt size.
     boundary_violations.sort(key=lambda d: d["slack"])
+    n_boundary_violations_total = len(boundary_violations)
     boundary_violations = boundary_violations[:_DIAGNOSTIC_CAP]
 
     # --- overlap pairs + minimum pairwise slack ---
@@ -335,12 +338,17 @@ def _compute_constraint_diagnostics(centers: np.ndarray, radii: np.ndarray) -> d
                         }
                     )
         overlap_pairs.sort(key=lambda d: d["interpenetration"], reverse=True)
+        n_overlap_pairs_total = len(overlap_pairs)
         overlap_pairs = overlap_pairs[:_DIAGNOSTIC_CAP]
+    else:
+        n_overlap_pairs_total = 0
 
     return {
         "n_circles_submitted": n,
         "boundary_violations": boundary_violations,
         "overlap_pairs": overlap_pairs,
+        "n_boundary_violations_total": n_boundary_violations_total,
+        "n_overlap_pairs_total": n_overlap_pairs_total,
         "min_pairwise_slack": (
             float(min_slack_pairwise) if min_slack_pairwise is not None else None
         ),
@@ -354,7 +362,109 @@ def _compute_constraint_diagnostics(centers: np.ndarray, radii: np.ndarray) -> d
 TARGET_VALUE = 2.6361  # target beyond current AlphaEvolve/OpenEvolve baseline (2.635983); see algorithmicsuperintelligence/openevolve#156
 
 
-def _build_result(metrics: dict, artifacts: dict):
+def _build_per_instance_scores(
+    strict_pass: bool,
+    diagnostics: dict,
+    target_ratio: float,
+    n_expected: int = 26,
+) -> dict:
+    """Decompose the single circle-packing objective into independent
+    sub-scores (GEPA-style "per-instance"). All keys produce values in
+    [0, 1] so a Pareto front over them is well-defined.
+
+    Keys:
+        validity:    1.0 iff the strict DeepMind checker accepted the packing.
+        boundary:    1.0 iff no circle crosses [0,1]^2; otherwise the fraction
+                     of submitted circles that stay inside.
+        overlap:     1.0 iff no pair overlaps; otherwise 1 - overlap_pairs /
+                     total_pairs over submitted circles.
+        sum_radii_progress: target_ratio, clamped to [0, 1.5] so a program
+                     that beats the target still shows incremental signal but
+                     can't dominate by an arbitrary multiple.
+    """
+    n_submitted = int(diagnostics.get("n_circles_submitted", 0) or 0)
+    n_eff = max(1, min(n_submitted, n_expected))
+
+    # Prefer uncapped totals — the visible *_violations / *_pairs lists are
+    # truncated to _DIAGNOSTIC_CAP for prompt size and would understate
+    # severity here. Fall back to len() so synthesized diags (in unit tests
+    # and ad-hoc callers) still produce sane numbers.
+    boundary_violations = diagnostics.get("boundary_violations") or []
+    overlap_pairs = diagnostics.get("overlap_pairs") or []
+    n_boundary = int(
+        diagnostics.get("n_boundary_violations_total", len(boundary_violations))
+    )
+    n_overlap = int(diagnostics.get("n_overlap_pairs_total", len(overlap_pairs)))
+
+    boundary_score = max(0.0, (n_eff - n_boundary) / n_eff)
+    total_pairs = max(1, n_eff * (n_eff - 1) // 2)
+    overlap_score = max(0.0, 1.0 - n_overlap / total_pairs)
+
+    return {
+        "validity": 1.0 if strict_pass else 0.0,
+        "boundary": float(boundary_score),
+        "overlap": float(overlap_score),
+        "sum_radii_progress": float(min(1.5, max(0.0, target_ratio))),
+    }
+
+
+def _build_feedback(
+    strict_pass: bool,
+    diagnostics: dict,
+    sum_radii: float,
+    reported_sum: float,
+) -> str:
+    """Short ASI-style summary the reflection LLM can read directly.
+
+    Roughly 1 line; surfaces the things a programmer would care about:
+    constraint violations and how close sum_radii is to target.
+    """
+    boundary_violations = diagnostics.get("boundary_violations") or []
+    overlap_pairs = diagnostics.get("overlap_pairs") or []
+    n_boundary = int(
+        diagnostics.get("n_boundary_violations_total", len(boundary_violations))
+    )
+    n_overlap = int(diagnostics.get("n_overlap_pairs_total", len(overlap_pairs)))
+    n_submitted = diagnostics.get("n_circles_submitted")
+    min_slack = diagnostics.get("min_pairwise_slack")
+
+    if strict_pass:
+        slack_part = (
+            f", min pairwise slack {min_slack:.3e}" if min_slack is not None else ""
+        )
+        return (
+            f"valid packing; sum_radii={sum_radii:.6f} "
+            f"(target {TARGET_VALUE}, ratio {sum_radii / TARGET_VALUE:.4f})"
+            f"{slack_part}"
+        )
+
+    parts = ["invalid"]
+    if n_submitted is not None and n_submitted != 26:
+        parts.append(f"got {n_submitted} circles (expected 26)")
+    if n_boundary and boundary_violations:
+        worst = boundary_violations[0]
+        parts.append(
+            f"{n_boundary} boundary violation(s)"
+            f" (worst slack {worst['slack']:.3e} at circle {worst['circle_index']})"
+        )
+    if n_overlap and overlap_pairs:
+        worst = overlap_pairs[0]
+        parts.append(
+            f"{n_overlap} overlap pair(s)"
+            f" (worst interpen {worst['interpenetration']:.3e} between {worst['pair'][0]}"
+            f" and {worst['pair'][1]})"
+        )
+    if reported_sum is not None and np.isfinite(reported_sum):
+        parts.append(f"reported sum={reported_sum:.4f}")
+    note = diagnostics.get("note")
+    if note:
+        parts.append(note)
+    return "; ".join(parts)
+
+
+def _build_result(metrics: dict, artifacts: dict, *,
+                  per_instance_scores: dict | None = None,
+                  feedback: str | None = None):
     """Return either an EvaluationResult (if available) or a plain dict.
 
     We always populate nested `constraint_diagnostics` inside metrics too so
@@ -362,13 +472,27 @@ def _build_result(metrics: dict, artifacts: dict):
     dict) can see it. The float-only stage-merge path in reps.evaluator will
     drop this nested key silently — that's fine; the artifacts channel is the
     authoritative home for the diagnostics in multi-stage pipelines.
+
+    GEPA-style ASI: when EvaluationResult is available, also populate
+    per_instance_scores (sub-objective decomposition) and feedback (free-form
+    diagnostic string). When falling back to a plain dict for standalone use,
+    these are merged in under reserved keys so they remain inspectable.
     """
     if EvaluationResult is not None:
-        return EvaluationResult(metrics=metrics, artifacts=artifacts)
+        return EvaluationResult(
+            metrics=metrics,
+            artifacts=artifacts,
+            per_instance_scores=per_instance_scores,
+            feedback=feedback,
+        )
     # Standalone fallback: flatten artifacts into the metrics dict so ad-hoc
     # `python -c` callers can still see everything in one place.
     merged = dict(metrics)
     merged["_artifacts"] = artifacts
+    if per_instance_scores is not None:
+        merged["_per_instance_scores"] = per_instance_scores
+    if feedback is not None:
+        merged["_feedback"] = feedback
     return merged
 
 
@@ -461,7 +585,22 @@ def evaluate(program_path, env=None):
             "combined_score_hi_precision_str": hi_prec,
             "constraint_diagnostics_json": json.dumps(diagnostics, indent=2),
         }
-        return _build_result(metrics, artifacts)
+        per_instance_scores = _build_per_instance_scores(
+            strict_pass=strict_pass,
+            diagnostics=diagnostics,
+            target_ratio=target_ratio,
+        )
+        feedback = _build_feedback(
+            strict_pass=strict_pass,
+            diagnostics=diagnostics,
+            sum_radii=sum_radii,
+            reported_sum=float(reported_sum) if reported_sum is not None else float("nan"),
+        )
+        return _build_result(
+            metrics, artifacts,
+            per_instance_scores=per_instance_scores,
+            feedback=feedback,
+        )
 
     except Exception as e:
         traceback.print_exc()
@@ -474,7 +613,17 @@ def evaluate(program_path, env=None):
             "error": str(e),
             "combined_score_hi_precision_str": "0",
         }
-        return _build_result(err_metrics, {"error": str(e)})
+        return _build_result(
+            err_metrics,
+            {"error": str(e)},
+            per_instance_scores={
+                "validity": 0.0,
+                "boundary": 0.0,
+                "overlap": 0.0,
+                "sum_radii_progress": 0.0,
+            },
+            feedback=f"evaluation failed: {e}",
+        )
 
 
 def evaluate_stage1(program_path, env=None):

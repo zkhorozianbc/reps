@@ -393,7 +393,33 @@ class ProcessParallelController:
             if pid in self.database.programs
         ]
 
+        # Phase 3.2: per-candidate trace-grounded reflection. Generates + caches
+        # mutation_directive on the parent (no-op when disabled or parent lacks
+        # ASI signal). Resulting block is injected via prompt_extras below.
+        trace_directive_block = await self._maybe_generate_trace_directive(parent)
+        if trace_directive_block:
+            iteration_config.prompt_extras["trace_directive"] = trace_directive_block
+
         parent_island = parent.metadata.get("island", self.database.current_island)
+
+        # Phase 4.2: system-aware merge for crossover iterations. When merge is
+        # enabled, override the WorkerPool's random distant-island pick with a
+        # Pareto-complementary partner. No-op when merge is disabled, the
+        # iteration isn't a crossover (second_parent_id is None), or the primary
+        # has no per_instance_scores. crossover_context is rendered ONLY when
+        # we actually performed system-aware selection — legacy random
+        # crossovers keep their existing empty crossover_context behavior.
+        if iteration_config.second_parent_id is not None:
+            complementary_id = self._maybe_select_complementary_partner(
+                parent, parent_island
+            )
+            if complementary_id is not None:
+                iteration_config.second_parent_id = complementary_id
+                partner_program = self.database.programs.get(complementary_id)
+                if partner_program is not None:
+                    ctx_block = self._build_crossover_context(parent, partner_program)
+                    if ctx_block:
+                        iteration_config.prompt_extras["crossover_context"] = ctx_block
         island_pids = list(self.database.islands[parent_island])
         island_programs = [
             self.database.programs[p]
@@ -636,6 +662,8 @@ class ProcessParallelController:
             parent_id=parent.id,
             generation=parent.generation + 1,
             metrics=outcome.metrics,
+            per_instance_scores=outcome.per_instance_scores,
+            feedback=outcome.feedback,
             iteration_found=iteration,
             metadata=child_metadata,
         )
@@ -691,6 +719,164 @@ class ProcessParallelController:
                 logger.exception(f"iteration {iteration} failed in spawn")
                 return SerializableResult(error=str(e), iteration=iteration)
 
+    async def _maybe_generate_trace_directive(self, parent: Program) -> str:
+        """Per-candidate trace-grounded reflection (Phase 3.2).
+
+        Returns prompt-ready text (header + directive) when:
+          - reps.trace_reflection.enabled is True
+          - the parent qualifies (per `should_generate_directive`)
+          - the LLM call returned a non-empty directive
+
+        Otherwise returns "". Caches the directive on `parent.mutation_directive`
+        so a re-sampled parent doesn't pay for the LLM call again.
+
+        Best-effort: any failure returns "" — the iteration proceeds with the
+        parent's existing prompt unchanged.
+        """
+        if not self._reps_enabled:
+            return ""
+        cfg = self.config.reps.trace_reflection
+        if not cfg.enabled:
+            return ""
+
+        from reps.trace_reflection import generate_directive, should_generate_directive
+
+        if not should_generate_directive(parent, min_feedback_length=cfg.min_feedback_length):
+            return ""
+
+        # Phase 5: optional ancestral history. Walk the parent's parent_id
+        # chain (NOT including the parent itself, since its info is already
+        # in the prompt) up to `lineage_depth` programs. Empty list when
+        # disabled or the parent is a seed.
+        ancestors: List[Program] = []
+        if cfg.lineage_depth > 0:
+            ancestors = self.database.walk_lineage(
+                parent.parent_id, max_depth=cfg.lineage_depth,
+            )
+
+        try:
+            directive = await generate_directive(
+                parent,
+                self.llm_ensemble,
+                min_feedback_length=cfg.min_feedback_length,
+                max_code_chars=cfg.max_code_chars,
+                ancestors=ancestors,
+            )
+        except Exception as e:
+            logger.warning(
+                "trace_reflection: unexpected error for parent %s: %s",
+                parent.id[:8] if parent.id else "?", e,
+            )
+            return ""
+
+        if not directive:
+            return ""
+
+        # Cache on the live Program so a re-sampled parent doesn't repeat the
+        # call. The new directive is also written to the child's metadata
+        # downstream so it's persisted with the program.
+        parent.mutation_directive = directive
+
+        return (
+            "## Suggested next change (from trace reflection)\n"
+            f"{directive}"
+        )
+
+    def _other_island_candidates(self, primary_island: int) -> List["Program"]:
+        """Programs on islands other than `primary_island`. Used by the
+        system-aware merge selector."""
+        from reps.database import Program  # local import: keep top-level small
+        candidates: List[Program] = []
+        for i, island in enumerate(self.database.islands):
+            if i == primary_island:
+                continue
+            for pid in island:
+                prog = self.database.programs.get(pid)
+                if prog is not None:
+                    candidates.append(prog)
+        return candidates
+
+    def _maybe_select_complementary_partner(
+        self, parent: "Program", primary_island: int
+    ) -> Optional[str]:
+        """Phase 4.2: pick a system-aware merge partner for a crossover
+        iteration. Returns the candidate id, or None to fall back to the
+        WorkerPool's random distant-island pick.
+
+        No-op (returns None) when:
+          - REPS or merge is disabled,
+          - primary has no per_instance_scores,
+          - no candidates exist on other islands,
+          - select_complementary_partner returns None (degenerate case).
+        """
+        if not self._reps_enabled:
+            return None
+        cfg = self.config.reps.merge
+        if not cfg.enabled:
+            return None
+        if not parent.per_instance_scores:
+            return None
+
+        candidates = self._other_island_candidates(primary_island)
+        if not candidates:
+            return None
+
+        from reps.pareto import select_complementary_partner
+        partner = select_complementary_partner(
+            parent, candidates, instance_keys=cfg.instance_keys
+        )
+        return partner.id if partner else None
+
+    def _build_crossover_context(
+        self, primary: "Program", partner: "Program"
+    ) -> str:
+        """Render a short crossover_context block naming each parent's
+        strong dimensions. Returns "" when neither parent has per-instance
+        scores (legacy random crossover — no signal to render).
+        """
+        if not primary.per_instance_scores and not partner.per_instance_scores:
+            return ""
+
+        threshold = self.config.reps.merge.strong_score_threshold
+
+        def _strong_keys(scores: Optional[Dict[str, float]]) -> List[str]:
+            if not scores:
+                return []
+            return sorted(
+                k for k, v in scores.items()
+                if isinstance(v, (int, float)) and v >= threshold
+            )
+
+        primary_strong = _strong_keys(primary.per_instance_scores)
+        partner_strong = _strong_keys(partner.per_instance_scores)
+
+        primary_desc = ", ".join(primary_strong) if primary_strong else "no clear strengths"
+        partner_desc = ", ".join(partner_strong) if partner_strong else "no clear strengths"
+
+        return (
+            "## Crossover hint (system-aware merge)\n"
+            f"Primary parent excels on: {primary_desc}.\n"
+            f"Partner parent excels on: {partner_desc}.\n"
+            "Combine: keep the primary's strengths and adopt the partner's "
+            "approach for the dimensions where the partner is stronger.\n"
+        )
+
+    def _should_sample_pareto(self) -> bool:
+        """Decide whether the next parent pick should come from the Pareto
+        frontier rather than MAP-Elites/exploration sampling.
+
+        - "map_elites" (default): always False — status quo behavior.
+        - "pareto":               always True.
+        - "mixed":                True with probability `pareto_fraction`.
+        """
+        strategy = self.database.config.selection_strategy
+        if strategy == "pareto":
+            return True
+        if strategy == "mixed":
+            frac = max(0.0, min(1.0, self.database.config.pareto_fraction))
+            return random.random() < frac
+        return False
+
     def _pick_iteration_inputs(
         self, iteration: int, island_id: int, reps_iter_config: Optional["IterationConfig"]
     ):
@@ -738,6 +924,12 @@ class ProcessParallelController:
                 _, inspirations = self.database.sample_from_island(
                     island_id=target_island,
                     num_inspirations=self.config.prompt.num_top_programs,
+                )
+            elif self._should_sample_pareto():
+                parent, inspirations = self.database.sample_pareto_from_island(
+                    island_id=target_island,
+                    num_inspirations=self.config.prompt.num_top_programs,
+                    instance_keys=self.database.config.pareto_instance_keys,
                 )
             else:
                 parent, inspirations = self.database.sample_from_island(
