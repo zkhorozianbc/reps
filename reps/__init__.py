@@ -25,7 +25,7 @@ from reps.metrics_logger import MetricsLogger
 # modules. Power users who relied on the previous flat namespace
 # (`reps.ReflectionEngine`, etc.) keep working both via this top-level
 # re-export and via `reps.internal.*`.
-from reps.api.lm import LM
+from reps.api.model import Model, ModelKwargs
 from reps.api.optimizer import Optimizer
 from reps.api.result import OptimizationResult
 from reps.evaluation_result import EvaluationResult
@@ -42,7 +42,8 @@ __all__ = [
     "SOTAController",
     "SearchRegime",
     "MetricsLogger",
-    "LM",
+    "Model",
+    "ModelKwargs",
     "Optimizer",
     "OptimizationResult",
     "EvaluationResult",

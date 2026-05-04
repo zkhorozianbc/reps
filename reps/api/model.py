@@ -1,4 +1,4 @@
-"""Public LM facade wrapping the existing `reps.llm.*` providers.
+"""Public Model facade wrapping the existing `reps.llm.*` providers.
 
 This is the v1 surface — sync `__call__` / `generate` only. Async variants
 and ensemble support are deferred to v1.5. The class builds an
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any, Optional
+from typing import Any, Optional, TypedDict
 
 from reps.config import LLMModelConfig
 from reps.llm.anthropic import AnthropicLLM
@@ -28,6 +28,23 @@ _PROVIDER_ENV: dict[str, tuple[str, Optional[str]]] = {
     "openai": ("OPENAI_API_KEY", None),
     "openrouter": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
 }
+
+
+class ModelKwargs(TypedDict, total=False):
+    """Optional Model construction kwargs, used as `**Unpack[ModelKwargs]`
+    on `reps.Optimizer` so users can configure the LM inline. `model` and
+    `api_key` are explicit on the optimizer; everything else flows through
+    here. Provider-specific kwargs (anthropic.Anthropic / openai.OpenAI
+    constructor extras) are accepted as additional dict entries — TypedDict
+    is structural so unknown keys are tolerated by type checkers as long
+    as `total=False`."""
+    api_base: Optional[str]
+    temperature: float
+    max_tokens: Optional[int]
+    timeout: int
+    retries: int
+    retry_delay: int
+    extended_thinking: Optional[str]
 
 
 def _split_provider(model: str) -> tuple[Optional[str], str]:
@@ -55,7 +72,7 @@ def _resolve_provider(model: str) -> str:
     return provider_of_model(model)
 
 
-class LM:
+class Model:
     """Sync LLM wrapper around `reps.llm.{anthropic,openai_compatible}`.
 
     Construct with a model id and optional credentials/generation knobs;
@@ -78,7 +95,7 @@ class LM:
         **provider_kwargs: Any,
     ) -> None:
         if not model or not isinstance(model, str):
-            raise ValueError(f"reps.LM: `model` must be a non-empty string, got {model!r}")
+            raise ValueError(f"reps.Model: `model` must be a non-empty string, got {model!r}")
 
         provider = _resolve_provider(model)
         _, raw_model_id = _split_provider(model)
@@ -89,7 +106,7 @@ class LM:
         resolved_key = api_key if api_key is not None else os.environ.get(env_var)
         if not resolved_key:
             raise ValueError(
-                f"reps.LM: no API key for provider {provider!r}. Pass `api_key=...` "
+                f"reps.Model: no API key for provider {provider!r}. Pass `api_key=...` "
                 f"or set ${env_var}."
             )
 
@@ -170,15 +187,15 @@ class LM:
         Raises if called from inside a running event loop — there's no safe
         way to nest `asyncio.run`. Async support lands in v1.5
         (`agenerate`); for now, callers in async contexts should use the
-        underlying client directly via `lm._client.generate(...)`.
+        underlying client directly via `model._client.generate(...)`.
         """
         try:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(self._client.generate(prompt, **kwargs))
         raise RuntimeError(
-            "reps.LM.generate() cannot be called from a running event loop. "
-            "Use `await lm._client.generate(...)` directly, or wait for "
+            "reps.Model.generate() cannot be called from a running event loop. "
+            "Use `await model._client.generate(...)` directly, or wait for "
             "v1.5's `agenerate()`."
         )
 
@@ -191,7 +208,7 @@ class LM:
         """Return the underlying LLMModelConfig for use by `reps.Optimizer`.
 
         A fresh copy is returned so the optimizer can mutate the result
-        (e.g. attaching a system_message) without affecting this LM
+        (e.g. attaching a system_message) without affecting this Model
         instance's client.
         """
         cfg = self._model_cfg

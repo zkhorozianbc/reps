@@ -11,7 +11,9 @@ def evaluate(code: str) -> float:
     ...  # run the artifact, return a score
 
 result = reps.Optimizer(
-    lm=reps.LM("anthropic/claude-sonnet-4.6"),
+    model="anthropic/claude-sonnet-4.6",          # or a built reps.Model
+    api_key="sk-...",                              # optional; falls back to env var
+    temperature=0.7,                               # any reps.ModelKwargs flow through
     max_iterations=50,
     selection_strategy="mixed",
     pareto_fraction=0.3,
@@ -26,7 +28,7 @@ print(result.best_code, result.best_score)
 ```
 
 **One outer call** (`optimize`), **one inner abstraction** (the `evaluate`
-callable). Configure the LM, set the knobs, hand over an evaluator,
+callable). Configure the model, set the knobs, hand over an evaluator,
 let it run.
 
 This shape is GEPA's `optimize_anything(seed_candidate, evaluator=...)`
@@ -40,7 +42,7 @@ Phases 1-5) reachable as constructor kwargs.
   whole text artifacts.
 - Not modeling `dspy.GEPA.compile()` directly — that requires a callable
   `dspy.Module` and a per-example metric. We borrow `dspy.LM`'s shape
-  for the LLM wrapper but follow `optimize_anything`'s shape for the
+  for the `Model` wrapper but follow `optimize_anything`'s shape for the
   optimizer.
 - Not replacing the existing `reps-run` CLI or YAML configs. The Python
   API is the right entry point for notebooks, libraries, and CI; the
@@ -53,26 +55,31 @@ v1.5 (see end of doc).
 
 | Symbol | Purpose |
 |---|---|
-| `reps.LM` | LLM wrapper, similar shape to `dspy.LM` |
+| `reps.Model` | LLM wrapper, similar shape to `dspy.LM` |
+| `reps.ModelKwargs` | TypedDict of optional Model construction kwargs (used inline on `Optimizer`) |
 | `reps.Optimizer` | The optimizer |
 | `reps.Optimizer.optimize(initial, evaluate)` | The single entry point |
 | `reps.OptimizationResult` | What `optimize()` returns |
 | `reps.EvaluationResult` | Optional rich return shape from the evaluator (already exists) |
 
-That's it. Four classes, one method on the optimizer. Internals are
-unchanged — Pareto, trace reflection, merge, lineage, convergence
-monitor, SOTA controller, all of it stays as it is in `reps/`. The
-public API is just a thin facade.
+That's it. Four classes (plus one TypedDict for kwarg typing), one
+method on the optimizer. Internals are unchanged — Pareto, trace
+reflection, merge, lineage, convergence monitor, SOTA controller, all
+of it stays as it is in `reps/`. The public API is just a thin facade.
 
-## `reps.LM`
+## `reps.Model`
 
 Thin facade over the existing `reps.llm.*` providers. Sync-only in v1
-(async wrappers come in v1.5).
+(async wrappers come in v1.5). Most users won't construct this directly
+— passing a model-name string to `Optimizer(model=...)` builds it
+inline. Use `reps.Model` directly when you want a standalone callable
+(`model("hello")`) or to reuse one configured Model across multiple
+optimizers.
 
 ### Signature
 
 ```python
-reps.LM(
+reps.Model(
     model: str,                      # "<provider>/<id>" or "<id>"
     *,
     api_key: Optional[str] = None,   # falls back to provider env var
@@ -101,26 +108,47 @@ reps.LM(
 ### Methods
 
 ```python
-text = lm("hello")            # __call__ — sync shortcut
-text = lm.generate("hello")   # explicit sync
+text = model("hello")            # __call__ — sync shortcut
+text = model.generate("hello")   # explicit sync
 ```
 
 That's it for v1. Async (`agenerate`, `agenerate_with_context`),
-ensembles (`LM.ensemble`), and `reps.configure(lm=...)` global defaults
-all defer to v1.5.
+ensembles (`Model.ensemble`), and `reps.configure(model=...)` global
+defaults all defer to v1.5.
+
+## `reps.ModelKwargs`
+
+A `TypedDict(total=False)` of the optional `Model` construction kwargs
+(everything except `model` and `api_key`). Used as `**Unpack[ModelKwargs]`
+on `reps.Optimizer` so users can configure the model inline without
+building a `Model` instance first. Type checkers catch typos; runtime
+users without type checking should know that unknown kwargs flow to
+the underlying SDK constructor.
+
+```python
+class ModelKwargs(TypedDict, total=False):
+    api_base: Optional[str]
+    temperature: float
+    max_tokens: Optional[int]
+    timeout: int
+    retries: int
+    retry_delay: int
+    extended_thinking: Optional[str]
+```
 
 ## `reps.Optimizer`
 
-The optimizer. Constructor takes the LM and the optimization knobs;
-`optimize()` runs.
+The optimizer. Constructor takes the model (or a model-name string) and
+the optimization knobs; `optimize()` runs.
 
 ### Signature
 
 ```python
 reps.Optimizer(
     *,
-    # LLM
-    lm: reps.LM,
+    # Model — either a built reps.Model, or a model-name string.
+    model: reps.Model | str,
+    api_key: Optional[str] = None,              # only used when model is a str
 
     # Search budget
     max_iterations: int = 100,
@@ -138,8 +166,26 @@ reps.Optimizer(
 
     # Output
     output_dir: Optional[str] = None,           # None ⇒ tempdir, no persistence
+
+    # Inline Model construction (only used when `model` is a string).
+    **model_kwargs: Unpack[ModelKwargs],
 )
 ```
+
+### Behavior
+
+- `model: str` — Optimizer constructs a `reps.Model(model, api_key=...,
+  **model_kwargs)` internally. This is the most common path.
+- `model: reps.Model` — passing an already-built Model. In this case
+  `api_key` and `**model_kwargs` MUST be empty; passing them raises
+  `ValueError` (those should be set on the Model directly).
+- Anything else — raises `TypeError`.
+
+**Footgun to call out:** typos in the search knobs (e.g.
+`max_itreations=...`) silently land in `**model_kwargs` and may pass
+through to the SDK constructor where they fail with a confusing error.
+Type checkers (with `Unpack[ModelKwargs]`) catch this; runtime users
+without type checking won't until the SDK rejects the kwarg.
 
 The constructor is **deliberately tight**. Everything that's not a
 load-bearing GEPA knob is hard-defaulted (population_size,
@@ -239,7 +285,7 @@ def evaluate(code: str) -> float:
     return 1.0 if proc.returncode == 0 else 0.0
 
 result = reps.Optimizer(
-    lm=reps.LM("anthropic/claude-sonnet-4.6"),
+    model="anthropic/claude-sonnet-4.6",       # api_key from $ANTHROPIC_API_KEY
     max_iterations=20,
 ).optimize(
     initial=open("seed.py").read(),
@@ -248,8 +294,23 @@ result = reps.Optimizer(
 print(result.best_code, result.best_score)
 ```
 
-15 lines. Four public symbols touched: `reps.LM`, `reps.Optimizer`,
-`optimize`, `OptimizationResult` (its fields).
+15 lines. Three public symbols touched: `reps.Optimizer`, `optimize`,
+`OptimizationResult` (its fields). No `reps.Model` instantiation needed
+in the common case.
+
+### Reusable Model
+
+When you want to call the model directly (not just via the optimizer),
+or to share one Model across multiple optimizer runs:
+
+```python
+import reps
+
+model = reps.Model("anthropic/claude-sonnet-4.6", temperature=0.7)
+print(model("hello"))                          # standalone callable
+
+result = reps.Optimizer(model=model, max_iterations=20).optimize(...)
+```
 
 ### GEPA-style (all features on)
 
@@ -261,7 +322,9 @@ def evaluate(code: str) -> reps.EvaluationResult:
     ...
 
 result = reps.Optimizer(
-    lm=reps.LM("anthropic/claude-sonnet-4.6"),
+    model="anthropic/claude-sonnet-4.6",
+    temperature=0.7,                            # any reps.ModelKwargs
+    extended_thinking="high",
     max_iterations=200,
     selection_strategy="mixed",
     pareto_fraction=0.3,
@@ -298,16 +361,16 @@ For when the simple constructor doesn't have the knob you need.
 
 ## Implementation phases
 
-### A — `reps.LM`
+### A — `reps.Model`
 
 Pure shim over existing `reps.llm.*`. ~150 LOC + tests with mocked
 provider clients. No internal changes.
 
 Files:
 - New `reps/api/__init__.py` — re-exports.
-- New `reps/api/lm.py` — `LM` class.
-- Update `reps/__init__.py` — re-export `LM`.
-- Tests `tests/test_api_lm.py`.
+- New `reps/api/model.py` — `Model` class + `ModelKwargs` TypedDict.
+- Update `reps/__init__.py` — re-export `Model`, `ModelKwargs`.
+- Tests `tests/test_api_model.py`.
 
 ### B — `reps.Optimizer` + `optimize()`
 
@@ -349,7 +412,7 @@ That's the whole v1. Two phases, two commits.
    wait for v1.5's `aoptimize()` (or to `asyncio.run` themselves on a
    new loop). Don't silently nest.
 
-2. **Provider-string inference.** `reps.LM("claude-sonnet-4.6")` (no
+2. **Provider-string inference.** `reps.Model("claude-sonnet-4.6")` (no
    provider prefix) — allow it via `provider_of_model()`, but fail
    loudly with a helpful error if the model name is ambiguous between
    providers.

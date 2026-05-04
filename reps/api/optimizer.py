@@ -19,14 +19,19 @@ import asyncio
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
+
+try:
+    from typing import Unpack  # Python 3.11+
+except ImportError:  # pragma: no cover - we require 3.12+, but be defensive
+    from typing_extensions import Unpack  # type: ignore[assignment]
 
 from reps.api.evaluate_dispatch import (
     register_user_evaluate,
     unregister_user_evaluate,
     write_shim,
 )
-from reps.api.lm import LM
+from reps.api.model import Model, ModelKwargs
 from reps.api.result import OptimizationResult
 from reps.config import Config, LLMConfig, LLMModelConfig
 from reps.database import ProgramDatabase
@@ -37,8 +42,9 @@ logger = logging.getLogger(__name__)
 class Optimizer:
     """The optimizer.
 
-    Construct with a `reps.LM` and the optimization knobs; call
-    `optimize(initial, evaluate)` to run. Returns an `OptimizationResult`.
+    Construct with a `reps.Model` (or a model-name string) and the
+    optimization knobs; call `optimize(initial, evaluate)` to run. Returns
+    an `OptimizationResult`.
 
     See docs/python_api_spec.md, section "v1 surface", for the contract.
     """
@@ -46,8 +52,12 @@ class Optimizer:
     def __init__(
         self,
         *,
-        # LLM
-        lm: LM,
+        # Model — accept either a built Model or a model-name string. When a
+        # string is passed, api_key + ModelKwargs are forwarded to a fresh
+        # Model(...). When a Model is passed, those must be set on the Model
+        # itself; passing them alongside raises.
+        model: Union[Model, str],
+        api_key: Optional[str] = None,
         # Search budget
         max_iterations: int = 100,
         # GEPA-style features (Phases 1-5)
@@ -61,10 +71,27 @@ class Optimizer:
         num_islands: int = 5,
         # Output
         output_dir: Optional[str] = None,
+        # Inline Model construction (only used when `model` is a string).
+        # Typed via Unpack[ModelKwargs] so type checkers catch typos —
+        # runtime users without type checking should be aware that
+        # unrecognized kwargs flow to the SDK constructor.
+        **model_kwargs: Unpack[ModelKwargs],
     ) -> None:
-        if not isinstance(lm, LM):
+        if isinstance(model, str):
+            self.model: Model = Model(model, api_key=api_key, **model_kwargs)
+        elif isinstance(model, Model):
+            if api_key is not None or model_kwargs:
+                raise ValueError(
+                    "reps.Optimizer: when `model` is a reps.Model instance, "
+                    "do not also pass `api_key` or other Model kwargs — set "
+                    "those on the Model directly. Got "
+                    f"api_key={api_key!r}, model_kwargs={list(model_kwargs)!r}."
+                )
+            self.model = model
+        else:
             raise TypeError(
-                f"reps.Optimizer: `lm` must be a reps.LM instance, got {type(lm).__name__}"
+                f"reps.Optimizer: `model` must be a reps.Model instance or a "
+                f"model-name string, got {type(model).__name__}"
             )
         if max_iterations < 1:
             raise ValueError(f"max_iterations must be >= 1, got {max_iterations}")
@@ -76,7 +103,6 @@ class Optimizer:
         if num_islands < 1:
             raise ValueError(f"num_islands must be >= 1, got {num_islands}")
 
-        self.lm = lm
         self.max_iterations = max_iterations
         self.selection_strategy = selection_strategy
         self.pareto_fraction = pareto_fraction
@@ -107,13 +133,13 @@ class Optimizer:
                 f"Optimizer.from_config: expected reps.config.Config, "
                 f"got {type(cfg).__name__}"
             )
-        # Build a stub LM from the first model in cfg so the optimize()
-        # path has something to reference. The LM client itself is never
+        # Build a stub Model from the first model in cfg so the optimize()
+        # path has something to reference. The Model client itself is never
         # used downstream — runner.run_reps reads cfg.llm directly — so
         # we tolerate a "missing key" by leaving it unset.
         primary = cfg.llm.models[0] if cfg.llm.models else None
         instance = cls.__new__(cls)
-        instance.lm = _StubLM(primary) if primary else None  # type: ignore[assignment]
+        instance.model = _StubModel(primary) if primary else None  # type: ignore[assignment]
         instance.max_iterations = cfg.max_iterations
         instance.selection_strategy = cfg.database.selection_strategy
         instance.pareto_fraction = cfg.database.pareto_fraction
@@ -179,7 +205,7 @@ class Optimizer:
         seed: Optional[int] = None,
     ) -> OptimizationResult:
         # Late import to avoid circular dep at module-import time
-        # (runner imports controller imports config imports api.lm).
+        # (runner imports controller imports config imports api.model).
         from reps.runner import run_reps
 
         # Resolve output directory. None ⇒ tempdir. Persisted runs use the
@@ -259,7 +285,7 @@ class Optimizer:
             cfg.reps.enabled = True
 
         # LLM: drop the LM into models[0]. Provider routing matches the LM.
-        model_cfg = self.lm._to_model_config()
+        model_cfg = self.model._to_model_config()
         cfg.llm = LLMConfig(
             api_base=model_cfg.api_base,
             api_key=model_cfg.api_key,
@@ -279,7 +305,7 @@ class Optimizer:
 
         # Top-level provider so runner.run_reps's "anthropic" path stamps
         # provider= on each model.
-        cfg.provider = "anthropic" if self.lm.provider == "anthropic" else "openrouter"
+        cfg.provider = "anthropic" if self.model.provider == "anthropic" else "openrouter"
 
         # Disable the per-program summarizer by default — it would try to
         # build its own anthropic LLM out of the user's lm and most users
@@ -379,12 +405,12 @@ def _clone_model_cfg(src: LLMModelConfig) -> LLMModelConfig:
     )
 
 
-class _StubLM:
+class _StubModel:
     """Minimal `lm`-like stub used when `from_config` constructs an Optimizer.
 
     `_aoptimize_internal` doesn't actually need to call the LM directly
     — the controller pulls models out of `Config.llm.models` — but other
-    parts of the API (e.g. `__repr__`) still touch `self.lm`. The stub
+    parts of the API (e.g. `__repr__`) still touch `self.model`. The stub
     just exposes the same `provider` / `model` attributes as `reps.LM`
     so introspection works without dragging in real credentials.
     """
@@ -394,4 +420,4 @@ class _StubLM:
         self.provider = src.provider or "unknown"
 
     def __repr__(self) -> str:
-        return f"_StubLM(model={self.model!r}, provider={self.provider!r})"
+        return f"_StubModel(model={self.model!r}, provider={self.provider!r})"
