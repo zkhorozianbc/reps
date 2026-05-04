@@ -1,4 +1,4 @@
-"""`reps.REPS` — the v1 optimizer entry point.
+"""`reps.Optimizer` — the v1 optimizer entry point.
 
 Constructor takes a small, deliberately tight set of GEPA-style knobs
 (see docs/python_api_spec.md). Internally builds a `Config`, writes the
@@ -6,7 +6,7 @@ user's seed code + a dispatch shim to the output directory, and runs the
 existing `reps.runner.run_reps` async pipeline.
 
 Power users with needs that exceed the constructor surface use
-`REPS.from_config(cfg)` to hand in a fully-formed `Config`.
+`Optimizer.from_config(cfg)` to hand in a fully-formed `Config`.
 
 Sync wrapping: `optimize()` calls `asyncio.run` on the internal async
 runner. Calling from inside a running event loop raises a clear error —
@@ -34,7 +34,7 @@ from reps.database import ProgramDatabase
 logger = logging.getLogger(__name__)
 
 
-class REPS:
+class Optimizer:
     """The optimizer.
 
     Construct with a `reps.LM` and the optimization knobs; call
@@ -64,7 +64,7 @@ class REPS:
     ) -> None:
         if not isinstance(lm, LM):
             raise TypeError(
-                f"reps.REPS: `lm` must be a reps.LM instance, got {type(lm).__name__}"
+                f"reps.Optimizer: `lm` must be a reps.LM instance, got {type(lm).__name__}"
             )
         if max_iterations < 1:
             raise ValueError(f"max_iterations must be >= 1, got {max_iterations}")
@@ -94,17 +94,17 @@ class REPS:
     # ---------------------------------------------------------------- #
 
     @classmethod
-    def from_config(cls, cfg: Config) -> "REPS":
-        """Construct a `REPS` from a fully-formed internal `Config`.
+    def from_config(cls, cfg: Config) -> "Optimizer":
+        """Construct a `Optimizer` from a fully-formed internal `Config`.
 
         Bypasses the simple constructor's kwarg → Config mapping for users
         who need knobs the constructor doesn't expose (population_size,
-        explicit worker pools, etc.). The resulting `REPS` runs `cfg`
+        explicit worker pools, etc.). The resulting `Optimizer` runs `cfg`
         verbatim — provider/api_key/api_base must be set in `cfg.llm`.
         """
         if not isinstance(cfg, Config):
             raise TypeError(
-                f"REPS.from_config: expected reps.config.Config, "
+                f"Optimizer.from_config: expected reps.config.Config, "
                 f"got {type(cfg).__name__}"
             )
         # Build a stub LM from the first model in cfg so the optimize()
@@ -148,13 +148,13 @@ class REPS:
         """
         if not isinstance(initial, str):
             raise TypeError(
-                f"reps.REPS.optimize: `initial` must be the program text "
+                f"reps.Optimizer.optimize: `initial` must be the program text "
                 f"(str), got {type(initial).__name__}. To load from a "
                 f"file, pass `open(path).read()`."
             )
         if not callable(evaluate):
             raise TypeError(
-                f"reps.REPS.optimize: `evaluate` must be callable, got "
+                f"reps.Optimizer.optimize: `evaluate` must be callable, got "
                 f"{type(evaluate).__name__}"
             )
 
@@ -163,7 +163,7 @@ class REPS:
         except RuntimeError:
             return asyncio.run(self._aoptimize_internal(initial, evaluate, seed=seed))
         raise RuntimeError(
-            "reps.REPS.optimize() cannot be called from an async context. "
+            "reps.Optimizer.optimize() cannot be called from an async context. "
             "Use aoptimize() (v1.5) or asyncio.run() yourself on a new loop."
         )
 
@@ -380,7 +380,7 @@ def _clone_model_cfg(src: LLMModelConfig) -> LLMModelConfig:
 
 
 class _StubLM:
-    """Minimal `lm`-like stub used when `from_config` constructs a REPS.
+    """Minimal `lm`-like stub used when `from_config` constructs an Optimizer.
 
     `_aoptimize_internal` doesn't actually need to call the LM directly
     — the controller pulls models out of `Config.llm.models` — but other

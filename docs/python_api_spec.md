@@ -10,7 +10,7 @@ import reps
 def evaluate(code: str) -> float:
     ...  # run the artifact, return a score
 
-result = reps.REPS(
+result = reps.Optimizer(
     lm=reps.LM("anthropic/claude-sonnet-4.6"),
     max_iterations=50,
     selection_strategy="mixed",
@@ -54,8 +54,8 @@ v1.5 (see end of doc).
 | Symbol | Purpose |
 |---|---|
 | `reps.LM` | LLM wrapper, similar shape to `dspy.LM` |
-| `reps.REPS` | The optimizer |
-| `reps.REPS.optimize(initial, evaluate)` | The single entry point |
+| `reps.Optimizer` | The optimizer |
+| `reps.Optimizer.optimize(initial, evaluate)` | The single entry point |
 | `reps.OptimizationResult` | What `optimize()` returns |
 | `reps.EvaluationResult` | Optional rich return shape from the evaluator (already exists) |
 
@@ -109,7 +109,7 @@ That's it for v1. Async (`agenerate`, `agenerate_with_context`),
 ensembles (`LM.ensemble`), and `reps.configure(lm=...)` global defaults
 all defer to v1.5.
 
-## `reps.REPS`
+## `reps.Optimizer`
 
 The optimizer. Constructor takes the LM and the optimization knobs;
 `optimize()` runs.
@@ -117,7 +117,7 @@ The optimizer. Constructor takes the LM and the optimization knobs;
 ### Signature
 
 ```python
-reps.REPS(
+reps.Optimizer(
     *,
     # LLM
     lm: reps.LM,
@@ -179,7 +179,7 @@ out.
 
 For users who outgrow the simple constructor:
 
-- `reps.REPS.from_config(cfg: reps.config.Config)` — accept the full
+- `reps.Optimizer.from_config(cfg: reps.config.Config)` — accept the full
   internal `Config` dataclass and run it. This is the **only** escape
   hatch we expose in v1. Existing YAML-based configs can be loaded into
   `Config` via the existing `load_experiment_config` helper, then
@@ -238,7 +238,7 @@ def evaluate(code: str) -> float:
     proc = subprocess.run(["python", "-c", code], capture_output=True)
     return 1.0 if proc.returncode == 0 else 0.0
 
-result = reps.REPS(
+result = reps.Optimizer(
     lm=reps.LM("anthropic/claude-sonnet-4.6"),
     max_iterations=20,
 ).optimize(
@@ -248,7 +248,7 @@ result = reps.REPS(
 print(result.best_code, result.best_score)
 ```
 
-15 lines. Four public symbols touched: `reps.LM`, `reps.REPS`,
+15 lines. Four public symbols touched: `reps.LM`, `reps.Optimizer`,
 `optimize`, `OptimizationResult` (its fields).
 
 ### GEPA-style (all features on)
@@ -260,7 +260,7 @@ def evaluate(code: str) -> reps.EvaluationResult:
     # Custom evaluator emitting full ASI (per-objective scores + feedback).
     ...
 
-result = reps.REPS(
+result = reps.Optimizer(
     lm=reps.LM("anthropic/claude-sonnet-4.6"),
     max_iterations=200,
     selection_strategy="mixed",
@@ -288,7 +288,7 @@ from reps.runner import load_experiment_config
 
 cfg: Config = load_experiment_config("path/to/run.yaml")
 # tweak cfg here if you want
-result = reps.REPS.from_config(cfg).optimize(
+result = reps.Optimizer.from_config(cfg).optimize(
     initial=open("seed.py").read(),
     evaluate=evaluate,
 )
@@ -309,7 +309,7 @@ Files:
 - Update `reps/__init__.py` — re-export `LM`.
 - Tests `tests/test_api_lm.py`.
 
-### B — `reps.REPS` + `optimize()`
+### B — `reps.Optimizer` + `optimize()`
 
 Builds the constructor + the single entry point. Internally constructs
 a `Config` from the kwargs, instantiates a controller + database +
@@ -327,11 +327,11 @@ Includes:
 - `from_config(cfg)` classmethod escape hatch.
 
 Files:
-- New `reps/api/optimizer.py` — `REPS` class + `optimize()`.
+- New `reps/api/optimizer.py` — `Optimizer` class + `optimize()`.
 - New `reps/api/result.py` — `OptimizationResult`.
 - New `reps/api/evaluate_dispatch.py` — signature introspection +
   return-shape coercion.
-- Update `reps/__init__.py` — re-export `REPS`, `OptimizationResult`,
+- Update `reps/__init__.py` — re-export `Optimizer`, `OptimizationResult`,
   `EvaluationResult`.
 - New `reps/internal/__init__.py` — re-exports current internals
   (`ReflectionEngine`, `WorkerPool`, `ConvergenceMonitor`, etc.) so
@@ -354,7 +354,7 @@ That's the whole v1. Two phases, two commits.
    loudly with a helpful error if the model name is ambiguous between
    providers.
 
-3. **`from_config` strictness.** Should `REPS.from_config(cfg)` accept
+3. **`from_config` strictness.** Should `Optimizer.from_config(cfg)` accept
    a partial / under-specified `Config` (filling in defaults)? Or
    require fully-formed `Config`? Recommendation: accept partial — the
    `Config` dataclass has defaults for everything; users shouldn't need
@@ -385,7 +385,7 @@ LLM surface:
 - `LM.agenerate()` / `LM.agenerate_with_context()` — async methods.
 - `reps.configure(lm=...)` — process-wide defaults.
 
-Constructor surface (REPS):
+Constructor surface (Optimizer):
 - `reflection_lm`, `summarizer_lm`, `trace_reflection_lm` — separate
   LLMs for individual roles. v1 uses `lm` for all of them.
 - `workers=[...]` — explicit worker config. v1 uses REPS's existing
@@ -409,7 +409,7 @@ Evaluator contract:
   `evaluate(code: str, ...)` (with optional `env` and `instances`
   keywords). Users with file-path-based evaluators wrap them in 2 lines.
 
-`reps.REPS.from_config_dict(dict)` — YAML-dict bridge. v1 has
+`reps.Optimizer.from_config_dict(dict)` — YAML-dict bridge. v1 has
 `from_config(Config)` only; the dict version is just `Config(**dict)`.
 
 ## Append-only changelog

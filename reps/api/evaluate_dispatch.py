@@ -1,7 +1,7 @@
 """Bridge user-supplied `evaluate(code: str)` callables into the path-based
 contract `Evaluator` expects.
 
-REPS's internal `Evaluator._load_evaluation_function` imports an `evaluate`
+REPS internal `Evaluator._load_evaluation_function` imports an `evaluate`
 function from a Python file and calls it with a temp file path. Users of
 the public API give us a callable that accepts the program text directly
 (`evaluate(code: str) -> float | dict | EvaluationResult`).
@@ -51,7 +51,7 @@ _REGISTRY_ENV_VAR = "REPS_USER_EVALUATOR_ID"
 _SHIM_SOURCE = '''"""Auto-generated shim — bridges the path-based Evaluator contract to
 a user-supplied `evaluate(code: str)` callable. Do not edit by hand.
 
-This file is regenerated each `reps.REPS.optimize()` call.
+This file is regenerated each `reps.Optimizer.optimize()` call.
 """
 import os
 
@@ -124,7 +124,7 @@ def coerce_return(value: Any) -> Union[Dict[str, Any], EvaluationResult]:
     if isinstance(value, (int, float)):
         return {"combined_score": float(value), "validity": 1.0}
     raise ValueError(
-        "reps.REPS.optimize: `evaluate` must return float, dict, or "
+        "reps.Optimizer.optimize: `evaluate` must return float, dict, or "
         f"EvaluationResult; got {type(value).__name__}"
     )
 

@@ -1,4 +1,4 @@
-"""End-to-end tests for `reps.REPS.optimize()` (Phase B of the v1 API).
+"""End-to-end tests for `reps.Optimizer.optimize()` (Phase B of the v1 API).
 
 The full controller path is mocked at `reps.runner.run_reps` — we don't
 need to spin up an LLM client to verify that:
@@ -31,7 +31,7 @@ from reps.api.evaluate_dispatch import (
     unregister_user_evaluate,
     write_shim,
 )
-from reps.api.optimizer import REPS, _StubLM
+from reps.api.optimizer import Optimizer, _StubLM
 from reps.api.result import OptimizationResult
 from reps.config import Config
 from reps.evaluation_result import EvaluationResult
@@ -43,7 +43,7 @@ from reps.evaluation_result import EvaluationResult
 
 
 def test_top_level_exports():
-    assert reps.REPS is REPS
+    assert reps.Optimizer is Optimizer
     assert reps.OptimizationResult is OptimizationResult
     assert reps.EvaluationResult is EvaluationResult
 
@@ -177,7 +177,7 @@ def _make_lm(monkeypatch, model="anthropic/claude-sonnet-4.6"):
 
 def test_constructor_defaults_match_spec(monkeypatch):
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm)
+    opt = Optimizer(lm=lm)
     assert opt.max_iterations == 100
     assert opt.selection_strategy == "map_elites"
     assert opt.pareto_fraction == 0.0
@@ -191,7 +191,7 @@ def test_constructor_defaults_match_spec(monkeypatch):
 
 def test_build_config_maps_kwargs(monkeypatch):
     lm = _make_lm(monkeypatch)
-    opt = REPS(
+    opt = Optimizer(
         lm=lm,
         max_iterations=42,
         selection_strategy="mixed",
@@ -219,14 +219,14 @@ def test_build_config_maps_kwargs(monkeypatch):
 
 def test_build_config_master_switch_off_when_no_gepa_features(monkeypatch):
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm)
+    opt = Optimizer(lm=lm)
     cfg = opt._build_config(seed=None)
     assert cfg.reps.enabled is False
 
 
 def test_build_config_anthropic_provider_routes_to_anthropic(monkeypatch):
     lm = _make_lm(monkeypatch, model="anthropic/claude-sonnet-4.6")
-    opt = REPS(lm=lm)
+    opt = Optimizer(lm=lm)
     cfg = opt._build_config(seed=None)
     assert cfg.provider == "anthropic"
     assert cfg.llm.models[0].name == "claude-sonnet-4.6"
@@ -236,7 +236,7 @@ def test_build_config_openrouter_provider_routes_to_openrouter(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     with patch("reps.llm.openai_compatible.openai.OpenAI"):
         lm = reps.LM("openrouter/google/gemini-2.5-flash")
-    opt = REPS(lm=lm)
+    opt = Optimizer(lm=lm)
     cfg = opt._build_config(seed=None)
     assert cfg.provider == "openrouter"
     assert cfg.llm.models[0].name == "google/gemini-2.5-flash"
@@ -245,13 +245,13 @@ def test_build_config_openrouter_provider_routes_to_openrouter(monkeypatch):
 def test_constructor_validates_kwargs(monkeypatch):
     lm = _make_lm(monkeypatch)
     with pytest.raises(ValueError, match="max_iterations"):
-        REPS(lm=lm, max_iterations=0)
+        Optimizer(lm=lm, max_iterations=0)
     with pytest.raises(ValueError, match="selection_strategy"):
-        REPS(lm=lm, selection_strategy="random")
+        Optimizer(lm=lm, selection_strategy="random")
     with pytest.raises(ValueError, match="num_islands"):
-        REPS(lm=lm, num_islands=0)
+        Optimizer(lm=lm, num_islands=0)
     with pytest.raises(TypeError, match="reps.LM"):
-        REPS(lm="not an LM")  # type: ignore[arg-type]
+        Optimizer(lm="not an LM")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +265,7 @@ def test_from_config_round_trips():
     cfg.database.num_islands = 8
     cfg.database.selection_strategy = "pareto"
     cfg.reps.merge.enabled = True
-    opt = REPS.from_config(cfg)
+    opt = Optimizer.from_config(cfg)
     assert opt.max_iterations == 17
     assert opt.num_islands == 8
     assert opt.selection_strategy == "pareto"
@@ -276,12 +276,12 @@ def test_from_config_round_trips():
 
 def test_from_config_rejects_non_config():
     with pytest.raises(TypeError, match="reps.config.Config"):
-        REPS.from_config("not a Config")  # type: ignore[arg-type]
+        Optimizer.from_config("not a Config")  # type: ignore[arg-type]
 
 
 def test_from_config_stamps_seed():
     cfg = Config()
-    opt = REPS.from_config(cfg)
+    opt = Optimizer.from_config(cfg)
     out_cfg = opt._build_config(seed=99)
     assert out_cfg.random_seed == 99
     assert out_cfg.database.random_seed == 99
@@ -294,7 +294,7 @@ def test_from_config_stamps_seed():
 
 def test_optimize_rejects_running_loop(monkeypatch):
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm)
+    opt = Optimizer(lm=lm)
 
     async def run():
         with pytest.raises(RuntimeError, match="async context"):
@@ -305,14 +305,14 @@ def test_optimize_rejects_running_loop(monkeypatch):
 
 def test_optimize_rejects_non_string_initial(monkeypatch):
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm)
+    opt = Optimizer(lm=lm)
     with pytest.raises(TypeError, match="program text"):
         opt.optimize(b"bytes", lambda c: 1.0)  # type: ignore[arg-type]
 
 
 def test_optimize_rejects_non_callable_evaluate(monkeypatch):
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm)
+    opt = Optimizer(lm=lm)
     with pytest.raises(TypeError, match="must be callable"):
         opt.optimize("def f(): pass", "not a callable")  # type: ignore[arg-type]
 
@@ -369,7 +369,7 @@ def test_optimize_happy_path_returns_optimization_result(monkeypatch, tmp_path):
     """Mock `run_reps` to write a saved DB, then verify result aggregation."""
     lm = _make_lm(monkeypatch)
     output_dir = tmp_path / "run"
-    opt = REPS(lm=lm, max_iterations=3, num_islands=2, output_dir=str(output_dir))
+    opt = Optimizer(lm=lm, max_iterations=3, num_islands=2, output_dir=str(output_dir))
 
     captured = {}
 
@@ -418,7 +418,7 @@ def test_optimize_happy_path_returns_optimization_result(monkeypatch, tmp_path):
 
 def test_optimize_uses_tempdir_when_output_dir_is_none(monkeypatch):
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm, max_iterations=1)
+    opt = Optimizer(lm=lm, max_iterations=1)
 
     seen_output: list = []
 
@@ -441,7 +441,7 @@ def test_optimize_runs_user_evaluate_via_shim(monkeypatch, tmp_path):
     `evaluate(program_path)` function is called."""
     lm = _make_lm(monkeypatch)
     output_dir = tmp_path / "run"
-    opt = REPS(lm=lm, max_iterations=1, output_dir=str(output_dir))
+    opt = Optimizer(lm=lm, max_iterations=1, output_dir=str(output_dir))
 
     received_codes: list = []
 
@@ -730,7 +730,7 @@ def test_optimize_cleans_up_registry_and_shim_on_success(monkeypatch, tmp_path):
     id itself must not leak)."""
     lm = _make_lm(monkeypatch)
     output_dir = tmp_path / "run"
-    opt = REPS(lm=lm, max_iterations=1, output_dir=str(output_dir))
+    opt = Optimizer(lm=lm, max_iterations=1, output_dir=str(output_dir))
 
     captured_id = {}
 
@@ -755,7 +755,7 @@ def test_optimize_cleans_up_registry_on_exception(monkeypatch, tmp_path):
     invariant."""
     lm = _make_lm(monkeypatch)
     output_dir = tmp_path / "run"
-    opt = REPS(lm=lm, max_iterations=1, output_dir=str(output_dir))
+    opt = Optimizer(lm=lm, max_iterations=1, output_dir=str(output_dir))
 
     captured_id = {}
 
@@ -784,7 +784,7 @@ def test_optimize_restores_pre_existing_env_var(monkeypatch, tmp_path):
 
     lm = _make_lm(monkeypatch)
     output_dir = tmp_path / "run"
-    opt = REPS(lm=lm, max_iterations=1, output_dir=str(output_dir))
+    opt = Optimizer(lm=lm, max_iterations=1, output_dir=str(output_dir))
 
     async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
         # During the run, the env var should carry the new id, not the
@@ -805,7 +805,7 @@ def test_optimize_restores_pre_existing_env_var(monkeypatch, tmp_path):
 
 def test_build_config_selection_strategy_pareto(monkeypatch):
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm, selection_strategy="pareto")
+    opt = Optimizer(lm=lm, selection_strategy="pareto")
     cfg = opt._build_config(seed=None)
     assert cfg.database.selection_strategy == "pareto"
 
@@ -813,7 +813,7 @@ def test_build_config_selection_strategy_pareto(monkeypatch):
 def test_build_config_pareto_fraction_default_is_zero(monkeypatch):
     """Spec promises `pareto_fraction=0.0` default."""
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm)
+    opt = Optimizer(lm=lm)
     cfg = opt._build_config(seed=None)
     assert cfg.database.pareto_fraction == 0.0
 
@@ -822,7 +822,7 @@ def test_build_config_master_switch_only_trace_reflection(monkeypatch):
     """Setting only `trace_reflection=True` (without merge) flips
     cfg.reps.enabled."""
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm, trace_reflection=True)
+    opt = Optimizer(lm=lm, trace_reflection=True)
     cfg = opt._build_config(seed=None)
     assert cfg.reps.enabled is True
     assert cfg.reps.trace_reflection.enabled is True
@@ -833,7 +833,7 @@ def test_build_config_master_switch_only_merge(monkeypatch):
     """Setting only `merge=True` (without trace_reflection) flips
     cfg.reps.enabled."""
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm, merge=True)
+    opt = Optimizer(lm=lm, merge=True)
     cfg = opt._build_config(seed=None)
     assert cfg.reps.enabled is True
     assert cfg.reps.merge.enabled is True
@@ -844,7 +844,7 @@ def test_build_config_summarizer_disabled_by_default(monkeypatch):
     """Spec note: summarizer is opt-in via from_config to avoid silent
     use of the user's API key for a second LLM."""
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm)
+    opt = Optimizer(lm=lm)
     cfg = opt._build_config(seed=None)
     assert cfg.reps.summarizer.enabled is False
 
@@ -853,7 +853,7 @@ def test_build_config_evaluator_models_independent_from_models(monkeypatch):
     """`_clone_model_cfg` exists specifically so post-init mutations on
     cfg.llm.models[0] don't bleed into evaluator_models[0]."""
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm)
+    opt = Optimizer(lm=lm)
     cfg = opt._build_config(seed=None)
     assert len(cfg.llm.models) == 1
     assert len(cfg.llm.evaluator_models) == 1
@@ -866,7 +866,7 @@ def test_build_config_evaluator_models_independent_from_models(monkeypatch):
 
 def test_build_config_minibatch_default_is_none(monkeypatch):
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm)
+    opt = Optimizer(lm=lm)
     cfg = opt._build_config(seed=None)
     assert cfg.evaluator.minibatch_size is None
 
@@ -875,7 +875,7 @@ def test_build_config_no_seed_does_not_overwrite_default(monkeypatch):
     """When `seed=None`, _build_config must leave random_seed alone
     (Config has its own default of 42)."""
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm)
+    opt = Optimizer(lm=lm)
     cfg = opt._build_config(seed=None)
     # Config defaults random_seed to 42; we don't clobber it to None.
     assert cfg.random_seed is not None
@@ -889,18 +889,18 @@ def test_build_config_no_seed_does_not_overwrite_default(monkeypatch):
 def test_constructor_rejects_negative_max_iterations(monkeypatch):
     lm = _make_lm(monkeypatch)
     with pytest.raises(ValueError, match="max_iterations"):
-        REPS(lm=lm, max_iterations=-5)
+        Optimizer(lm=lm, max_iterations=-5)
 
 
 def test_constructor_rejects_zero_islands(monkeypatch):
     lm = _make_lm(monkeypatch)
     with pytest.raises(ValueError, match="num_islands"):
-        REPS(lm=lm, num_islands=0)
+        Optimizer(lm=lm, num_islands=0)
 
 
 def test_constructor_rejects_lm_being_none():
     with pytest.raises(TypeError, match="reps.LM"):
-        REPS(lm=None)  # type: ignore[arg-type]
+        Optimizer(lm=None)  # type: ignore[arg-type]
 
 
 def test_constructor_rejects_lm_being_wrong_type():
@@ -908,7 +908,7 @@ def test_constructor_rejects_lm_being_wrong_type():
     helpful error pointing at `reps.LM`."""
     from reps.config import LLMModelConfig
     with pytest.raises(TypeError, match="reps.LM"):
-        REPS(lm=LLMModelConfig(name="x"))  # type: ignore[arg-type]
+        Optimizer(lm=LLMModelConfig(name="x"))  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -918,10 +918,10 @@ def test_constructor_rejects_lm_being_wrong_type():
 
 def test_from_config_partial_config_uses_defaults():
     """A bare `Config()` (only dataclass defaults) must construct a
-    valid REPS — users shouldn't need to know which fields are
+    valid Optimizer — users shouldn't need to know which fields are
     required."""
     cfg = Config()  # no overrides
-    opt = REPS.from_config(cfg)
+    opt = Optimizer.from_config(cfg)
     # Defaults from Config flow through.
     assert opt.max_iterations == cfg.max_iterations
     assert opt.num_islands == cfg.database.num_islands
@@ -944,7 +944,7 @@ def test_from_config_preserves_all_kwarg_mapped_fields():
     cfg.evaluator.minibatch_size = 7
     cfg.output = "/some/path"
 
-    opt = REPS.from_config(cfg)
+    opt = Optimizer.from_config(cfg)
     assert opt.max_iterations == 31
     assert opt.selection_strategy == "mixed"
     assert opt.pareto_fraction == 0.42
@@ -961,7 +961,7 @@ def test_from_config_does_not_force_summarizer_off():
     is the escape hatch — summarizer setting in cfg must be honored."""
     cfg = Config()
     cfg.reps.summarizer.enabled = True
-    opt = REPS.from_config(cfg)
+    opt = Optimizer.from_config(cfg)
     out_cfg = opt._build_config(seed=None)
     # _build_config passes cfg through unchanged when from_config was used.
     assert out_cfg.reps.summarizer.enabled is True
@@ -973,7 +973,7 @@ def test_from_config_with_no_models_uses_none_lm():
     cfg = Config()
     # Explicitly empty
     cfg.llm.models = []
-    opt = REPS.from_config(cfg)
+    opt = Optimizer.from_config(cfg)
     assert opt.lm is None
 
 
@@ -983,7 +983,7 @@ def test_from_config_with_models_builds_stub_lm():
     cfg = Config()
     from reps.config import LLMModelConfig
     cfg.llm.models = [LLMModelConfig(name="claude-x", provider="anthropic")]
-    opt = REPS.from_config(cfg)
+    opt = Optimizer.from_config(cfg)
     assert opt.lm is not None
     assert opt.lm.model == "claude-x"
     assert opt.lm.provider == "anthropic"
@@ -992,12 +992,12 @@ def test_from_config_with_models_builds_stub_lm():
 def test_from_config_rejects_dict():
     """`from_config_dict` is deferred to v1.5; a raw dict must error."""
     with pytest.raises(TypeError, match="reps.config.Config"):
-        REPS.from_config({"max_iterations": 5})  # type: ignore[arg-type]
+        Optimizer.from_config({"max_iterations": 5})  # type: ignore[arg-type]
 
 
 def test_from_config_rejects_none():
     with pytest.raises(TypeError, match="reps.config.Config"):
-        REPS.from_config(None)  # type: ignore[arg-type]
+        Optimizer.from_config(None)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -1010,7 +1010,7 @@ def test_optimize_works_outside_async_context(monkeypatch, tmp_path):
     optimize() must succeed."""
     lm = _make_lm(monkeypatch)
     output_dir = tmp_path / "run"
-    opt = REPS(lm=lm, max_iterations=1, output_dir=str(output_dir))
+    opt = Optimizer(lm=lm, max_iterations=1, output_dir=str(output_dir))
 
     async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
         _seed_database(output_dir, num_islands=config.database.num_islands)
@@ -1032,7 +1032,7 @@ def test_collect_result_handles_empty_database(monkeypatch, tmp_path):
     `best is None`."""
     lm = _make_lm(monkeypatch)
     output_dir = tmp_path / "run"
-    opt = REPS(lm=lm, max_iterations=1, output_dir=str(output_dir))
+    opt = Optimizer(lm=lm, max_iterations=1, output_dir=str(output_dir))
 
     async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
         # Empty DB — just metadata, no programs/.
@@ -1065,7 +1065,7 @@ def test_collect_result_total_metric_calls_counts_all_programs(monkeypatch, tmp_
     a 3-program DB."""
     lm = _make_lm(monkeypatch)
     output_dir = tmp_path / "run"
-    opt = REPS(lm=lm, max_iterations=1, output_dir=str(output_dir))
+    opt = Optimizer(lm=lm, max_iterations=1, output_dir=str(output_dir))
 
     async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
         out = Path(output_dir)
@@ -1105,7 +1105,7 @@ def test_collect_result_aggregates_tokens_across_programs(monkeypatch, tmp_path)
     `reps_meta` dicts."""
     lm = _make_lm(monkeypatch)
     output_dir = tmp_path / "run"
-    opt = REPS(lm=lm, max_iterations=1, output_dir=str(output_dir))
+    opt = Optimizer(lm=lm, max_iterations=1, output_dir=str(output_dir))
 
     async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
         out = Path(output_dir)
@@ -1154,7 +1154,7 @@ def test_output_dir_none_yields_none_on_result(monkeypatch, tmp_path):
     """Spec: when `output_dir=None`, the result's `output_dir` is
     `None` (the run used a tempdir internally — not exposed)."""
     lm = _make_lm(monkeypatch)
-    opt = REPS(lm=lm, max_iterations=1)  # output_dir=None
+    opt = Optimizer(lm=lm, max_iterations=1)  # output_dir=None
 
     async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
         _seed_database(output_dir, num_islands=config.database.num_islands)
@@ -1170,7 +1170,7 @@ def test_output_dir_set_yields_resolved_absolute_path_on_result(monkeypatch, tmp
     the result (so users can re-load programs after the call returns)."""
     lm = _make_lm(monkeypatch)
     output_dir = tmp_path / "myrun"
-    opt = REPS(lm=lm, max_iterations=1, output_dir=str(output_dir))
+    opt = Optimizer(lm=lm, max_iterations=1, output_dir=str(output_dir))
 
     async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
         _seed_database(output_dir, num_islands=config.database.num_islands)

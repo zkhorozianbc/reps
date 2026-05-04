@@ -346,7 +346,7 @@ class EvaluatorConfig:
 
     # Forward-compat field for Phase 6 of the GEPA plan (per-iteration
     # minibatch sampling). Currently unused by the evaluator itself —
-    # exposed so the v1 `reps.REPS(minibatch_size=...)` kwarg has a stable
+    # exposed so the v1 `reps.Optimizer(minibatch_size=...)` kwarg has a stable
     # landing slot until the runner consumes it.
     minibatch_size: Optional[int] = None
 

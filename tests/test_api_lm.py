@@ -205,7 +205,7 @@ def test_lm_reexported_at_top_level():
 
 
 # ---------------------------------------------------------------------------
-# _to_model_config (used by reps.REPS in Phase B)
+# _to_model_config (used by reps.Optimizer in Phase B)
 # ---------------------------------------------------------------------------
 
 
@@ -426,7 +426,7 @@ def test_extended_thinking_propagates_through_model_config_for_openai(mock_oai):
 
 @patch("reps.llm.openai_compatible.openai.OpenAI")
 def test_to_model_config_carries_provider_for_openrouter(mock_oai):
-    """`reps.REPS` reads `_to_model_config().provider` to set
+    """`reps.Optimizer` reads `_to_model_config().provider` to set
     `cfg.provider`. Ensure the openrouter case round-trips."""
     lm = LM("openrouter/google/gemini-2.5-flash", api_key="k")
     cfg = lm._to_model_config()
@@ -438,7 +438,7 @@ def test_to_model_config_carries_provider_for_openrouter(mock_oai):
 @patch("reps.llm.anthropic.anthropic.Anthropic")
 def test_to_model_config_returns_fresh_instance_not_same_object(mock_anth):
     """`_to_model_config()` is documented as returning an independent
-    copy. `cfg is lm._model_cfg` must be False so REPS can attach a
+    copy. `cfg is lm._model_cfg` must be False so Optimizer can attach a
     `system_message` without mutating the LM's client config."""
     lm = LM("anthropic/claude-sonnet-4.6", api_key="k")
     cfg_a = lm._to_model_config()

@@ -185,10 +185,10 @@ class LM:
     def __call__(self, prompt: str, **kwargs: Any) -> str:
         return self.generate(prompt, **kwargs)
 
-    # --- introspection helpers (used by reps.REPS) ----------------------
+    # --- introspection helpers (used by reps.Optimizer) ----------------------
 
     def _to_model_config(self) -> LLMModelConfig:
-        """Return the underlying LLMModelConfig for use by `reps.REPS`.
+        """Return the underlying LLMModelConfig for use by `reps.Optimizer`.
 
         A fresh copy is returned so the optimizer can mutate the result
         (e.g. attaching a system_message) without affecting this LM

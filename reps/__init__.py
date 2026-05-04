@@ -26,7 +26,7 @@ from reps.metrics_logger import MetricsLogger
 # (`reps.ReflectionEngine`, etc.) keep working both via this top-level
 # re-export and via `reps.internal.*`.
 from reps.api.lm import LM
-from reps.api.optimizer import REPS
+from reps.api.optimizer import Optimizer
 from reps.api.result import OptimizationResult
 from reps.evaluation_result import EvaluationResult
 
@@ -43,7 +43,7 @@ __all__ = [
     "SearchRegime",
     "MetricsLogger",
     "LM",
-    "REPS",
+    "Optimizer",
     "OptimizationResult",
     "EvaluationResult",
 ]
