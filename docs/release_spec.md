@@ -345,11 +345,12 @@ jobs:
       - name: Run pytest
         run: uv run python -m pytest tests/ -v
         env:
-          # Tests that genuinely need a real API key are skipped via
-          # pytest skipif markers (see the test_skip spec being
-          # designed in parallel — those two tests must declare
-          # @pytest.mark.skipif(not os.environ.get("ANTHROPIC_API_KEY"),
-          # ...) so CI passes without secrets).
+          # The previous 2 env-key-requiring failures are eliminated
+          # by the test_skip spec's lazy summarizer construction in
+          # production code (reps/controller.py) — no skipif markers
+          # needed. CI passes without ANTHROPIC_API_KEY because the
+          # controller no longer eagerly constructs the summarizer
+          # LLM at __init__ time. See docs/test_skip_spec.md.
           PYTHONUNBUFFERED: "1"
 ```
 
@@ -420,6 +421,11 @@ jobs:
     # AND id-token: write. Both are set up via PyPI project settings.
     environment:
       name: pypi
+      # NOTE: the URL hardcodes the PyPI distribution name. If the
+      # packaging spec resolves to a name other than `reps` (e.g.
+      # `reps-search` per its recommendation), the executor MUST
+      # update this URL to match. The `[project].name` field in
+      # pyproject.toml is the source of truth.
       url: https://pypi.org/p/reps
     permissions:
       id-token: write

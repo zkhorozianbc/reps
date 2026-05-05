@@ -234,7 +234,7 @@ version = "0.1.0"
 description = "Recursive Evolutionary Program Search — LLM-driven evolutionary code search with reflection, worker diversity, convergence detection, and SOTA steering."
 readme = "README.md"
 requires-python = ">=3.12"
-license = {text = "MIT"}            # see §7 Open Decisions: licence choice
+license = { file = "LICENSE" }      # see §7 Open Decisions: license choice
 authors = [
     {name = "{TBD}", email = "{TBD}"},      # see §7 Open Decisions
 ]
@@ -251,7 +251,7 @@ keywords = [
     "anthropic",
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",      # update if licence choice changes
@@ -273,14 +273,22 @@ Documentation = "https://github.com/zkhorozianbc/reps#readme"
 
 ### Notes for the executor
 
-- **`license = {text = "MIT"}`** uses the legacy table form intentionally — it's still accepted by setuptools 42+ (see `requires = ["setuptools>=42"]` at `pyproject.toml:2`) and avoids needing to bump to setuptools >= 77 for the modern SPDX-string `license = "MIT"` form. If the executor wants the modern form, bump `requires = ["setuptools>=77"]` and use `license = "MIT"` plus `license-files = ["LICENSE"]`.
+- **`license = { file = "LICENSE" }`** is the modern form that points
+  setuptools at the actual LICENSE file we'll write to repo root.
+  Avoids hardcoding the SPDX id in two places and matches the
+  release spec's recommendation. The file-form has been supported
+  since setuptools 42 (matching `requires = ["setuptools>=42"]` at
+  `pyproject.toml:2`), so no setuptools bump needed.
 - **`readme = "README.md"`** assumes the executor adds a `[tool.setuptools]` `include-package-data = true` or similar so the README ships in the sdist. The wheel typically embeds README into `PKG-INFO` automatically; verify in §6.
 - **No `LICENSE` file exists** at `/home/user/reps/LICENSE` today — `ls /home/user/reps/LICENSE*` returned nothing. The executor must create one before publishing. See §7.
 - **Distribution name** — `name = "reps"` is almost certainly taken on PyPI (`reps` is a common short word). The Python module name (`import reps`) is independent of the PyPI distribution name, so we can publish under e.g. `reps-search` while users still write `import reps`. See §7 for candidates.
 
 ### Cross-spec interaction
 
-- The `License :: OSI Approved :: MIT License` classifier and `license = {text = "MIT"}` field must agree with whichever `LICENSE` file actually ships. If the user picks Apache-2.0 instead, both lines change.
+- The `License :: OSI Approved :: MIT License` classifier and the
+  shipped LICENSE file must agree with whichever license is chosen.
+  If the user picks Apache-2.0 instead, both the classifier line and
+  the LICENSE file content change.
 - `Typing :: Typed` classifier becomes valid only after Sub-spec 4 (`py.typed`) lands. Adding it now is fine — it's an aspirational marker — but the two should ship in the same release.
 
 ## Sub-spec 4: `py.typed` marker (PEP 561)
@@ -460,7 +468,7 @@ No `LICENSE` file exists at `/home/user/reps/LICENSE` today. Need:
 
 1. A licence decision (MIT, Apache-2.0, BSD-3-Clause are the typical OSS choices for libraries; Apache-2.0 has explicit patent grants which matter for ML projects).
 2. A `LICENSE` text file at the repo root (committed to git, included in the sdist).
-3. Matching `license = {text = "..."}` and `License :: OSI Approved :: ... License` classifier in `pyproject.toml`.
+3. Matching `License :: OSI Approved :: ... License` classifier in `pyproject.toml` and `LICENSE` file at repo root.
 
 **Note:** REPS is forked from OpenEvolve (per the README). Check OpenEvolve's licence first — if it's MIT or Apache, REPS can match; if it's GPL, REPS must comply with copyleft requirements. The licence choice is **load-bearing** for both legal compliance and PyPI metadata.
 
