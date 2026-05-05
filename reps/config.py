@@ -344,11 +344,16 @@ class EvaluatorConfig:
     enable_artifacts: bool = True
     max_artifact_storage: int = 100 * 1024 * 1024  # 100MB per program
 
-    # Forward-compat field for Phase 6 of the GEPA plan (per-iteration
-    # minibatch sampling). Currently unused by the evaluator itself —
-    # exposed so the v1 `reps.Optimizer(minibatch_size=...)` kwarg has a stable
-    # landing slot until the runner consumes it.
+    # GEPA Phase 6: minibatch evaluation with promotion. When set, the
+    # evaluator first calls the benchmark's `evaluate(... instances=subset)`
+    # on `minibatch_size` instance keys; the full evaluation only runs if
+    # the minibatch combined_score >= `minibatch_promotion_threshold`.
+    # `minibatch_strategy` controls how the subset is picked
+    # (see `reps.minibatch.select_instances`). None disables the path —
+    # behavior is byte-identical to pre-Phase-6 evaluation.
     minibatch_size: Optional[int] = None
+    minibatch_promotion_threshold: float = 0.5
+    minibatch_strategy: str = "fixed_subset"  # "fixed_subset" | "random"
 
 
 @dataclass
