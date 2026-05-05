@@ -587,9 +587,15 @@ class ProcessParallelController:
             )
 
         # Final (scored) evaluation — artifacts of this call land in the DB.
+        # Route through `evaluate_with_promotion` so the GEPA Phase 6
+        # minibatch gate applies when configured. The method falls back
+        # to direct evaluation byte-identically when minibatch_size is
+        # None or cascade is enabled.
         try:
-            outcome = await self.evaluator.evaluate_isolated(
-                result.child_code, program_id=final_child_id
+            outcome = await self.evaluator.evaluate_with_promotion(
+                result.child_code,
+                program_id=final_child_id,
+                iteration=iteration,
             )
         except Exception as e:
             logger.exception(f"Evaluator failed for iteration {iteration}")

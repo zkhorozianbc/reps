@@ -177,6 +177,7 @@ class Evaluator:
         program_id: Optional[str] = None,
         scratch: bool = False,
         run_dir: Optional[str] = None,
+        instances: Optional[List[str]] = None,
     ) -> "EvaluationOutcome":
         """Run one isolated evaluation. Safe to call concurrently from asyncio Tasks.
 
@@ -184,6 +185,10 @@ class Evaluator:
         - `scratch`: informational flag; caller guarantees this is a throwaway
           (e.g., from a tool-call); artifacts are returned but not stored globally.
         - `run_dir`: optional override for REPS_RUN_DIR passed to the subprocess env.
+        - `instances`: optional subset of benchmark instance keys (Phase 6.2).
+          Forwarded to the benchmark's `evaluate(... instances=...)` when the
+          function accepts it; ignored otherwise. None means "evaluate the
+          full instance set" (legacy behavior).
         """
         pid = program_id or f"scratch-{uuid.uuid4().hex[:12]}"
         async with self._eval_semaphore:
@@ -199,6 +204,7 @@ class Evaluator:
                     program_code=program_code,
                     program_id=pid,
                     env=call_env,
+                    instances=instances,
                 )
                 artifacts = dict(_call_artifacts.get() or {})
                 return EvaluationOutcome(
@@ -212,11 +218,182 @@ class Evaluator:
                 reset_current_program_id(token_pid)
                 _call_artifacts.reset(token_artifacts)
 
+    def _benchmark_module(self):
+        """Re-import the loaded benchmark module so we can read its
+        instance registry (`INSTANCES` constant or `list_instances()`).
+        Cached on first call."""
+        if getattr(self, "_cached_benchmark_module", None) is not None:
+            return self._cached_benchmark_module
+        spec = importlib.util.spec_from_file_location(
+            "evaluation_module", self.evaluation_file
+        )
+        if spec is None or spec.loader is None:
+            self._cached_benchmark_module = None
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self._cached_benchmark_module = module
+        return module
+
+    def _read_instance_registry(self) -> List[str]:
+        """Resolve the universe of instance keys from the benchmark module.
+
+        Phase 6.2 contract (Open design decision (b)): the benchmark exposes
+        either an ``INSTANCES: list[str]`` module-level constant or a
+        ``list_instances() -> list[str]`` function. Raises ValueError if
+        neither is present, so misconfigured runs fail fast instead of
+        silently bypassing the minibatch path.
+        """
+        module = self._benchmark_module()
+        if module is None:
+            raise ValueError(
+                f"Cannot load benchmark module from {self.evaluation_file!r} "
+                "to read instance registry."
+            )
+        registry = getattr(module, "INSTANCES", None)
+        if registry is None and hasattr(module, "list_instances"):
+            registry = module.list_instances()
+        if registry is None:
+            raise ValueError(
+                f"Benchmark {self.evaluation_file!r} has `minibatch_size` set "
+                "but does not expose an `INSTANCES = [...]` module-level "
+                "constant nor a `list_instances() -> list[str]` function. "
+                "Add one or unset `minibatch_size`."
+            )
+        return list(registry)
+
+    def _evaluator_accepts_instances(self) -> bool:
+        """One-shot check: does the benchmark's `evaluate` accept an
+        `instances` kwarg? Cached so we don't re-introspect every call."""
+        cached = getattr(self, "_cached_accepts_instances", None)
+        if cached is not None:
+            return cached
+        sig = inspect.signature(self.evaluate_function)
+        accepts = "instances" in sig.parameters
+        self._cached_accepts_instances = accepts
+        return accepts
+
+    async def evaluate_with_promotion(
+        self,
+        program_code: str,
+        *,
+        program_id: Optional[str] = None,
+        run_dir: Optional[str] = None,
+        iteration: int = 0,
+    ) -> "EvaluationOutcome":
+        """GEPA Phase 6.2 evaluation entry point — minibatch promotion gate.
+
+        Order of operations (matches docs/gepa_implementation_plan.md):
+          1. If `cascade_evaluation` is enabled, defer to the existing
+             cascade path. Cascade and minibatch are mutually exclusive
+             (validated at config load); this branch is for when the
+             user simply hasn't enabled minibatch.
+          2. If `minibatch_size is None`, defer to the existing direct
+             evaluate path. Behavior here is byte-identical to
+             `evaluate_isolated` so legacy callers can be re-pointed
+             without changing semantics.
+          3. If the benchmark's `evaluate` does not accept an `instances`
+             kwarg, log a one-time warning and fall back to the full eval.
+          4. Otherwise: sample `minibatch_size` keys from the benchmark's
+             instance registry, run a minibatch eval, tag fidelity. If
+             below threshold, return the minibatch result. Otherwise run
+             the full eval and tag fidelity="full".
+
+        The fidelity tag (in `metrics["fidelity"]`) is what Phase 6.3
+        archive integrity reads to decide whether the program enters the
+        MAP-Elites archive / Pareto frontier.
+        """
+        # Cascade or minibatch-disabled: legacy path.
+        if self.config.cascade_evaluation or self.config.minibatch_size is None:
+            outcome = await self.evaluate_isolated(
+                program_code, program_id=program_id, run_dir=run_dir
+            )
+            # Tag fidelity for downstream archive policy. Cascade and
+            # full-eval both count as "full" for selection purposes.
+            outcome.metrics.setdefault("fidelity", "full")
+            return outcome
+
+        # Benchmark-side capability check.
+        if not self._evaluator_accepts_instances():
+            self._warn_minibatch_unsupported_once()
+            outcome = await self.evaluate_isolated(
+                program_code, program_id=program_id, run_dir=run_dir
+            )
+            outcome.metrics.setdefault("fidelity", "full")
+            return outcome
+
+        # Resolve registry — may raise ValueError if missing. We let it
+        # bubble: misconfiguration should fail loudly, not silently fall
+        # back to a full eval per iteration.
+        from reps.minibatch import select_instances
+
+        registry = self._read_instance_registry()
+        size = int(self.config.minibatch_size or 0)
+        subset = select_instances(
+            registry,
+            size,
+            iteration=iteration,
+            strategy=self.config.minibatch_strategy,
+        )
+
+        # Edge case: registry is empty or smaller than `minibatch_size` —
+        # `select_instances` returned the full list. There's nothing to
+        # gain from a separate minibatch pass, so go straight to full eval.
+        if not subset or len(subset) >= len(registry):
+            outcome = await self.evaluate_isolated(
+                program_code, program_id=program_id, run_dir=run_dir
+            )
+            outcome.metrics.setdefault("fidelity", "full")
+            return outcome
+
+        # 1) Minibatch eval.
+        mb_outcome = await self.evaluate_isolated(
+            program_code,
+            program_id=program_id,
+            run_dir=run_dir,
+            instances=subset,
+        )
+        mb_score = mb_outcome.metrics.get("combined_score")
+        threshold = self.config.minibatch_promotion_threshold
+
+        if not isinstance(mb_score, (int, float)) or float(mb_score) < threshold:
+            # Reject: program does not earn the full evaluation budget.
+            mb_outcome.metrics["fidelity"] = "minibatch"
+            mb_outcome.metrics["minibatch_size"] = float(len(subset))
+            return mb_outcome
+
+        # 2) Promotion: full eval. The full result supersedes the minibatch
+        # one — combined_score in the returned outcome reflects the
+        # highest-fidelity eval that ran.
+        full_outcome = await self.evaluate_isolated(
+            program_code, program_id=program_id, run_dir=run_dir
+        )
+        full_outcome.metrics["fidelity"] = "full"
+        return full_outcome
+
+    def _warn_minibatch_unsupported_once(self) -> None:
+        """Emit a single warning when `minibatch_size` is set but the
+        benchmark's `evaluate` doesn't accept an `instances` kwarg.
+        Falling back to full eval per iteration without warning would
+        silently nullify the user's config; warning every iteration would
+        spam logs."""
+        if getattr(self, "_minibatch_unsupported_warned", False):
+            return
+        logger.warning(
+            "EvaluatorConfig.minibatch_size is set but %s's `evaluate(...)` "
+            "does not accept an `instances` keyword argument. Falling back "
+            "to full evaluation. Add `instances: Optional[List[str]] = None` "
+            "to the benchmark's signature to opt in.",
+            self.evaluation_file,
+        )
+        self._minibatch_unsupported_warned = True
+
     async def _evaluate_code_with_env(
         self,
         program_code: str,
         program_id: str,
         env: Optional[Dict[str, str]] = None,
+        instances: Optional[List[str]] = None,
     ) -> EvaluationResult:
         """Run the full retry/cascade evaluation pipeline.
 
@@ -246,11 +423,16 @@ class Evaluator:
             try:
                 # Run evaluation
                 if self.config.cascade_evaluation:
-                    # Run cascade evaluation
+                    # Run cascade evaluation. Cascade and minibatch are
+                    # mutually exclusive (enforced at config validation),
+                    # so `instances` is never set on this path.
                     result = await self._cascade_evaluate(temp_file_path, env=env)
                 else:
-                    # Run direct evaluation
-                    result = await self._direct_evaluate(temp_file_path, env=env)
+                    # Run direct evaluation. `instances` is the GEPA Phase
+                    # 6 minibatch subset when set; None = full eval.
+                    result = await self._direct_evaluate(
+                        temp_file_path, env=env, instances=instances
+                    )
 
                 # Process the result based on type
                 eval_result = self._process_evaluation_result(result)
@@ -445,6 +627,7 @@ class Evaluator:
         self,
         program_path: str,
         env: Optional[Dict[str, str]] = None,
+        instances: Optional[List[str]] = None,
     ) -> Union[Dict[str, float], EvaluationResult]:
         """
         Directly evaluate a program using the evaluation function with timeout
@@ -454,6 +637,11 @@ class Evaluator:
             env: Per-call environment dict to pass to the benchmark evaluate function
                  (if the function accepts an `env` kwarg). Older benchmarks without
                  an `env` parameter still work via the inspect.signature gate.
+            instances: GEPA Phase 6 minibatch subset. Passed to the benchmark
+                 evaluator only if its signature accepts an `instances` kwarg.
+                 When the benchmark doesn't accept it, the kwarg is silently
+                 dropped (caller in `evaluate_with_promotion` handles the
+                 user-facing warning so we don't spam every iteration).
 
         Returns:
             Dictionary of metrics or EvaluationResult with metrics and artifacts
@@ -467,6 +655,8 @@ class Evaluator:
         kwargs: Dict[str, Any] = {}
         if "env" in sig.parameters:
             kwargs["env"] = env
+        if instances is not None and "instances" in sig.parameters:
+            kwargs["instances"] = instances
 
         # Create a coroutine that runs the evaluation function in an executor
         async def run_evaluation():

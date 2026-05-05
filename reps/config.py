@@ -355,6 +355,26 @@ class EvaluatorConfig:
     minibatch_promotion_threshold: float = 0.5
     minibatch_strategy: str = "fixed_subset"  # "fixed_subset" | "random"
 
+    def __post_init__(self):
+        # Cascade and minibatch are different promotion strategies and must
+        # not be combined: cascade promotes between *stages* (separate
+        # evaluator functions), minibatch promotes between *instance
+        # subsets* (single evaluator, different `instances=` argument).
+        # Mixing them produces incoherent fidelity tags and double-spending
+        # of the eval budget. Stage-based pipelines stay in cascade.
+        if self.minibatch_size is not None and self.cascade_evaluation:
+            raise ValueError(
+                "EvaluatorConfig: `minibatch_size` and `cascade_evaluation` "
+                "are mutually exclusive. Set `cascade_evaluation: false` to "
+                "opt into minibatch promotion, or unset `minibatch_size` to "
+                "keep using cascade."
+            )
+        if self.minibatch_strategy not in ("fixed_subset", "random"):
+            raise ValueError(
+                "EvaluatorConfig: `minibatch_strategy` must be "
+                f"'fixed_subset' or 'random'; got {self.minibatch_strategy!r}."
+            )
+
 
 @dataclass
 class REPSReflectionConfig:

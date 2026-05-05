@@ -124,7 +124,10 @@ class TestConfigFields:
         assert cfg.minibatch_strategy == "fixed_subset"
 
     def test_evaluator_config_accepts_minibatch_settings(self):
+        # `cascade_evaluation=False` is required when opting into minibatch:
+        # the two promotion strategies are mutually exclusive (Phase 6.2).
         cfg = EvaluatorConfig(
+            cascade_evaluation=False,
             minibatch_size=4,
             minibatch_promotion_threshold=0.7,
             minibatch_strategy="random",
