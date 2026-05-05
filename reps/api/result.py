@@ -1,4 +1,4 @@
-"""`OptimizationResult` — the v1 return shape from `reps.REPS.optimize()`.
+"""`OptimizationResult` — the v1 return shape from `reps.Optimizer.optimize()`.
 
 Plain dataclass; no `save`/`load`/`history`/`as_callable` (those defer
 to v1.5 — see docs/python_api_spec.md "Deferred to v1.5+").
@@ -12,7 +12,7 @@ from typing import Dict, Optional
 
 @dataclass
 class OptimizationResult:
-    """Outcome of one `reps.REPS.optimize()` call.
+    """Outcome of one `reps.Optimizer.optimize()` call.
 
     Fields mirror the spec exactly — best_* fields come from the database's
     tracked best Program; iterations_run is the number of completed
