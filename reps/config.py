@@ -355,6 +355,24 @@ class EvaluatorConfig:
     minibatch_promotion_threshold: float = 0.5
     minibatch_strategy: str = "fixed_subset"  # "fixed_subset" | "random"
 
+    # GEPA Phase 6.3: archive integrity. Determines what happens to a
+    # program tagged `metrics["fidelity"] == "minibatch"` (i.e. one that
+    # failed the promotion gate and only saw a subset of instances).
+    #
+    # "promoted_only" (default, safe): minibatch-only programs are kept
+    #   in `ProgramDatabase._minibatch_only` for diagnostics but do NOT
+    #   enter the MAP-Elites archive, the islands, or the Pareto frontier.
+    #   Sampling paths only see promoted (full-eval) programs, so
+    #   selection cannot be polluted by low-fidelity scores.
+    #
+    # "all_with_tag": minibatch programs ARE registered normally; the
+    #   `fidelity` tag is preserved on the Program for downstream
+    #   stratification. As of Phase 6.3 the samplers do NOT yet read the
+    #   tag — selection treats all archived programs equally. Tag-aware
+    #   stratification is deferred to v1.5; this option is functionally
+    #   equivalent to current behavior for now.
+    minibatch_archive_policy: str = "promoted_only"
+
     def __post_init__(self):
         # Cascade and minibatch are different promotion strategies and must
         # not be combined: cascade promotes between *stages* (separate
@@ -373,6 +391,12 @@ class EvaluatorConfig:
             raise ValueError(
                 "EvaluatorConfig: `minibatch_strategy` must be "
                 f"'fixed_subset' or 'random'; got {self.minibatch_strategy!r}."
+            )
+        if self.minibatch_archive_policy not in ("promoted_only", "all_with_tag"):
+            raise ValueError(
+                "EvaluatorConfig: `minibatch_archive_policy` must be "
+                "'promoted_only' or 'all_with_tag'; got "
+                f"{self.minibatch_archive_policy!r}."
             )
 
 

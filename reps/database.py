@@ -147,8 +147,31 @@ class ProgramDatabase:
     It also tracks the absolute best program separately to ensure it's never lost.
     """
 
-    def __init__(self, config: DatabaseConfig):
+    def __init__(
+        self,
+        config: DatabaseConfig,
+        minibatch_archive_policy: str = "promoted_only",
+    ):
         self.config = config
+
+        # GEPA Phase 6.3: archive integrity policy. Mirrors
+        # `EvaluatorConfig.minibatch_archive_policy`. Stored here (not on
+        # DatabaseConfig) so legacy callers constructing
+        # `ProgramDatabase(cfg.database)` keep working — the default
+        # `"promoted_only"` is a no-op when no program ever gets tagged
+        # `fidelity == "minibatch"` (i.e. when minibatch is disabled).
+        if minibatch_archive_policy not in ("promoted_only", "all_with_tag"):
+            raise ValueError(
+                f"Invalid minibatch_archive_policy {minibatch_archive_policy!r}. "
+                "Valid: 'promoted_only', 'all_with_tag'."
+            )
+        self.minibatch_archive_policy = minibatch_archive_policy
+
+        # Side dict for minibatch-only programs when policy ==
+        # "promoted_only". These never enter the archive / islands /
+        # Pareto frontier, so sampling cannot pick them as parents.
+        # Kept in-memory for run-level diagnostics and trace reflection.
+        self._minibatch_only: Dict[str, Program] = {}
 
         # In-memory program storage
         self.programs: Dict[str, Program] = {}
@@ -250,6 +273,32 @@ class ProgramDatabase:
         Returns:
             Program ID
         """
+        # GEPA Phase 6.3: archive integrity gate. A program tagged
+        # `metrics["fidelity"] == "minibatch"` failed the promotion
+        # threshold, so it only saw a subset of instances. Mixing its
+        # combined_score into the MAP-Elites archive or Pareto frontier
+        # would corrupt selection (different programs scored on
+        # different instances). Under the safe-by-default
+        # "promoted_only" policy we redirect such programs to a side
+        # dict and skip every archive-touching code path. Under
+        # "all_with_tag" we register normally and let downstream
+        # selection (deferred to v1.5) read the tag.
+        fidelity = program.metrics.get("fidelity") if program.metrics else None
+        if (
+            fidelity == "minibatch"
+            and self.minibatch_archive_policy == "promoted_only"
+        ):
+            if iteration is not None:
+                program.iteration_found = iteration
+                self.last_iteration = max(self.last_iteration, iteration)
+            self._minibatch_only[program.id] = program
+            logger.debug(
+                "Program %s tagged fidelity=minibatch; archived in "
+                "_minibatch_only side dict (policy=promoted_only).",
+                program.id,
+            )
+            return program.id
+
         # Store the program
         # If iteration is provided, update the program's iteration_found
         if iteration is not None:
