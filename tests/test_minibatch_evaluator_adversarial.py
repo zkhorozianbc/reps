@@ -177,19 +177,32 @@ class TestInstanceRegistryEdgeCases:
         assert "INSTANCES" in msg
         assert "list_instances" in msg
 
-    def test_list_instances_raising_propagates(self, tmp_path: Path):
-        # If the user's `list_instances()` itself raises, the harness
-        # currently propagates the exception (does not silently fall back).
-        # Pin this so a future refactor doesn't accidentally swallow it.
+    def test_list_instances_raising_logs_and_falls_back_to_missing_registry(
+        self, tmp_path: Path, caplog
+    ):
+        # If the user's `list_instances()` itself raises, the harness logs
+        # the exception and treats it as "no registry available" — same
+        # graceful path as the legacy-signature fallback. The caller then
+        # surfaces the clearer missing-registry ValueError naming the file.
+        # (Reviewer-flagged in Phase 6 audit; the prior behavior of bubbling
+        # `RuntimeError("registry boom")` was inconsistent with how legacy
+        # benchmarks degrade.)
         body = "    return {'combined_score': 0.5, 'validity': 1.0}\n"
         bench = _write_bench(tmp_path, body=body, registry_kind="function_raises")
         ev = _make_evaluator(bench, minibatch_size=2)
-        with pytest.raises(RuntimeError, match="registry boom"):
-            asyncio.run(
-                ev.evaluate_with_promotion(
-                    "def f(): return 1\n", program_id="x", iteration=0
+        with caplog.at_level("WARNING"):
+            with pytest.raises(ValueError, match="INSTANCES"):
+                asyncio.run(
+                    ev.evaluate_with_promotion(
+                        "def f(): return 1\n", program_id="x", iteration=0
+                    )
                 )
-            )
+        # The originating runtime error from list_instances is surfaced as
+        # a WARNING naming the benchmark file, so a misbehaving registry
+        # callable doesn't silently disappear.
+        warned = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert any("list_instances" in r.message for r in warned)
+        assert any(str(bench) in r.message for r in warned)
 
     def test_empty_instances_list_collapses_to_full_eval(self, tmp_path: Path):
         # `INSTANCES = []` must not wedge or zero-divide. The wiring's

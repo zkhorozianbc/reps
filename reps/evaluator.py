@@ -252,7 +252,22 @@ class Evaluator:
             )
         registry = getattr(module, "INSTANCES", None)
         if registry is None and hasattr(module, "list_instances"):
-            registry = module.list_instances()
+            try:
+                registry = module.list_instances()
+            except Exception as e:
+                # Mirror the legacy-signature path's graceful fallback:
+                # a misbehaving registry callable should not crash the
+                # whole run. Log + treat as "no registry available";
+                # caller falls through to the missing-registry ValueError
+                # which surfaces a clear message naming the file.
+                logger.warning(
+                    "Calling `list_instances()` from %s raised: %s. "
+                    "Treating as no registry — minibatch will be unavailable "
+                    "for this benchmark.",
+                    self.evaluation_file,
+                    e,
+                )
+                registry = None
         if registry is None:
             raise ValueError(
                 f"Benchmark {self.evaluation_file!r} has `minibatch_size` set "
@@ -356,6 +371,16 @@ class Evaluator:
         mb_score = mb_outcome.metrics.get("combined_score")
         threshold = self.config.minibatch_promotion_threshold
 
+        # Promotion gate. Only `combined_score` is consulted — `validity` and
+        # other metadata are NOT gates (a v1.5 stratification layer can read
+        # them from the fidelity-tagged Program). Known-current behaviors,
+        # pinned by adversarial tests in test_minibatch_evaluator_adversarial.py
+        # so any change here is intentional:
+        #   - NaN combined_score: `NaN < threshold` is False, so NaN PROMOTES
+        #     (treated as "the run produced something we can't compare; let
+        #     the full eval decide"). Flip if a future spec mandates rejecting
+        #     NaN-score candidates as broken.
+        #   - validity=0 with combined_score >= threshold: PROMOTES.
         if not isinstance(mb_score, (int, float)) or float(mb_score) < threshold:
             # Reject: program does not earn the full evaluation budget.
             mb_outcome.metrics["fidelity"] = "minibatch"
