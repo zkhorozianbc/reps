@@ -55,8 +55,36 @@ removed.
 |     3 | Trace-grounded reflection              | ✅ Shipped | `c9bda73`, `1fdacfe` |
 |     4 | System-aware merge                     | ✅ Shipped | `f89fb8f`, `b1db148` |
 |     5 | Ancestry-aware reflection              | ✅ Shipped | `2420e69` |
-|     6 | Minibatch evaluation with promotion    | ⬜ Planned  | — |
+|     6 | Minibatch evaluation with promotion    | ❌ Reverted | shipped + reverted — see below |
 |     7 | Adapter pattern refactor (deferred)    | ⬜ Sketched | — |
+
+### Phase 6 — reverted
+
+Phase 6 shipped (commits `31e1482`, `877d57d`, `8441b72`, `2bed1a1`,
+`13f6bf5`) and was then reverted in a single commit on review of the
+public-API contract. The reasons:
+
+- **Polluted the user-facing evaluator contract.** REPS's `Optimizer`
+  is supposed to be a generic optimizer — `evaluate(code) -> score`,
+  any callable, any logic. Phase 6 required benchmarks to expose an
+  `INSTANCES = [...]` (or `list_instances()`) registry and accept an
+  `instances=[...]` kwarg on `evaluate`. That couples the harness to a
+  specific evaluator shape that most REPS benchmarks don't have.
+- **Use case underdeveloped.** Minibatch shines on benchmarks with
+  many independent test cases (math sets, RAG queries — dspy-eval-suite
+  shape). REPS's existing benchmarks are single-program optimizations
+  where evaluation cost is "run once + validate"; there's no natural
+  subset to sample from.
+- **Cascade evaluation already covers fast-fail.** `evaluate_stage1`
+  (cheap) → `evaluate` (full) is a strategy the harness picks; the
+  benchmark decides what "cheap" means. Same generic result protocol,
+  no instance-registry coupling. If a future benchmark wants minibatch
+  semantics, it can implement them inside `evaluate_stage1`.
+
+**If we revisit:** the plan below stays in place as a reference. Phase 6
+is the right shape *if* REPS picks up multi-instance benchmarks. Until
+that's a concrete need, cascade is sufficient and the simpler public
+contract wins.
 
 ## Completed phases (recap)
 
@@ -449,3 +477,5 @@ SHA and a one-line description of what landed.
 | 2026-05-01 | 4.1   | `f89fb8f`  | select_complementary_partner / _pair |
 | 2026-05-01 | 4.2   | `b1db148`  | System-aware merge wired into crossover dispatch |
 | 2026-05-01 | 5     | `2420e69`  | walk_lineage + ancestry block in directive prompt |
+| 2026-05-05 | 6.1-3 | `31e1482`, `877d57d`, `8441b72`, `2bed1a1`, `13f6bf5` | Phase 6 shipped (minibatch with promotion + archive integrity + adversarial tests + review fixes) |
+| 2026-05-05 | 6     | revert | Phase 6 reverted: polluted the user-facing evaluator contract; cascade evaluation covers fast-fail without coupling the harness to an instance registry. See "Phase 6 — reverted" section above. |

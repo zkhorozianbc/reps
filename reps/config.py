@@ -344,60 +344,11 @@ class EvaluatorConfig:
     enable_artifacts: bool = True
     max_artifact_storage: int = 100 * 1024 * 1024  # 100MB per program
 
-    # GEPA Phase 6: minibatch evaluation with promotion. When set, the
-    # evaluator first calls the benchmark's `evaluate(... instances=subset)`
-    # on `minibatch_size` instance keys; the full evaluation only runs if
-    # the minibatch combined_score >= `minibatch_promotion_threshold`.
-    # `minibatch_strategy` controls how the subset is picked
-    # (see `reps.minibatch.select_instances`). None disables the path —
-    # behavior is byte-identical to pre-Phase-6 evaluation.
+    # Forward-compat field for Phase 6 of the GEPA plan (per-iteration
+    # minibatch sampling). Currently unused by the evaluator itself —
+    # exposed so the v1 `reps.Optimizer(minibatch_size=...)` kwarg has a stable
+    # landing slot until the runner consumes it.
     minibatch_size: Optional[int] = None
-    minibatch_promotion_threshold: float = 0.5
-    minibatch_strategy: str = "fixed_subset"  # "fixed_subset" | "random"
-
-    # GEPA Phase 6.3: archive integrity. Determines what happens to a
-    # program tagged `metrics["fidelity"] == "minibatch"` (i.e. one that
-    # failed the promotion gate and only saw a subset of instances).
-    #
-    # "promoted_only" (default, safe): minibatch-only programs are kept
-    #   in `ProgramDatabase._minibatch_only` for diagnostics but do NOT
-    #   enter the MAP-Elites archive, the islands, or the Pareto frontier.
-    #   Sampling paths only see promoted (full-eval) programs, so
-    #   selection cannot be polluted by low-fidelity scores.
-    #
-    # "all_with_tag": minibatch programs ARE registered normally; the
-    #   `fidelity` tag is preserved on the Program for downstream
-    #   stratification. As of Phase 6.3 the samplers do NOT yet read the
-    #   tag — selection treats all archived programs equally. Tag-aware
-    #   stratification is deferred to v1.5; this option is functionally
-    #   equivalent to current behavior for now.
-    minibatch_archive_policy: str = "promoted_only"
-
-    def __post_init__(self):
-        # Cascade and minibatch are different promotion strategies and must
-        # not be combined: cascade promotes between *stages* (separate
-        # evaluator functions), minibatch promotes between *instance
-        # subsets* (single evaluator, different `instances=` argument).
-        # Mixing them produces incoherent fidelity tags and double-spending
-        # of the eval budget. Stage-based pipelines stay in cascade.
-        if self.minibatch_size is not None and self.cascade_evaluation:
-            raise ValueError(
-                "EvaluatorConfig: `minibatch_size` and `cascade_evaluation` "
-                "are mutually exclusive. Set `cascade_evaluation: false` to "
-                "opt into minibatch promotion, or unset `minibatch_size` to "
-                "keep using cascade."
-            )
-        if self.minibatch_strategy not in ("fixed_subset", "random"):
-            raise ValueError(
-                "EvaluatorConfig: `minibatch_strategy` must be "
-                f"'fixed_subset' or 'random'; got {self.minibatch_strategy!r}."
-            )
-        if self.minibatch_archive_policy not in ("promoted_only", "all_with_tag"):
-            raise ValueError(
-                "EvaluatorConfig: `minibatch_archive_policy` must be "
-                "'promoted_only' or 'all_with_tag'; got "
-                f"{self.minibatch_archive_policy!r}."
-            )
 
 
 @dataclass

@@ -113,13 +113,8 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
             if model.reasoning_effort is None:
                 model.reasoning_effort = effort
 
-    # Initialize database. Phase 6.3: pass the minibatch archive policy
-    # so the safe-by-default "promoted_only" gate is enforced when
-    # minibatch promotion is in use.
-    db = ProgramDatabase(
-        config.database,
-        minibatch_archive_policy=config.evaluator.minibatch_archive_policy,
-    )
+    # Initialize database
+    db = ProgramDatabase(config.database)
 
     # Load, evaluate, and add initial program
     initial_code = Path(initial_program).read_text()
