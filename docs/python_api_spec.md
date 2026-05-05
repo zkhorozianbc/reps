@@ -53,14 +53,19 @@ Phases 1-5) reachable as constructor kwargs.
 Everything below is shipped in v1. Everything not listed is deferred to
 v1.5 (see end of doc).
 
-| Symbol | Purpose |
-|---|---|
-| `reps.Model` | LLM wrapper, similar shape to `dspy.LM` |
-| `reps.ModelKwargs` | TypedDict of optional Model construction kwargs (used inline on `Optimizer`) |
-| `reps.Optimizer` | The optimizer |
-| `reps.Optimizer.optimize(initial, evaluate)` | The single entry point |
-| `reps.OptimizationResult` | What `optimize()` returns |
-| `reps.EvaluationResult` | Optional rich return shape from the evaluator (already exists) |
+| Symbol | Purpose | Implemented in |
+|---|---|---|
+| `reps.Model` | LLM wrapper, similar shape to `dspy.LM` | [`reps/api/model.py:75`](../reps/api/model.py#L75) |
+| `reps.ModelKwargs` | TypedDict of optional Model construction kwargs (used inline on `Optimizer`) | [`reps/api/model.py:33`](../reps/api/model.py#L33) |
+| `reps.Optimizer` | The optimizer | [`reps/api/optimizer.py:42`](../reps/api/optimizer.py#L42) |
+| `reps.Optimizer.optimize(initial, evaluate)` | The single entry point | [`reps/api/optimizer.py:159`](../reps/api/optimizer.py#L159) |
+| `reps.Optimizer.from_config(cfg)` | Power-user escape hatch | [`reps/api/optimizer.py:123`](../reps/api/optimizer.py#L123) |
+| `reps.OptimizationResult` | What `optimize()` returns | [`reps/api/result.py:14`](../reps/api/result.py#L14) |
+| `reps.EvaluationResult` | Optional rich return shape from the evaluator | [`reps/evaluation_result.py:11`](../reps/evaluation_result.py#L11) |
+
+Top-level re-exports live in [`reps/__init__.py`](../reps/__init__.py)
+and [`reps/api/__init__.py`](../reps/api/__init__.py); both kept in
+sync via the same import lines.
 
 That's it. Four classes (plus one TypedDict for kwarg typing), one
 method on the optimizer. Internals are unchanged — Pareto, trace
@@ -68,6 +73,9 @@ reflection, merge, lineage, convergence monitor, SOTA controller, all
 of it stays as it is in `reps/`. The public API is just a thin facade.
 
 ## `reps.Model`
+
+**Implemented in:** [`reps/api/model.py:75`](../reps/api/model.py#L75) (class), constructor at line 83, sync `generate` at line 184, `__call__` at line 202.
+**Tests:** [`tests/test_api_model.py`](../tests/test_api_model.py) (38 cases).
 
 Thin facade over the existing `reps.llm.*` providers. Sync-only in v1
 (async wrappers come in v1.5). Most users won't construct this directly
@@ -98,12 +106,22 @@ reps.Model(
 
 - `model` parsed as `"<provider>/<id>"` (e.g.
   `"anthropic/claude-sonnet-4.6"`) or just `"<id>"` (provider inferred
-  via existing `reps.llm.provider_of.provider_of_model`).
+  via existing `reps.llm.provider_of.provider_of_model`). Splitting at
+  [`reps/api/model.py:50`](../reps/api/model.py#L50)
+  (`_split_provider`); resolution at
+  [line 65](../reps/api/model.py#L65) (`_resolve_provider`).
 - `api_key=None` ⇒ provider env-var fallback (`ANTHROPIC_API_KEY`,
   `OPENAI_API_KEY`, `OPENROUTER_API_KEY`). Fail loudly at construction
-  if unresolved.
-- `extended_thinking` is the existing `reasoning` knob.
-- `**provider_kwargs` passed verbatim to the underlying client.
+  if unresolved. See
+  [`reps/api/model.py:101-108`](../reps/api/model.py#L101-L108).
+- `extended_thinking` is the existing `reasoning` knob, mapped to
+  `reasoning_effort` at
+  [`reps/api/model.py:127`](../reps/api/model.py#L127).
+- `**provider_kwargs` passed verbatim to the underlying SDK client.
+  The wrapper rebuilds the SDK client when provider_kwargs are
+  non-empty rather than threading kwargs through the internal
+  `AnthropicLLM`/`OpenAICompatibleLLM` constructors. See
+  [`reps/api/model.py:152-181`](../reps/api/model.py#L152-L181).
 
 ### Methods
 
@@ -117,6 +135,8 @@ ensembles (`Model.ensemble`), and `reps.configure(model=...)` global
 defaults all defer to v1.5.
 
 ## `reps.ModelKwargs`
+
+**Implemented in:** [`reps/api/model.py:33`](../reps/api/model.py#L33).
 
 A `TypedDict(total=False)` of the optional `Model` construction kwargs
 (everything except `model` and `api_key`). Used as `**Unpack[ModelKwargs]`
@@ -137,6 +157,9 @@ class ModelKwargs(TypedDict, total=False):
 ```
 
 ## `reps.Optimizer`
+
+**Implemented in:** [`reps/api/optimizer.py:42`](../reps/api/optimizer.py#L42) (class), constructor at line 52, `optimize()` at line 159, `from_config()` at line 123, kwarg → `Config` mapping at `_build_config` (line 259).
+**Tests:** [`tests/test_api_optimize.py`](../tests/test_api_optimize.py) (78 cases including adversarial coverage and the inline-string-model path).
 
 The optimizer. Constructor takes the model (or a model-name string) and
 the optimization knobs; `optimize()` runs.
@@ -159,7 +182,6 @@ reps.Optimizer(
     trace_reflection: bool = False,             # Phase 3
     lineage_depth: int = 3,                     # Phase 5
     merge: bool = False,                        # Phase 4
-    minibatch_size: Optional[int] = None,       # Phase 6 (placeholder until shipped)
 
     # Population
     num_islands: int = 5,
@@ -172,14 +194,26 @@ reps.Optimizer(
 )
 ```
 
+(Phase 6 `minibatch_size` was shipped then reverted — see
+`docs/gepa_implementation_plan.md` "Phase 6 — reverted".)
+
 ### Behavior
 
 - `model: str` — Optimizer constructs a `reps.Model(model, api_key=...,
-  **model_kwargs)` internally. This is the most common path.
+  **model_kwargs)` internally. This is the most common path. Branch at
+  [`reps/api/optimizer.py:80`](../reps/api/optimizer.py#L80).
 - `model: reps.Model` — passing an already-built Model. In this case
   `api_key` and `**model_kwargs` MUST be empty; passing them raises
-  `ValueError` (those should be set on the Model directly).
-- Anything else — raises `TypeError`.
+  `ValueError`. See
+  [`reps/api/optimizer.py:82-89`](../reps/api/optimizer.py#L82-L89).
+- Anything else — raises `TypeError`. See
+  [`reps/api/optimizer.py:91-95`](../reps/api/optimizer.py#L91-L95).
+- Field-level validation (`max_iterations >= 1`,
+  `selection_strategy in {map_elites|pareto|mixed}`, `num_islands >= 1`)
+  at [`reps/api/optimizer.py:96-104`](../reps/api/optimizer.py#L96-L104).
+- Constructor → internal `Config` mapping happens lazily in
+  [`_build_config`](../reps/api/optimizer.py#L259) at first
+  `optimize()` call.
 
 **Footgun to call out:** typos in the search knobs (e.g.
 `max_itreations=...`) silently land in `**model_kwargs` and may pass
@@ -197,6 +231,9 @@ override them keep using YAML or a `Config` object directly (see
 
 ### `optimize()` — the single entry point
 
+**Implemented in:** [`reps/api/optimizer.py:159`](../reps/api/optimizer.py#L159) (sync wrapper, running-loop guard at line 188), `_aoptimize_internal` at line 206 (the actual async pipeline).
+**Evaluator dispatch:** [`reps/api/evaluate_dispatch.py`](../reps/api/evaluate_dispatch.py) — `register_user_evaluate` (line 67) stores the user's callable in a process-local registry; `write_shim` (line 85) writes a `_reps_user_evaluator.py` into the run dir; `dispatch_user_evaluate` (line 132) handles signature introspection (`_supported_kwargs`, line 94) and return-shape coercion (`coerce_return`, line 108).
+
 ```python
 result: reps.OptimizationResult = optimizer.optimize(
     initial: str,
@@ -207,14 +244,19 @@ result: reps.OptimizationResult = optimizer.optimize(
 ```
 
 `evaluate` is the **single inner abstraction**. It's called with the
-artifact text. Three accepted return shapes, in order of richness:
+artifact text. Three accepted return shapes, in order of richness, all
+coerced to `EvaluationResult` in
+[`coerce_return`](../reps/api/evaluate_dispatch.py#L108):
 
 1. **`float`** — just a scalar score. REPS treats it as `combined_score`
    and skips Pareto / trace-reflection / merge (no per-instance signal
    to act on).
 2. **`dict`** — must include `combined_score`; may include `validity`,
    `per_instance_scores`, `feedback`, `error`. Auto-wrapped in
-   `EvaluationResult`.
+   `EvaluationResult` via
+   [`EvaluationResult.from_dict`](../reps/evaluation_result.py#L41),
+   which peels top-level `per_instance_scores` and `feedback` into
+   the dedicated dataclass fields.
 3. **`reps.EvaluationResult`** — full ASI surface, recommended if you
    want the Phase 1-5 features to actually fire.
 
@@ -226,13 +268,17 @@ out.
 For users who outgrow the simple constructor:
 
 - `reps.Optimizer.from_config(cfg: reps.config.Config)` — accept the full
-  internal `Config` dataclass and run it. This is the **only** escape
+  internal `Config` dataclass and run it. The **only** escape
   hatch we expose in v1. Existing YAML-based configs can be loaded into
-  `Config` via the existing `load_experiment_config` helper, then
-  passed in.
+  `Config` via [`reps.runner.load_experiment_config`](../reps/runner.py),
+  then passed in. Implemented at
+  [`reps/api/optimizer.py:123`](../reps/api/optimizer.py#L123); uses a
+  `_StubModel` ([line 408](../reps/api/optimizer.py#L408)) so the
+  optimize() path has something to reference even when the LLM client
+  isn't built directly through `reps.Model`.
 - `reps.internal.*` re-exports the existing internals (`ReflectionEngine`,
   `WorkerPool`, etc.) — power users who already import these keep
-  working.
+  working. See [`reps/internal/__init__.py`](../reps/internal/__init__.py).
 
 `from_config` is the safety valve: if a user needs a knob the simple
 constructor doesn't expose, they drop down to `Config` rather than
@@ -240,6 +286,9 @@ asking us to grow the constructor. Keeps the v1 surface honest without
 locking advanced users out.
 
 ## `reps.OptimizationResult`
+
+**Implemented in:** [`reps/api/result.py:14`](../reps/api/result.py#L14).
+**Built by:** `_collect_result` at [`reps/api/optimizer.py:325`](../reps/api/optimizer.py#L325).
 
 ```python
 @dataclass
@@ -260,8 +309,11 @@ list — those land in v1.5 if asked for.
 
 ## `reps.EvaluationResult`
 
-Already exists in `reps/evaluation_result.py`. Re-exported at top level
-for convenience. Field shape unchanged from Phase 1.1:
+**Implemented in:** [`reps/evaluation_result.py:11`](../reps/evaluation_result.py#L11).
+**`from_dict` ASI peeling:** [`reps/evaluation_result.py:41`](../reps/evaluation_result.py#L41) — promotes top-level `per_instance_scores` and `feedback` keys into the dataclass fields without mutating the input dict.
+
+Already exists from GEPA Phase 1.1. Re-exported at top level for
+convenience.
 
 ```python
 @dataclass
@@ -361,18 +413,21 @@ For when the simple constructor doesn't have the knob you need.
 
 ## Implementation phases
 
-### A — `reps.Model`
+### A — `reps.Model` ✅ Shipped
 
-Pure shim over existing `reps.llm.*`. ~150 LOC + tests with mocked
-provider clients. No internal changes.
+**Commits:** `3ef3bb4` (initial impl), `df77b02` (provider_kwargs forwarding fix + from_dict ASI peeling), `ab2517f` (LM → Model rename + ModelKwargs + Optimizer accepts string).
+
+Pure shim over existing `reps.llm.*`. ~210 LOC of class + ~50 LOC of helpers + tests with mocked provider clients. No internal changes.
 
 Files:
-- New `reps/api/__init__.py` — re-exports.
-- New `reps/api/model.py` — `Model` class + `ModelKwargs` TypedDict.
-- Update `reps/__init__.py` — re-export `Model`, `ModelKwargs`.
-- Tests `tests/test_api_model.py`.
+- [`reps/api/__init__.py`](../reps/api/__init__.py) — re-exports.
+- [`reps/api/model.py`](../reps/api/model.py) — `Model` class (line 75) + `ModelKwargs` TypedDict (line 33).
+- [`reps/__init__.py`](../reps/__init__.py) — top-level re-export of `Model`, `ModelKwargs`.
+- [`tests/test_api_model.py`](../tests/test_api_model.py) — 38 cases covering provider routing, env-var fallback, kwarg propagation, sync wiring, running-loop guard, provider_kwargs forwarding to the SDK client, and `_to_model_config()` independent-copy semantics.
 
-### B — `reps.Optimizer` + `optimize()`
+### B — `reps.Optimizer` + `optimize()` ✅ Shipped
+
+**Commits:** `aaae09a` (initial impl), `9121c7b` (adversarial test coverage), `df77b02` (review-flagged fixes), `ab2517f` (Optimizer signature: `model: Model | str` + `**ModelKwargs`), `642ab15` (REPS → Optimizer rename).
 
 Builds the constructor + the single entry point. Internally constructs
 a `Config` from the kwargs, instantiates a controller + database +
@@ -381,28 +436,31 @@ Controller and internals are unchanged — this is purely the new entry
 path.
 
 Includes:
-- Signature introspection on the user's `evaluate` callable: the v1
-  contract is `Callable[[str], ...]` so we accept `evaluate(code)`,
-  `evaluate(code, *, env=None)`, and `evaluate(code, *, env=None,
-  instances=None)` — auto-detected so legacy benchmark evaluators work.
-- Return-shape coercion: `float` → wrapped in `dict` →
-  `EvaluationResult`.
-- `from_config(cfg)` classmethod escape hatch.
+- Signature introspection on the user's `evaluate` callable at
+  [`reps/api/evaluate_dispatch.py:94`](../reps/api/evaluate_dispatch.py#L94)
+  (`_supported_kwargs`). The v1 contract is `Callable[[str], ...]`
+  so we accept `evaluate(code)` and `evaluate(code, *, env=None)` —
+  auto-detected so legacy benchmark evaluators work.
+- Return-shape coercion at
+  [`reps/api/evaluate_dispatch.py:108`](../reps/api/evaluate_dispatch.py#L108)
+  (`coerce_return`): `float` → `dict` → `EvaluationResult`.
+- Process-local registry + shim file pattern for the user's evaluator:
+  [`register_user_evaluate`](../reps/api/evaluate_dispatch.py#L67),
+  [`unregister_user_evaluate`](../reps/api/evaluate_dispatch.py#L79),
+  [`write_shim`](../reps/api/evaluate_dispatch.py#L85),
+  [`dispatch_user_evaluate`](../reps/api/evaluate_dispatch.py#L132).
+- `from_config(cfg)` classmethod escape hatch at
+  [`reps/api/optimizer.py:123`](../reps/api/optimizer.py#L123).
 
 Files:
-- New `reps/api/optimizer.py` — `Optimizer` class + `optimize()`.
-- New `reps/api/result.py` — `OptimizationResult`.
-- New `reps/api/evaluate_dispatch.py` — signature introspection +
-  return-shape coercion.
-- Update `reps/__init__.py` — re-export `Optimizer`, `OptimizationResult`,
-  `EvaluationResult`.
-- New `reps/internal/__init__.py` — re-exports current internals
-  (`ReflectionEngine`, `WorkerPool`, `ConvergenceMonitor`, etc.) so
-  users who already import them keep working.
-- Tests `tests/test_api_optimize.py` — end-to-end with a mock LLM and
-  a trivial in-memory evaluator.
+- [`reps/api/optimizer.py`](../reps/api/optimizer.py) — `Optimizer` class (line 42) + `optimize()` (line 159) + `_aoptimize_internal` (line 206) + `_build_config` (line 259) + `_collect_result` (line 325) + `_StubModel` (line 408).
+- [`reps/api/result.py`](../reps/api/result.py) — `OptimizationResult` (line 14).
+- [`reps/api/evaluate_dispatch.py`](../reps/api/evaluate_dispatch.py) — signature introspection + return-shape coercion + the registry/shim mechanism.
+- [`reps/internal/__init__.py`](../reps/internal/__init__.py) — re-exports current internals (`ReflectionEngine`, `WorkerPool`, `ConvergenceMonitor`, etc.) so users who already import them keep working.
+- [`tests/test_api_optimize.py`](../tests/test_api_optimize.py) — 78 cases including end-to-end with a mock LLM, the inline-string-model path, registry concurrency, env-var collision check, `from_config` round-trip, and post-construction validation.
+- [`tests/test_evaluation_contract.py`](../tests/test_evaluation_contract.py) — `EvaluationResult.from_dict` ASI peeling tests.
 
-That's the whole v1. Two phases, two commits.
+That's the whole v1. Two phases.
 
 ## Open design decisions (v1 only)
 
@@ -469,14 +527,23 @@ Constructor surface (Optimizer):
 
 Evaluator contract:
 - `evaluate(program_path: str, ...)` legacy file-path shim. v1 assumes
-  `evaluate(code: str, ...)` (with optional `env` and `instances`
-  keywords). Users with file-path-based evaluators wrap them in 2 lines.
+  `evaluate(code: str, ...)` (with optional `env` keyword). Users with
+  file-path-based evaluators wrap them in 2 lines.
+- `instances=[...]` kwarg for minibatch evaluation. Was shipped as GEPA
+  Phase 6 then reverted; cascade evaluation covers the same use case
+  without coupling the harness to an instance registry. See
+  `docs/gepa_implementation_plan.md` "Phase 6 — reverted".
 
 `reps.Optimizer.from_config_dict(dict)` — YAML-dict bridge. v1 has
 `from_config(Config)` only; the dict version is just `Config(**dict)`.
 
 ## Append-only changelog
 
-| Date | Phase | Commit | Notes |
-|------|-------|--------|-------|
-| —    | —     | —      | (spec only — no implementation yet) |
+| Date       | Phase  | Commit     | Notes |
+|------------|--------|------------|-------|
+| 2026-05-04 | A      | `3ef3bb4`  | `reps.LM` initial impl (renamed to `Model` later) + 21 tests |
+| 2026-05-04 | B      | `aaae09a`  | `reps.REPS + optimize() + OptimizationResult` (renamed to `Optimizer` later) + `evaluate_dispatch.py` registry/shim mechanism + 29 tests |
+| 2026-05-04 | B+     | `9121c7b`  | Adversarial test coverage from test subagent: +62 tests across LM error paths, constructor wiring, dispatch edge cases, registry concurrency, env-var collision, `from_config` round-trip, internal back-compat |
+| 2026-05-04 | A+B    | `df77b02`  | Review-flagged fixes: `provider_kwargs` actually forwarded to the underlying SDK client; `EvaluationResult.from_dict` peels top-level `per_instance_scores` and `feedback` into the dataclass fields |
+| 2026-05-04 | rename | `642ab15`  | `reps.REPS` → `reps.Optimizer` (the package and class shared a name) |
+| 2026-05-04 | rename | `ab2517f`  | `reps.LM` → `reps.Model` + new `reps.ModelKwargs` TypedDict + `Optimizer(model: Model \| str, api_key=, **ModelKwargs)` signature so the common case ("just give me a model name and an api key") avoids building a Model first |
