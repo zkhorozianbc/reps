@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from reps.config import EvaluatorConfig
 from reps.database import ProgramDatabase
 from reps.evaluation_result import EvaluationResult
+from reps.interpret import Interpretation
 from reps.llm.ensemble import LLMEnsemble
 from reps.async_utils import TaskPool, run_in_executor
 from reps.prompt_sampler import PromptSampler
@@ -70,6 +71,7 @@ class Evaluator:
         prompt_sampler: Optional[PromptSampler] = None,
         database: Optional[ProgramDatabase] = None,
         suffix: Optional[str] = ".py",
+        interpret: Optional[Interpretation] = None,
     ):
         self.config = config
         self.evaluation_file = evaluation_file
@@ -77,6 +79,9 @@ class Evaluator:
         self.llm_ensemble = llm_ensemble
         self.prompt_sampler = prompt_sampler
         self.database = database
+        # Pluggable scalar reduction over per_instance_scores.
+        # None ⇒ legacy behavior (use whatever combined_score the evaluator emits).
+        self.interpret: Optional[Interpretation] = interpret
 
         # Create a task pool for parallel evaluation
         self.task_pool = TaskPool(max_concurrency=config.parallel_evaluations)
@@ -201,8 +206,9 @@ class Evaluator:
                     env=call_env,
                 )
                 artifacts = dict(_call_artifacts.get() or {})
+                metrics = self._apply_interpretation(eval_result)
                 return EvaluationOutcome(
-                    metrics=eval_result.metrics,
+                    metrics=metrics,
                     artifacts=artifacts,
                     program_id=pid,
                     per_instance_scores=eval_result.per_instance_scores,
@@ -407,6 +413,43 @@ class Evaluator:
             f"All evaluation attempts failed for program{program_id_str}. Last error: {str(last_exception)}"
         )
         return EvaluationResult(metrics={"error": 0.0})
+
+    def _apply_interpretation(self, eval_result: EvaluationResult) -> Dict[str, float]:
+        """Optionally collapse per_instance_scores → combined_score via self.interpret.
+
+        Legacy path (interpret is None): return metrics as-is. The user's
+        evaluator owns combined_score.
+
+        Configured path (interpret is a callable): compute the scalar from
+        per_instance_scores and stamp it as combined_score, overwriting any
+        value the evaluator emitted. The pre-interpretation value (if any)
+        is preserved as `combined_score_raw` for inspection. We also stash
+        the chosen scalar under `interpreted_score` so downstream metric
+        consumers can distinguish "the optimizer's promotion key" from
+        "whatever the benchmark called combined_score".
+
+        Returns the (possibly mutated) metrics dict — the same dict object
+        from `eval_result.metrics` so artifact / feedback mutations elsewhere
+        stay consistent.
+        """
+        metrics = eval_result.metrics
+        if self.interpret is None:
+            return metrics
+        try:
+            scalar = float(self.interpret(eval_result.per_instance_scores, metrics))
+        except Exception as e:
+            # An interpretation that raises should not nuke the iteration —
+            # log and fall back to whatever metric the evaluator produced.
+            logger.warning(
+                "interpret() raised %s: %s; falling back to evaluator combined_score",
+                type(e).__name__, e,
+            )
+            return metrics
+        if "combined_score" in metrics:
+            metrics["combined_score_raw"] = metrics["combined_score"]
+        metrics["combined_score"] = scalar
+        metrics["interpreted_score"] = scalar
+        return metrics
 
     def _process_evaluation_result(self, result: Any) -> EvaluationResult:
         """

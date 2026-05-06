@@ -29,6 +29,7 @@ from reps.api.model import Model, ModelKwargs
 from reps.api.optimizer import Optimizer
 from reps.api.result import OptimizationResult
 from reps.evaluation_result import EvaluationResult
+from reps import interpret  # reps.interpret.{mean, worst, cvar, ...}
 
 __all__ = [
     "IterationConfig",
@@ -47,4 +48,5 @@ __all__ = [
     "Optimizer",
     "OptimizationResult",
     "EvaluationResult",
+    "interpret",
 ]

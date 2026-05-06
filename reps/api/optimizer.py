@@ -35,6 +35,7 @@ from reps.api.model import Model, ModelKwargs
 from reps.api.result import OptimizationResult
 from reps.config import Config, LLMConfig, LLMModelConfig
 from reps.database import ProgramDatabase
+from reps.interpret import Interpretation
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,10 @@ class Optimizer:
         minibatch_size: Optional[int] = None,
         # Population
         num_islands: int = 5,
+        # Interpretation: scalar reduction over per_instance_scores. None ⇒
+        # legacy behavior (use evaluator-supplied combined_score). When set,
+        # overrides combined_score with interpret(per_instance_scores, metrics).
+        interpret: Optional[Interpretation] = None,
         # Output
         output_dir: Optional[str] = None,
         # Inline Model construction (only used when `model` is a string).
@@ -103,6 +108,12 @@ class Optimizer:
         if num_islands < 1:
             raise ValueError(f"num_islands must be >= 1, got {num_islands}")
 
+        if interpret is not None and not callable(interpret):
+            raise TypeError(
+                f"reps.Optimizer: `interpret` must be a callable "
+                f"(per_instance_scores, metrics) -> float; got {type(interpret).__name__}"
+            )
+
         self.max_iterations = max_iterations
         self.selection_strategy = selection_strategy
         self.pareto_fraction = pareto_fraction
@@ -111,6 +122,7 @@ class Optimizer:
         self.merge_enabled = merge
         self.minibatch_size = minibatch_size
         self.num_islands = num_islands
+        self.interpret = interpret
         self.output_dir = output_dir
 
         self._config: Optional[Config] = None  # built lazily in _build_config
@@ -148,6 +160,7 @@ class Optimizer:
         instance.merge_enabled = cfg.reps.merge.enabled
         instance.minibatch_size = getattr(cfg.evaluator, "minibatch_size", None)
         instance.num_islands = cfg.database.num_islands
+        instance.interpret = None  # from_config path defers to evaluator's combined_score
         instance.output_dir = cfg.output
         instance._config = cfg
         return instance
@@ -239,6 +252,7 @@ class Optimizer:
                 initial_program=str(initial_path),
                 evaluator=evaluator_path,
                 output_dir=run_dir,
+                interpret=self.interpret,
             )
             return self._collect_result(
                 run_dir, cfg=cfg, persisted_output=persisted_output

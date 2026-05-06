@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from reps.config import Config
 from reps.database import Program, ProgramDatabase
+from reps.interpret import Interpretation
 from reps.utils import safe_numeric_average
 
 if TYPE_CHECKING:
@@ -165,12 +166,14 @@ class ProcessParallelController:
         database: ProgramDatabase,
         file_suffix: str = ".py",
         output_dir: Optional[str] = None,
+        interpret: Optional[Interpretation] = None,
     ):
         self.config = config
         self.evaluation_file = evaluation_file
         self.database = database
         self.file_suffix = file_suffix
         self.output_dir = output_dir
+        self.interpret = interpret
         self._reps_metrics = None
 
         # Shared singletons — populated by start()
@@ -313,6 +316,7 @@ class ProcessParallelController:
             evaluator_prompt_sampler,
             database=self.database,
             suffix=self.file_suffix,
+            interpret=self.interpret,
         )
 
         max_conc = (

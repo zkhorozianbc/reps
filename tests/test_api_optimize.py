@@ -430,7 +430,7 @@ def test_optimize_happy_path_returns_optimization_result(monkeypatch, tmp_path):
 
     captured = {}
 
-    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir, interpret=None):
         captured["config"] = config
         captured["initial_program"] = initial_program
         captured["evaluator"] = evaluator
@@ -479,7 +479,7 @@ def test_optimize_uses_tempdir_when_output_dir_is_none(monkeypatch):
 
     seen_output: list = []
 
-    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir, interpret=None):
         seen_output.append(output_dir)
         _seed_database(output_dir, num_islands=config.database.num_islands)
 
@@ -506,7 +506,7 @@ def test_optimize_runs_user_evaluate_via_shim(monkeypatch, tmp_path):
         received_codes.append(code)
         return 0.7
 
-    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir, interpret=None):
         # Drive the shim the same way Evaluator would.
         import importlib.util
         spec = importlib.util.spec_from_file_location("_reps_user_evaluator", evaluator)
@@ -791,7 +791,7 @@ def test_optimize_cleans_up_registry_and_shim_on_success(monkeypatch, tmp_path):
 
     captured_id = {}
 
-    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir, interpret=None):
         captured_id["env"] = os.environ.get("REPS_USER_EVALUATOR_ID")
         _seed_database(output_dir, num_islands=config.database.num_islands)
 
@@ -816,7 +816,7 @@ def test_optimize_cleans_up_registry_on_exception(monkeypatch, tmp_path):
 
     captured_id = {}
 
-    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir, interpret=None):
         captured_id["env"] = os.environ.get("REPS_USER_EVALUATOR_ID")
         raise RuntimeError("simulated controller crash")
 
@@ -843,7 +843,7 @@ def test_optimize_restores_pre_existing_env_var(monkeypatch, tmp_path):
     output_dir = tmp_path / "run"
     opt = Optimizer(model=lm, max_iterations=1, output_dir=str(output_dir))
 
-    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir, interpret=None):
         # During the run, the env var should carry the new id, not the
         # preexisting one.
         assert os.environ.get("REPS_USER_EVALUATOR_ID") != "preexisting-value"
@@ -1069,7 +1069,7 @@ def test_optimize_works_outside_async_context(monkeypatch, tmp_path):
     output_dir = tmp_path / "run"
     opt = Optimizer(model=lm, max_iterations=1, output_dir=str(output_dir))
 
-    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir, interpret=None):
         _seed_database(output_dir, num_islands=config.database.num_islands)
 
     with patch("reps.runner.run_reps", new=fake_run_reps):
@@ -1091,7 +1091,7 @@ def test_collect_result_handles_empty_database(monkeypatch, tmp_path):
     output_dir = tmp_path / "run"
     opt = Optimizer(model=lm, max_iterations=1, output_dir=str(output_dir))
 
-    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir, interpret=None):
         # Empty DB — just metadata, no programs/.
         out = Path(output_dir)
         (out / "programs").mkdir(parents=True, exist_ok=True)
@@ -1124,7 +1124,7 @@ def test_collect_result_total_metric_calls_counts_all_programs(monkeypatch, tmp_
     output_dir = tmp_path / "run"
     opt = Optimizer(model=lm, max_iterations=1, output_dir=str(output_dir))
 
-    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir, interpret=None):
         out = Path(output_dir)
         (out / "programs").mkdir(parents=True, exist_ok=True)
         metadata = {
@@ -1164,7 +1164,7 @@ def test_collect_result_aggregates_tokens_across_programs(monkeypatch, tmp_path)
     output_dir = tmp_path / "run"
     opt = Optimizer(model=lm, max_iterations=1, output_dir=str(output_dir))
 
-    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir, interpret=None):
         out = Path(output_dir)
         (out / "programs").mkdir(parents=True, exist_ok=True)
         metadata = {
@@ -1213,7 +1213,7 @@ def test_output_dir_none_yields_none_on_result(monkeypatch, tmp_path):
     lm = _make_lm(monkeypatch)
     opt = Optimizer(model=lm, max_iterations=1)  # output_dir=None
 
-    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir, interpret=None):
         _seed_database(output_dir, num_islands=config.database.num_islands)
 
     with patch("reps.runner.run_reps", new=fake_run_reps):
@@ -1229,7 +1229,7 @@ def test_output_dir_set_yields_resolved_absolute_path_on_result(monkeypatch, tmp
     output_dir = tmp_path / "myrun"
     opt = Optimizer(model=lm, max_iterations=1, output_dir=str(output_dir))
 
-    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir, interpret=None):
         _seed_database(output_dir, num_islands=config.database.num_islands)
 
     with patch("reps.runner.run_reps", new=fake_run_reps):

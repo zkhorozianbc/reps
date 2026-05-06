@@ -9,5 +9,13 @@ from reps.api.model import Model, ModelKwargs
 from reps.api.optimizer import Optimizer
 from reps.api.result import OptimizationResult
 from reps.evaluation_result import EvaluationResult
+from reps import interpret
 
-__all__ = ["Model", "ModelKwargs", "Optimizer", "OptimizationResult", "EvaluationResult"]
+__all__ = [
+    "Model",
+    "ModelKwargs",
+    "Optimizer",
+    "OptimizationResult",
+    "EvaluationResult",
+    "interpret",
+]

@@ -30,6 +30,7 @@ from typing import Optional
 import yaml
 
 from reps.config import Config, load_config
+from reps.interpret import Interpretation
 
 
 def load_experiment_config(config_path: str) -> Config:
@@ -54,8 +55,20 @@ def _next_run_dir(base: str) -> str:
     return str(run_dir)
 
 
-async def run_reps(config: Config, initial_program: str, evaluator: str, output_dir: str):
-    """Run experiment with the REPS harness."""
+async def run_reps(
+    config: Config,
+    initial_program: str,
+    evaluator: str,
+    output_dir: str,
+    interpret: Optional[Interpretation] = None,
+):
+    """Run experiment with the REPS harness.
+
+    `interpret`, when provided, is the scalar reduction applied to
+    `per_instance_scores` to produce `combined_score`. Threaded through to
+    both the seed evaluator (one-shot, here) and the controller's evaluator
+    (per-iteration, in `start()`).
+    """
     from reps.controller import ProcessParallelController
     from reps.database import Program, ProgramDatabase
     from reps.llm.ensemble import LLMEnsemble
@@ -123,7 +136,7 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
     # Use evaluate_isolated so per_instance_scores and feedback (if the
     # benchmark emits them) reach the seed Program, not just evolved children.
     from reps.evaluator import Evaluator
-    seed_evaluator = Evaluator(config.evaluator, evaluator)
+    seed_evaluator = Evaluator(config.evaluator, evaluator, interpret=interpret)
     seed_outcome = await seed_evaluator.evaluate_isolated(initial_code, program_id="initial")
     seed_metrics = seed_outcome.metrics
     if seed_outcome.artifacts:
@@ -149,6 +162,7 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
         evaluation_file=evaluator,
         database=db,
         output_dir=output_dir,
+        interpret=interpret,
     )
 
     # Initialize reflection engine with LLM ensemble
