@@ -23,6 +23,16 @@ Verified against [DeepMind's official validator](https://colab.research.google.c
 
 ![REPS Circle Packing](experiment/results/circle_sonnet_reps/packing.png)
 
+## Status: pre-1.0
+
+REPS is pre-1.0. The Python API
+([`docs/python_api_spec.md`](docs/python_api_spec.md)) shipped recently
+and may still evolve. Per [`docs/release_spec.md`](docs/release_spec.md),
+minor version bumps (0.1 → 0.2) may include breaking changes during
+the pre-1.0 era. Pin to a specific minor version (e.g.
+`reps-search==0.1.*`) if you need stability across upgrades. Strict
+semver applies once REPS reaches 1.0.0.
+
 ## Install
 
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).

@@ -1,0 +1,41 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install REPS in editable mode with dev extras
+        run: uv pip install --system -e ".[dev]"
+
+      - name: Run pytest
+        run: uv run python -m pytest tests/ -v
+        env:
+          # The previous 2 env-key-requiring failures are eliminated
+          # by the test_skip spec's lazy summarizer construction in
+          # production code (reps/controller.py) — no skipif markers
+          # needed. CI passes without ANTHROPIC_API_KEY because the
+          # controller no longer eagerly constructs the summarizer
+          # LLM at __init__ time. See docs/test_skip_spec.md.
+          PYTHONUNBUFFERED: "1"

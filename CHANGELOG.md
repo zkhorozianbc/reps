@@ -1,0 +1,99 @@
+# Changelog
+
+All notable changes to REPS will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+once it reaches 1.0.0. Until then, the project follows the pre-1.0 policy
+documented in [`docs/release_spec.md`](docs/release_spec.md): minor bumps
+may include breaking changes; only patch bumps are safe to consume blindly.
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.1.0] - 2026-05-05
+
+First public release. Ships the v1 Python API
+([`docs/python_api_spec.md`](docs/python_api_spec.md)) and GEPA Phases 1-5
+([`docs/gepa_implementation_plan.md`](docs/gepa_implementation_plan.md)).
+
+### Added
+
+- `reps.Optimizer` — single-class entry point for evolutionary code
+  search; constructed with `model=...` plus optional knobs, runs via
+  `optimizer.optimize(initial, evaluate)` (`aaae09a`, renamed from
+  `reps.REPS` in `642ab15`).
+- `reps.Model` — sync LLM facade over `reps.llm.*` providers
+  (Anthropic, OpenAI, OpenRouter); model strings parsed as
+  `"<provider>/<id>"` with env-var fallback for `api_key` (`3ef3bb4`,
+  renamed from `reps.LM` in `ab2517f`).
+- `reps.ModelKwargs` — `TypedDict(total=False)` of optional `Model`
+  construction kwargs; spread as `**Unpack[ModelKwargs]` on
+  `Optimizer` so common-case users skip the `Model` constructor
+  entirely (`ab2517f`).
+- `reps.OptimizationResult` — return type from `optimize()`; carries
+  `best_code`, `best_score`, `best_metrics`, `best_per_instance_scores`,
+  `best_feedback`, `iterations_run`, `total_metric_calls`,
+  `total_tokens`, `output_dir` (`aaae09a`).
+- `reps.EvaluationResult` — re-exported at top level; evaluators may
+  return `float`, `dict`, or `EvaluationResult` and the harness coerces
+  consistently (`102952e`).
+- `EvaluationResult.per_instance_scores` and `EvaluationResult.feedback`
+  fields — power Pareto selection, trace reflection, and merge (GEPA
+  Phase 1.1, `102952e`).
+- `Optimizer.from_config(cfg: reps.config.Config)` — escape hatch for
+  power users who need knobs the simple constructor doesn't expose
+  (`aaae09a`).
+- `reps.internal.*` — documented re-export surface for advanced
+  internals (`ReflectionEngine`, `WorkerPool`, `ConvergenceMonitor`,
+  etc.) so existing direct importers keep working (`aaae09a`).
+- Pareto-frontier selection — `selection_strategy="pareto"` or
+  `"mixed"` with `pareto_fraction=...` on `Optimizer`; chooses parents
+  by per-instance domination instead of MAP-Elites bins (GEPA Phase 2,
+  `5dea23b`, `7e73e61`).
+- Trace-grounded reflection — `trace_reflection=True` on `Optimizer`
+  emits a per-candidate LLM-generated mutation directive from the
+  parent's specific failures (GEPA Phase 3, `c9bda73`, `1fdacfe`).
+- System-aware merge — `merge=True` on `Optimizer` selects crossover
+  partners whose strengths complement the primary's weaknesses on
+  disjoint instance dimensions (GEPA Phase 4, `f89fb8f`, `b1db148`).
+- Ancestry-aware reflection — `lineage_depth=N` on `Optimizer` extends
+  trace reflection with N generations of parent context (GEPA Phase 5,
+  `2420e69`).
+- `circle_packing` benchmark emits four sub-scores (`validity`,
+  `boundary`, `overlap`, `sum_radii_progress`) as
+  `per_instance_scores` plus `feedback` (`eac9f83`).
+
+### Fixed
+
+- `provider_kwargs` are now actually forwarded to the underlying SDK
+  client when constructing `reps.Model` (previously declared but
+  swallowed) (`df77b02`).
+- `EvaluationResult.from_dict` peels top-level `per_instance_scores`
+  and `feedback` keys into the dedicated dataclass fields rather than
+  leaving them buried in `metrics` (`df77b02`).
+
+### Removed
+
+- GEPA Phase 6 (minibatch evaluation with promotion) — shipped in
+  `31e1482`, `877d57d`, `8441b72`, `2bed1a1`, `13f6bf5`, then reverted
+  in `d0ad5c0` because the `evaluate(code, instances=...)` contract
+  coupled the harness to a benchmark-side instance registry that most
+  REPS benchmarks don't have. Cascade evaluation
+  (`evaluate_stage1` → `evaluate`) covers the same fast-fail use case
+  without polluting the public contract. See
+  [`docs/gepa_implementation_plan.md` "Phase 6 — reverted"](docs/gepa_implementation_plan.md).
+
+[Unreleased]: https://github.com/zkhorozianbc/reps/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/zkhorozianbc/reps/releases/tag/v0.1.0
