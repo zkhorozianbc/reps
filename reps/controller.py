@@ -246,18 +246,13 @@ class ProcessParallelController:
             self._reps_reflection_config = asdict(reps.reflection)
 
             # Dedicated summarizer LLM (independent of worker ensemble).
-            # Fail LOUDLY now if the summarizer is enabled but its model
-            # can't be constructed — better than silently disabling F8
-            # annotations for the whole run.
-            self._reps_summarizer_llm = None
-            summarizer_cfg = getattr(reps, "summarizer", None)
-            if summarizer_cfg is not None and summarizer_cfg.enabled:
-                from reps.program_summarizer import build_summarizer_llm
-                self._reps_summarizer_llm = build_summarizer_llm(summarizer_cfg)
-                logger.info(
-                    f"Summarizer LLM: model={summarizer_cfg.model_id} "
-                    f"provider={self._reps_summarizer_llm.provider}"
-                )
+            # Construction is DEFERRED to first use so importing/constructing
+            # a controller does not require an Anthropic/OpenAI key when the
+            # summarizer happens to be enabled-by-default in cfg. Failures
+            # still surface loudly — but at the first iteration that needs
+            # them, not at __init__. See _get_reps_summarizer_llm().
+            self._reps_summarizer_llm = None  # cache; built on first use
+            self._reps_summarizer_cfg = getattr(reps, "summarizer", None)
 
             worker_names = list(self._reps_worker_pool._configs.keys())
             logger.info(
@@ -269,6 +264,27 @@ class ProcessParallelController:
             logger.info("REPS features disabled")
 
         logger.info(f"Initialized async controller with {self.num_workers} workers")
+
+    def _get_reps_summarizer_llm(self):
+        """Lazily construct the summarizer LLM.
+
+        Returns None if the summarizer is disabled or REPS is off. Raises
+        loudly on first call if the summarizer is enabled but no api_key is
+        resolvable — same loud-failure semantics as before, just deferred
+        from __init__ to first batch. See ``docs/test_skip_spec.md``.
+        """
+        cfg = getattr(self, "_reps_summarizer_cfg", None)
+        if cfg is None or not cfg.enabled:
+            return None
+        if self._reps_summarizer_llm is None:
+            from reps.program_summarizer import build_summarizer_llm
+
+            self._reps_summarizer_llm = build_summarizer_llm(cfg)
+            logger.info(
+                f"Summarizer LLM: model={cfg.model_id} "
+                f"provider={self._reps_summarizer_llm.provider}"
+            )
+        return self._reps_summarizer_llm
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -621,38 +637,44 @@ class ProcessParallelController:
 
         # Per-iteration summarization: run BEFORE the child enters the DB so
         # descendants that start concurrently see the summary. Uses a
-        # dedicated summarizer LLM (built at controller startup) — NOT the
+        # dedicated summarizer LLM (built lazily on first use) — NOT the
         # worker ensemble — so the summarizer model is independent of what
         # workers use. Best-effort: failures don't block the child.
         summarizer_cfg = getattr(self.config.reps, "summarizer", None)
-        if (
-            self._reps_enabled
-            and self._reps_summarizer_llm is not None
-            and (summarizer_cfg is None or summarizer_cfg.enabled)
-        ):
+        if self._reps_enabled and (summarizer_cfg is None or summarizer_cfg.enabled):
             try:
-                from reps.program_summarizer import summarize_program
-
-                turns_dicts = [_turn_to_dict(t) for t in result.turns]
-                summary = await summarize_program(
-                    program_id=final_child_id,
-                    code=result.child_code,
-                    turns=turns_dicts,
-                    parent_score=parent_score,
-                    child_score=child_score,
-                    improved=child_score > parent_score,
-                    summarizer_llm=self._reps_summarizer_llm,
-                    task_instructions=(
-                        summarizer_cfg.task_instructions if summarizer_cfg else None
-                    ),
-                )
-                if summary:
-                    ann = child_metadata.setdefault("reps_annotations", {})
-                    ann["summary"] = summary
+                summarizer_llm = self._get_reps_summarizer_llm()
             except Exception as e:
                 logger.warning(
-                    "per-iteration summarizer failed for %s: %s", final_child_id[:8], e
+                    "per-iteration summarizer LLM construction failed: %s", e
                 )
+                summarizer_llm = None
+            if summarizer_llm is not None:
+                try:
+                    from reps.program_summarizer import summarize_program
+
+                    turns_dicts = [_turn_to_dict(t) for t in result.turns]
+                    summary = await summarize_program(
+                        program_id=final_child_id,
+                        code=result.child_code,
+                        turns=turns_dicts,
+                        parent_score=parent_score,
+                        child_score=child_score,
+                        improved=child_score > parent_score,
+                        summarizer_llm=summarizer_llm,
+                        task_instructions=(
+                            summarizer_cfg.task_instructions if summarizer_cfg else None
+                        ),
+                    )
+                    if summary:
+                        ann = child_metadata.setdefault("reps_annotations", {})
+                        ann["summary"] = summary
+                except Exception as e:
+                    logger.warning(
+                        "per-iteration summarizer failed for %s: %s",
+                        final_child_id[:8],
+                        e,
+                    )
 
         child = Program(
             id=final_child_id,
