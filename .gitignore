@@ -8,10 +8,12 @@ openevolve/.venv/
 openevolve/results/
 openevolve/openevolve_output/
 *.egg-info/
+dist/
 docs/history/
 
-# Experiment results — keep configs and best programs, skip logs/checkpoints
-experiment/results/*/seed_*/logs/
-experiment/results/*/seed_*/checkpoints/
-experiment/results/*/*.log
-experiment/results/*/seed_*/best/
+# Experiment results — keep configs and best programs, skip ephemeral run output.
+# The ** glob catches both seed_* and run_* layouts.
+experiment/results/**/logs/
+experiment/results/**/checkpoints/
+experiment/results/**/*.log
+experiment/results/**/best/

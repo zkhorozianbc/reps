@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/python-3.12-blue" alt="Python 3.12">
 </p>
 
-REPS evolves programs with an LLM-driven loop that reflects between batches, balances explorer/exploiter workers, detects convergence, and steers compute by distance to a known target. Forked from [OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve); now self-contained.
+REPS evolves programs with an LLM-driven loop that reflects between batches, balances explorer/exploiter workers, detects convergence, and steers compute by distance to a known target.
 
 ## Result: Circle Packing n=26
 
@@ -23,6 +23,24 @@ Verified against [DeepMind's official validator](https://colab.research.google.c
 
 ![REPS Circle Packing](experiment/results/circle_sonnet_reps/packing.png)
 
+## What REPS does
+
+- **Adaptive selection** — `selection_strategy="map_elites" | "pareto" | "mixed"` with `pareto_fraction` for blending MAP-Elites bins and per-instance Pareto fronts. (`reps/api/optimizer.py:64`, GEPA Phase 2)
+- **Trace reflection** — `trace_reflection=True`: the reflection LLM sees per-instance scores + feedback from the parent's failures, not just aggregate scores. (`reps/api/optimizer.py:66`, GEPA Phase 3)
+- **Ancestry-aware reflection** — `lineage_depth=N`: extends reflection with the last N parents in a candidate's chain. (`reps/api/optimizer.py:67`, GEPA Phase 5)
+- **System-aware merge** — `merge=True`: candidates from different islands recombine via an LLM-driven merge prompt that targets disjoint instance dimensions. (`reps/api/optimizer.py:68`, GEPA Phase 4)
+- **Convergence + SOTA steering** — built-in convergence monitor (edit entropy + strategy divergence) and gap-aware compute steering when a target score is set. On by default.
+
+## Status: pre-1.0
+
+REPS is pre-1.0. The Python API
+([`docs/python_api_spec.md`](docs/python_api_spec.md)) shipped recently
+and may still evolve. Per [`docs/release_spec.md`](docs/release_spec.md),
+minor version bumps (0.1 → 0.2) may include breaking changes during
+the pre-1.0 era. Pin to a specific minor version (e.g.
+`reps-search==0.1.*`) if you need stability across upgrades. Strict
+semver applies once REPS reaches 1.0.0.
+
 ## Install
 
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
@@ -34,7 +52,9 @@ uv venv .venv --python 3.12
 uv pip install -e .
 ```
 
-Set the API key matching your config's `provider:`
+PyPI publish is in flight; this README will be updated to `pip install reps-search` once the package lands. Optional extras: `[dspy]` (the `dspy_react` worker), `[benchmarks]` (`scipy` + `matplotlib` for the bundled circle-packing benchmark).
+
+Set the API key matching your model's provider:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...      # provider: anthropic
@@ -44,7 +64,76 @@ export OPENAI_API_KEY=sk-...             # provider: openai
 
 A sibling `.env` file is auto-loaded.
 
-## Run
+## Quick start (Python)
+
+REPS is a Python library. Pass a seed program string and an evaluator callable; get back the best evolved program.
+
+```python
+import reps
+
+def evaluate(code: str) -> float:
+    # Run the candidate, return a score. Higher is better.
+    namespace = {}
+    exec(code, namespace)
+    return float(namespace["solve"]())
+
+result = reps.Optimizer(
+    model="anthropic/claude-sonnet-4.6",   # api_key from $ANTHROPIC_API_KEY
+    max_iterations=20,
+).optimize(
+    initial=open("seed.py").read(),
+    evaluate=evaluate,
+)
+
+print(result.best_score)
+print(result.best_code)
+```
+
+## What's an evaluator?
+
+An evaluator is any `Callable[[str], float | dict | reps.EvaluationResult]`. REPS calls it with the candidate program text and uses the returned score to drive selection. Return a `float` for a quick start, a `dict` with `combined_score` and optional `per_instance_scores` / `feedback` for richer signal, or a `reps.EvaluationResult` to unlock the per-objective Pareto + trace-reflection paths described in [`docs/python_api_spec.md`](docs/python_api_spec.md).
+
+```python
+def eval_simple(code: str) -> float:    return 1.0
+def eval_dict(code: str) -> dict:       return {"combined_score": 0.9, "feedback": "..."}
+def eval_full(code: str) -> reps.EvaluationResult: ...
+```
+
+## GEPA-style features (constructor knobs)
+
+| Kwarg | Effect | Default |
+|---|---|---|
+| `selection_strategy` | `"map_elites"` (REPS classic), `"pareto"` (GEPA-style frontier), or `"mixed"` | `"map_elites"` |
+| `pareto_fraction` | Blend ratio when `selection_strategy="mixed"` | `0.0` |
+| `trace_reflection` | Reflection sees per-instance scores + feedback, not aggregates | `False` |
+| `lineage_depth` | How many ancestors the reflection prompt sees | `3` |
+| `merge` | Enable LLM-driven cross-island merge | `False` |
+| `num_islands` | Population islands for diversity | `5` |
+| `max_iterations` | Search budget | `100` |
+| `output_dir` | Persist run artifacts; `None` ⇒ tempdir | `None` |
+
+Full surface (escape hatches, model knobs, deferred kwargs) in [`docs/python_api_spec.md`](docs/python_api_spec.md).
+
+## Reusing a Model
+
+Most users pass a model-name string to `Optimizer(model=...)`. Build a `reps.Model` directly when you want to call the model outside the optimizer or share one configured client across multiple runs.
+
+```python
+import reps
+
+model = reps.Model("anthropic/claude-sonnet-4.6", temperature=0.7)
+print(model("hello"))                                    # standalone use
+
+# Share one Model across multiple optimizers
+o1 = reps.Optimizer(model=model, max_iterations=20)
+o2 = reps.Optimizer(model=model, max_iterations=50, merge=True)
+```
+
+## Power-user: CLI / YAML
+
+For batch experiments, reproducible sweeps, or YAML-driven configuration, REPS ships a CLI: `reps-run --config <yaml>`. The Python API above is built on the same engine, so anything achievable via YAML is achievable via `Optimizer(...)` plus `Optimizer.from_config(cfg)`.
+
+### Run
 
 Everything lives in the YAML — point `reps-run` at a config and go:
 
@@ -63,7 +152,7 @@ reps-run --config <yaml> -o llm.temperature=0.9 -o reps.batch_size=10
 
 The config decides everything else — model, workers, harness (`reps` or `openevolve`), and which benchmark to evolve (via `task:`).
 
-## Add a Benchmark
+### Add a benchmark
 
 Drop two files into `experiment/benchmarks/<name>/`:
 
@@ -107,7 +196,7 @@ Run it: `reps-run --config experiment/configs/<your_config>.yaml`.
 
 For cascade evaluation, also define `evaluate_stage1` / `evaluate_stage2`. If the primary objective metric isn't `combined_score`, set `reps.sota.target_metric:` so SOTA steering compares the right value.
 
-## Configs
+### Configs
 
 Reference configs in `experiment/configs/`:
 
@@ -122,3 +211,13 @@ Reference configs in `experiment/configs/`:
 ```bash
 uv run python -m pytest tests/
 ```
+
+## Design docs
+
+- [`docs/python_api_spec.md`](docs/python_api_spec.md) — the v1 Python API contract: every public class, kwarg, return shape, with file:line references into the implementation.
+- [`docs/gepa_implementation_plan.md`](docs/gepa_implementation_plan.md) — phase-by-phase rollout plan for the GEPA-inspired features (Pareto selection, trace reflection, merge, ancestry-aware reflection).
+- [`docs/optimizer_engine_separation_spec.md`](docs/optimizer_engine_separation_spec.md) — internal refactor splitting the public `Optimizer` facade from the runtime engine.
+
+## Acknowledgements
+
+Forked from [OpenEvolve](https://github.com/algorithmicsuperintelligence/openevolve); now self-contained.

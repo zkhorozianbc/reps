@@ -11,9 +11,9 @@ Optional CLI overrides (take precedence over YAML):
     --output <dir>
     --iterations N
 
-Automatically loads a sibling `.env` file (via python-dotenv) so env-var
-references like `${ANTHROPIC_API_KEY}` in the YAML resolve without manual
-sourcing.
+Automatically loads a sibling `.env` file (via a small built-in walker) so
+env-var references like `${ANTHROPIC_API_KEY}` in the YAML resolve without
+manual sourcing.
 
 Output directories are auto-versioned: <output>/run_001, run_002, etc.
 """

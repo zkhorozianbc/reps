@@ -3,26 +3,38 @@ requires = ["setuptools>=42"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "reps"
+name = "reps-search"
 version = "0.1.0"
-description = "Recursive Evolutionary Program Search"
+description = "Recursive Evolutionary Program Search — LLM-driven evolutionary code search"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.12"
+authors = [{name = "Zach Khorozian", email = "zkhorozianbc@gmail.com"}]
+keywords = ["evolutionary", "llm", "code-search", "optimization", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Code Generators",
+    "Typing :: Typed",
+]
 dependencies = [
     "numpy>=1.22.0",
     "openai>=1.0.0",
     "anthropic>=0.60.0",
     "pyyaml>=6.0",
     "dacite>=1.9.2",
-    "tqdm>=4.64.0",
-    "flask",
-    "scipy>=1.10.0",
-    "matplotlib>=3.5.0",
-    "dspy>=3.1.3",
-    "python-dotenv>=1.0.0",
-    "bs4>=0.0.2",
+    "httpx>=0.27.0",
 ]
 
 [project.optional-dependencies]
+dspy = ["dspy>=3.1.3"]
+benchmarks = ["scipy>=1.10.0", "matplotlib>=3.5.0"]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -30,14 +42,20 @@ dev = [
     "isort>=5.10.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/zkhorozianbc/reps"
+Repository = "https://github.com/zkhorozianbc/reps"
+Issues = "https://github.com/zkhorozianbc/reps/issues"
+
 [project.scripts]
 reps-run = "reps.runner:main"
 
+# Wheel ships only the reps/ package; experiment/, tests/, docs/ are dev-only.
 [tool.setuptools.packages.find]
 include = ["reps*"]
 
 [tool.setuptools.package-data]
-reps = ["prompt_templates/*.txt", "prompt_templates/*.json"]
+reps = ["prompt_templates/**/*", "py.typed"]
 
 [tool.pytest.ini_options]
 markers = [
