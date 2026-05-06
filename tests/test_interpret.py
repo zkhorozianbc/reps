@@ -241,7 +241,7 @@ def test_evaluator_interpret_overrides_combined_score():
     out = e._apply_interpretation(er)
     assert out["combined_score"] == pytest.approx(0.1)
     assert out["combined_score_raw"] == pytest.approx(0.7)
-    assert out["interpreted_score"] == pytest.approx(0.1)
+    assert "interpreted_score" not in out  # dead key removed
 
 
 def test_evaluator_interpret_fills_combined_score_when_missing():
@@ -250,7 +250,7 @@ def test_evaluator_interpret_fills_combined_score_when_missing():
     out = e._apply_interpretation(er)
     assert out["combined_score"] == pytest.approx(0.5)
     assert "combined_score_raw" not in out  # nothing to preserve
-    assert out["interpreted_score"] == pytest.approx(0.5)
+    assert "interpreted_score" not in out
 
 
 def test_evaluator_interpret_failure_falls_back_silently():
@@ -278,3 +278,166 @@ def test_evaluator_interpret_propagates_to_outcome_metrics():
     # Worst 50% of 4 = 2 instances: {0.0, 0.5}, mean = 0.25.
     assert out["combined_score"] == pytest.approx(0.25)
     assert out["combined_score_raw"] == pytest.approx(0.99)
+
+
+def test_evaluator_interpret_does_not_mutate_caller_dict():
+    """Regression: `from_dict` aliases the user's dict; interpretation must
+    not write into it.
+    """
+    e = _make_evaluator(I.worst())
+    user_metrics = {"combined_score": 0.7}
+    er = EvaluationResult(metrics=user_metrics, per_instance_scores={"a": 0.1, "b": 0.9})
+    e._apply_interpretation(er)
+    # The caller's original dict must be unchanged.
+    assert user_metrics == {"combined_score": 0.7}
+    # But the EvaluationResult should now point at the interpreted dict.
+    assert er.metrics["combined_score"] == pytest.approx(0.1)
+    assert er.metrics is not user_metrics
+
+
+def test_pass_rate_rejects_nonfinite_threshold():
+    with pytest.raises(ValueError):
+        I.pass_rate(float("nan"))
+    with pytest.raises(ValueError):
+        I.pass_rate(float("inf"))
+
+
+# ---------------------------------------------------------------------------
+# from_spec — YAML/CLI bridge
+# ---------------------------------------------------------------------------
+
+
+def test_from_spec_parameterless():
+    fn = I.from_spec("mean")
+    assert fn({"a": 0.0, "b": 1.0}, {}) == pytest.approx(0.5)
+
+
+def test_from_spec_empty_parens():
+    fn = I.from_spec("worst()")
+    assert fn({"a": 0.1, "b": 0.9}, {}) == pytest.approx(0.1)
+
+
+def test_from_spec_with_args():
+    fn = I.from_spec("cvar(0.5)")
+    # Worst 50% of {0.0, 0.5, 1.0, 1.0} → ceil(2) = 2 → mean({0, 0.5}) = 0.25.
+    assert fn({"a": 0.0, "b": 0.5, "c": 1.0, "d": 1.0}, {}) == pytest.approx(0.25)
+
+
+def test_from_spec_tolerates_whitespace():
+    fn = I.from_spec("  quantile( 0.5 )  ")
+    assert fn({"a": 0.0, "b": 0.5, "c": 1.0}, {}) == pytest.approx(0.5)
+
+
+def test_from_spec_unknown_name():
+    with pytest.raises(ValueError, match="unknown interpret name"):
+        I.from_spec("bogus")
+
+
+def test_from_spec_missing_close_paren():
+    with pytest.raises(ValueError, match="closing paren"):
+        I.from_spec("cvar(0.5")
+
+
+def test_from_spec_non_numeric_arg():
+    with pytest.raises(ValueError, match="numeric"):
+        I.from_spec("cvar(low)")
+
+
+# ---------------------------------------------------------------------------
+# Optimizer.from_config — interpret kwarg + YAML field plumbing
+# ---------------------------------------------------------------------------
+
+
+def test_optimizer_from_config_kwarg_wins_over_yaml():
+    from reps.api.optimizer import Optimizer
+    from reps.config import Config
+
+    cfg = Config()
+    cfg.evaluator.interpret = "mean"
+    explicit = I.worst()
+    opt = Optimizer.from_config(cfg, interpret=explicit)
+    assert opt.interpret is explicit
+
+
+def test_optimizer_from_config_parses_yaml_spec_when_kwarg_absent():
+    from reps.api.optimizer import Optimizer
+    from reps.config import Config
+
+    cfg = Config()
+    cfg.evaluator.interpret = "cvar(0.5)"
+    opt = Optimizer.from_config(cfg)
+    # Round-trip: feed the resolved callable a known distribution.
+    assert opt.interpret is not None
+    assert opt.interpret({"a": 0.0, "b": 0.5, "c": 1.0, "d": 1.0}, {}) == pytest.approx(0.25)
+
+
+def test_optimizer_from_config_no_interpret_means_none():
+    from reps.api.optimizer import Optimizer
+    from reps.config import Config
+
+    cfg = Config()
+    opt = Optimizer.from_config(cfg)
+    assert opt.interpret is None
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: Optimizer(interpret=...) → run_reps → controller.evaluator
+# ---------------------------------------------------------------------------
+
+
+def test_optimizer_threads_interpret_to_controller_evaluator():
+    """Verify the full plumbing: an interpret callable passed to `Optimizer`
+    reaches the per-iteration `Evaluator` constructed inside the controller.
+    Mocks `run_reps` and inspects what it was called with.
+    """
+    import asyncio
+    from unittest.mock import patch
+
+    from reps.api.optimizer import Optimizer
+
+    captured: dict = {}
+
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir, interpret=None):
+        captured["interpret"] = interpret
+        # Exercise the production path that builds the controller's Evaluator
+        # so a regression in run_reps wiring would surface here too.
+        from reps.controller import ProcessParallelController
+        from reps.database import ProgramDatabase
+
+        db = ProgramDatabase(config.database)
+        controller = ProcessParallelController(
+            config=config,
+            evaluation_file=evaluator,
+            database=db,
+            output_dir=output_dir,
+            interpret=interpret,
+        )
+        controller.start()
+        captured["controller_evaluator_interpret"] = controller.evaluator.interpret
+        controller.stop()
+
+    chosen = I.worst()
+    opt = Optimizer(model="anthropic/claude-sonnet-4.6", api_key="x", interpret=chosen)
+    with patch("reps.runner.run_reps", new=fake_run_reps):
+        try:
+            opt.optimize("seed_code", lambda c: 0.5)
+        except Exception:
+            # `_collect_result` will fail because no DB was saved — fine, we
+            # only care that run_reps was reached with the right kwarg.
+            pass
+    assert captured["interpret"] is chosen
+    assert captured["controller_evaluator_interpret"] is chosen
+
+
+def test_evaluator_config_interpret_yaml_field_round_trips():
+    """The CLI codepath relies on `cfg.evaluator.interpret` being a string
+    that `from_spec` can parse. Round-trip through the dataclass to ensure
+    nothing in Config init clobbers or transforms the field.
+    """
+    from reps.config import Config
+
+    cfg = Config()
+    assert cfg.evaluator.interpret is None  # default
+    cfg.evaluator.interpret = "cvar(0.5)"
+    fn = I.from_spec(cfg.evaluator.interpret)
+    assert fn({"a": 0.0, "b": 0.5, "c": 1.0, "d": 1.0}, {}) == pytest.approx(0.25)

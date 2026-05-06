@@ -325,7 +325,14 @@ def main():
     if config.harness == "openevolve":
         run_openevolve(args.config, initial_program, evaluator, run_dir, config.max_iterations)
     else:
-        asyncio.run(run_reps(config, initial_program, evaluator, run_dir))
+        # Resolve the YAML-driven interpretation spec (if any) into a callable.
+        # Errors here surface to the user as a CLI failure rather than mid-run.
+        interpret_fn: Optional[Interpretation] = None
+        spec = getattr(config.evaluator, "interpret", None)
+        if spec:
+            from reps.interpret import from_spec
+            interpret_fn = from_spec(spec)
+        asyncio.run(run_reps(config, initial_program, evaluator, run_dir, interpret=interpret_fn))
 
 
 if __name__ == "__main__":

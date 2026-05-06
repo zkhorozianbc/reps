@@ -132,13 +132,20 @@ class Optimizer:
     # ---------------------------------------------------------------- #
 
     @classmethod
-    def from_config(cls, cfg: Config) -> "Optimizer":
+    def from_config(
+        cls, cfg: Config, *, interpret: Optional[Interpretation] = None
+    ) -> "Optimizer":
         """Construct a `Optimizer` from a fully-formed internal `Config`.
 
         Bypasses the simple constructor's kwarg → Config mapping for users
         who need knobs the constructor doesn't expose (population_size,
         explicit worker pools, etc.). The resulting `Optimizer` runs `cfg`
         verbatim — provider/api_key/api_base must be set in `cfg.llm`.
+
+        `interpret` is accepted explicitly because Config (a YAML-backed
+        dataclass) cannot carry a Python callable. When the YAML carries a
+        string spec on `cfg.evaluator.interpret`, it is parsed via
+        `reps.interpret.from_spec` unless the kwarg overrides it.
         """
         if not isinstance(cfg, Config):
             raise TypeError(
@@ -160,7 +167,16 @@ class Optimizer:
         instance.merge_enabled = cfg.reps.merge.enabled
         instance.minibatch_size = getattr(cfg.evaluator, "minibatch_size", None)
         instance.num_islands = cfg.database.num_islands
-        instance.interpret = None  # from_config path defers to evaluator's combined_score
+        # Resolve interpret: explicit kwarg wins, then YAML spec, then None.
+        if interpret is not None:
+            instance.interpret = interpret
+        else:
+            spec = getattr(cfg.evaluator, "interpret", None)
+            if spec:
+                from reps.interpret import from_spec
+                instance.interpret = from_spec(spec)
+            else:
+                instance.interpret = None
         instance.output_dir = cfg.output
         instance._config = cfg
         return instance

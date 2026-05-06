@@ -350,6 +350,13 @@ class EvaluatorConfig:
     # landing slot until the runner consumes it.
     minibatch_size: Optional[int] = None
 
+    # Scalar reduction over per_instance_scores. Accepted forms:
+    #   "mean", "worst", "best", "combined", "quantile(0.5)",
+    #   "cvar(0.1)", "pass_rate(0.5)"
+    # None ⇒ legacy behavior (use evaluator-supplied combined_score).
+    # Parsed by `reps.interpret.from_spec` at runner startup.
+    interpret: Optional[str] = None
+
 
 @dataclass
 class REPSReflectionConfig:

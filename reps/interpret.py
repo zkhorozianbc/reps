@@ -221,7 +221,14 @@ def weighted(weights: Mapping[str, float]) -> Interpretation:
 
 
 def pass_rate(threshold: float) -> Interpretation:
-    """Fraction of finite per-instance scores >= threshold. Range [0, 1]."""
+    """Fraction of finite per-instance scores >= threshold. Range [0, 1].
+
+    `threshold` must be finite — NaN/inf would silently make every score
+    fail or pass and is almost certainly a caller bug.
+    """
+    if not math.isfinite(float(threshold)):
+        raise ValueError(f"pass_rate threshold must be finite, got {threshold!r}")
+
     def _pass_rate(per_instance: Optional[Mapping[str, float]],
                    metrics: Mapping[str, float]) -> float:
         vals = _finite_values(per_instance)
@@ -230,6 +237,63 @@ def pass_rate(threshold: float) -> Interpretation:
         passing = sum(1 for v in vals if v >= threshold)
         return passing / len(vals)
     return _pass_rate
+
+
+# ---------------------------------------------------------------------------
+# YAML / CLI bridge — parse a string spec into an Interpretation
+# ---------------------------------------------------------------------------
+
+
+_REGISTRY: dict[str, Callable[..., Interpretation]] = {
+    "combined": combined,
+    "mean": mean,
+    "worst": worst,
+    "best": best,
+    "quantile": quantile,
+    "cvar": cvar,
+    "pass_rate": pass_rate,
+}
+# weighted() and combined(fallback=...) take non-scalar args (mapping / nested
+# Interpretation) that don't round-trip through the simple "name(args)" string
+# form. Users wanting them must construct via the Python API.
+
+
+def from_spec(spec: str) -> Interpretation:
+    """Parse a string like 'mean', 'cvar(0.1)', 'pass_rate(0.5)' into an
+    Interpretation. Used by the YAML/CLI path where a Python callable can't
+    be stored directly.
+
+    Grammar: NAME | NAME() | NAME(ARG[, ARG]...) where ARGs are floats.
+    Whitespace inside the parens is tolerated. Anything else raises ValueError.
+
+    Supported names: combined, mean, worst, best, quantile, cvar, pass_rate.
+    `weighted` and `combined(fallback=...)` are Python-API-only.
+    """
+    s = spec.strip()
+    if "(" not in s:
+        name, args_text = s, ""
+    else:
+        if not s.endswith(")"):
+            raise ValueError(f"interpret spec missing closing paren: {spec!r}")
+        name, _, rest = s.partition("(")
+        args_text = rest[:-1]  # strip trailing ')'
+    name = name.strip()
+    factory = _REGISTRY.get(name)
+    if factory is None:
+        valid = ", ".join(sorted(_REGISTRY))
+        raise ValueError(
+            f"unknown interpret name {name!r}; supported: {valid}"
+        )
+    args_text = args_text.strip()
+    if not args_text:
+        return factory()
+    try:
+        args = [float(p.strip()) for p in args_text.split(",") if p.strip()]
+    except ValueError as e:
+        raise ValueError(
+            f"interpret spec {spec!r}: arguments must be numeric ({e})"
+        ) from e
+    return factory(*args)
 
 
 __all__ = [
@@ -242,4 +306,5 @@ __all__ = [
     "cvar",
     "weighted",
     "pass_rate",
+    "from_spec",
 ]

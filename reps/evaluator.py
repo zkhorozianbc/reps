@@ -423,20 +423,29 @@ class Evaluator:
         Configured path (interpret is a callable): compute the scalar from
         per_instance_scores and stamp it as combined_score, overwriting any
         value the evaluator emitted. The pre-interpretation value (if any)
-        is preserved as `combined_score_raw` for inspection. We also stash
-        the chosen scalar under `interpreted_score` so downstream metric
-        consumers can distinguish "the optimizer's promotion key" from
-        "whatever the benchmark called combined_score".
+        is preserved as `combined_score_raw` for inspection.
 
-        Returns the (possibly mutated) metrics dict — the same dict object
-        from `eval_result.metrics` so artifact / feedback mutations elsewhere
-        stay consistent.
+        Caveats:
+        - If `use_llm_feedback=True`, this evaluator already mixed the
+          benchmark's combined_score with the LLM-judge score before the
+          interpretation runs (see `_evaluate_code_with_env`); so
+          `combined_score_raw` reflects the post-mix value, not the raw
+          benchmark output. This rarely matters in practice (LLM feedback
+          is off by default) but is worth knowing.
+        - Cascade evaluation thresholds (`_passes_threshold`) gate on the
+          per-stage `combined_score` produced by the benchmark, NOT the
+          interpretation. Interpretation runs once on the merged final
+          result, so partial-stage values can't be interpreted meaningfully.
+
+        Returns a fresh dict (does not mutate the EvaluationResult.metrics
+        the caller may still hold a reference to) and reassigns
+        `eval_result.metrics` to the new dict so downstream readers off the
+        same EvaluationResult see the interpreted scalar.
         """
-        metrics = eval_result.metrics
         if self.interpret is None:
-            return metrics
+            return eval_result.metrics
         try:
-            scalar = float(self.interpret(eval_result.per_instance_scores, metrics))
+            scalar = float(self.interpret(eval_result.per_instance_scores, eval_result.metrics))
         except Exception as e:
             # An interpretation that raises should not nuke the iteration —
             # log and fall back to whatever metric the evaluator produced.
@@ -444,11 +453,14 @@ class Evaluator:
                 "interpret() raised %s: %s; falling back to evaluator combined_score",
                 type(e).__name__, e,
             )
-            return metrics
+            return eval_result.metrics
+        # Shallow-copy so we don't mutate the user's returned dict (which
+        # EvaluationResult.from_dict aliases without copying).
+        metrics = dict(eval_result.metrics)
         if "combined_score" in metrics:
             metrics["combined_score_raw"] = metrics["combined_score"]
         metrics["combined_score"] = scalar
-        metrics["interpreted_score"] = scalar
+        eval_result.metrics = metrics
         return metrics
 
     def _process_evaluation_result(self, result: Any) -> EvaluationResult:
