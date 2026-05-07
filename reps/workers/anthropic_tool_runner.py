@@ -10,7 +10,7 @@ import json
 import logging
 import os
 import time
-from pathlib import Path
+from importlib.resources import files
 from typing import Any, Dict, List, Optional, Tuple
 
 import anthropic
@@ -48,7 +48,7 @@ from reps.workers.tools import (
 
 logger = logging.getLogger(__name__)
 
-_TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "prompt_templates"
+_TEMPLATE_DIR = files("reps") / "prompt_templates"
 
 # Anthropic server-tool result block types. All share the same shape
 # (type + tool_use_id + content) and must be echoed back in the next user

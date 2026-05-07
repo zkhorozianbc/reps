@@ -138,12 +138,8 @@ class TestSingleCallWorkerPropagatesTraceDirective:
         assert '"trace_directive"' in src
 
     def test_trace_directive_in_dspy_react_keys(self):
-        # Read the source from disk instead of via importlib so this guardrail
-        # works even when the optional `[dspy]` extra is not installed (the
-        # module would otherwise fail at `import dspy` on the top of
-        # reps/workers/dspy_react.py).
-        from pathlib import Path
-        import reps.workers
-        src_path = Path(reps.workers.__file__).parent / "dspy_react.py"
-        src = src_path.read_text()
+        pytest.importorskip("dspy")  # optional [dspy] extra; skip when absent
+        import inspect
+        from reps.workers import dspy_react
+        src = inspect.getsource(dspy_react._fmt_extras)
         assert '"trace_directive"' in src

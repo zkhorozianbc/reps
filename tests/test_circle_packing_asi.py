@@ -12,7 +12,7 @@ import pytest
 
 # circle_packing's evaluator.py lives outside the package import path; add it
 # to sys.path the same way the harness does at runtime.
-BENCH_DIR = Path(__file__).resolve().parents[1] / "experiment/benchmarks/circle_packing"
+BENCH_DIR = Path(__file__).parents[1] / "experiment/benchmarks/circle_packing"
 sys.path.insert(0, str(BENCH_DIR))
 
 from evaluator import (  # type: ignore
