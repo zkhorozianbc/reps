@@ -11,6 +11,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from reps.sanitize import Sanitizer, regex_sanitizer, sanitize_schema
+
 logger = logging.getLogger(__name__)
 
 # Prompt template for the reflection LLM call
@@ -98,7 +100,12 @@ class ReflectionEngine:
     to generate structured analysis of batch results.
     """
 
-    def __init__(self, llm_ensemble, config: Dict[str, Any]):
+    def __init__(
+        self,
+        llm_ensemble,
+        config: Dict[str, Any],
+        sanitizer: Optional[Sanitizer] = None,
+    ):
         """
         Args:
             llm_ensemble: LLMEnsemble instance for making reflection LLM calls
@@ -108,12 +115,18 @@ class ReflectionEngine:
                 - enabled (bool): whether reflection is active
                 - model (Optional[str]): model id to use for reflection calls;
                   when None, the ensemble's default weighted sampling is used.
+            sanitizer: hedges absolute-pessimism claims in the parsed
+                reflection. Defaults to ``regex_sanitizer`` (free, deterministic);
+                the controller upgrades to an LLM-backed sanitizer when a
+                summarizer LLM is configured. Applied to every string leaf of
+                the parsed JSON, preserving the 4-field schema.
         """
         self.llm = llm_ensemble
         self.top_k = config.get("top_k", 3)
         self.bottom_k = config.get("bottom_k", 2)
         self.enabled = config.get("enabled", True)
         self.model_override = config.get("model")
+        self._sanitizer: Sanitizer = sanitizer or regex_sanitizer
         self._current_reflection: Dict[str, Any] = {}
         self._call_count = 0
         self._total_tokens = {"prompt_tokens": 0, "completion_tokens": 0}
@@ -201,6 +214,7 @@ class ReflectionEngine:
             self._total_tokens["completion_tokens"] += usage.get("completion_tokens", 0)
 
             reflection = self._parse_reflection(response)
+            reflection = await sanitize_schema(reflection, self._sanitizer)
             self._current_reflection = reflection
             return reflection
         except Exception as e:

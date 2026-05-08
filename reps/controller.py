@@ -253,6 +253,11 @@ class ProcessParallelController:
             # them, not at __init__. See _get_reps_summarizer_llm().
             self._reps_summarizer_llm = None  # cache; built on first use
             self._reps_summarizer_cfg = getattr(reps, "summarizer", None)
+            # Single sanitizer instance shared across producers (reflection,
+            # per-program summarizer). Built lazily on first use so the
+            # underlying summarizer LLM is available; falls back to the pure
+            # regex sanitizer when the summarizer is disabled or unavailable.
+            self._reps_sanitizer = None  # cache; built on first use
 
             worker_names = list(self._reps_worker_pool._configs.keys())
             logger.info(
@@ -285,6 +290,39 @@ class ProcessParallelController:
                 f"provider={self._reps_summarizer_llm.provider}"
             )
         return self._reps_summarizer_llm
+
+    def _get_reps_sanitizer(self):
+        """Lazily construct the harness sanitizer.
+
+        LLM-backed when a summarizer LLM is available (rides on the
+        existing summarizer config — no separate model to configure);
+        pure regex otherwise. The same instance is shared across
+        producers so behavior is uniform.
+        """
+        if self._reps_sanitizer is not None:
+            return self._reps_sanitizer
+        from reps.sanitize import (
+            LLM_REWRITE_SYSTEM_PROMPT,
+            make_llm_sanitizer,
+            regex_sanitizer,
+        )
+        try:
+            summarizer_llm = self._get_reps_summarizer_llm()
+        except Exception as e:
+            logger.warning("sanitizer: summarizer LLM unavailable, using regex: %s", e)
+            self._reps_sanitizer = regex_sanitizer
+            return self._reps_sanitizer
+        if summarizer_llm is None:
+            self._reps_sanitizer = regex_sanitizer
+            return self._reps_sanitizer
+
+        async def _rewrite(text: str) -> str:
+            return await summarizer_llm.call(
+                system_prompt=LLM_REWRITE_SYSTEM_PROMPT,
+                user_text=text,
+            )
+        self._reps_sanitizer = make_llm_sanitizer(_rewrite)
+        return self._reps_sanitizer
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -665,6 +703,7 @@ class ProcessParallelController:
                         task_instructions=(
                             summarizer_cfg.task_instructions if summarizer_cfg else None
                         ),
+                        sanitizer=self._get_reps_sanitizer(),
                     )
                     if summary:
                         ann = child_metadata.setdefault("reps_annotations", {})
@@ -1431,7 +1470,9 @@ class ProcessParallelController:
         if self._reps_reflection is None and self._reps_enabled:
             from reps.reflection_engine import ReflectionEngine
             self._reps_reflection = ReflectionEngine(
-                llm_ensemble, self._reps_reflection_config
+                llm_ensemble,
+                self._reps_reflection_config,
+                sanitizer=self._get_reps_sanitizer(),
             )
 
     def _reps_get_sota_score(self, program: Optional[Program]) -> Optional[float]:

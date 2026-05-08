@@ -20,6 +20,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
+from reps.sanitize import Sanitizer, regex_sanitizer, sanitize_schema
 from reps.workers.trace_render import render_trace_from_dicts
 
 logger = logging.getLogger(__name__)
@@ -233,6 +234,7 @@ async def summarize_program(
     improved: bool,
     summarizer_llm: "SummarizerLLM",
     task_instructions: Optional[str] = None,
+    sanitizer: Optional[Sanitizer] = None,
 ) -> Optional[Dict[str, Any]]:
     """Call the configured summarizer model to produce a structured per-program summary.
 
@@ -249,6 +251,10 @@ async def summarize_program(
             the user message before the attempt data. Use this to inject
             correction guidance (e.g. "score=0 means overlap, not a broken
             validator") without touching the general system prompt.
+        sanitizer: hedges absolute-pessimism claims in the produced summary.
+            Defaults to ``regex_sanitizer`` (free, deterministic); the
+            controller upgrades to an LLM-backed sanitizer when configured.
+            Applied to every string leaf of the 3-field schema before return.
     """
     if not turns:
         return None
@@ -296,7 +302,7 @@ async def summarize_program(
         "pitfalls": [str(p)[:500] for p in (data.get("pitfalls") or [])[:5]],
         "key_insight": str(data.get("key_insight", ""))[:800],
     }
-    return out
+    return await sanitize_schema(out, sanitizer or regex_sanitizer)
 
 
 def format_summary_for_prompt(summary: Dict[str, Any], label: str = "Parent's notebook") -> str:
