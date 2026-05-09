@@ -17,7 +17,7 @@ import anthropic
 import httpx
 from anthropic import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
-from reps.llm.anthropic import REASONING_MODEL_PATTERNS
+from reps.llm.anthropic import OPUS_47_PLUS_PATTERNS, REASONING_MODEL_PATTERNS
 
 import os
 _MSG_DEBUG = os.environ.get("REPS_ATR_MSG_DEBUG") == "1"
@@ -119,7 +119,9 @@ class AnthropicToolRunnerWorker:
     async def run(self, request: WorkerRequest, ctx: WorkerContext) -> WorkerResult:
         t0 = time.monotonic()
         model = self.config.model_id or request.model_id or ""
-        is_reasoning = any(p in model.lower() for p in REASONING_MODEL_PATTERNS)
+        model_lower = model.lower()
+        is_reasoning = any(p in model_lower for p in REASONING_MODEL_PATTERNS)
+        is_47_plus = any(p in model_lower for p in OPUS_47_PLUS_PATTERNS)
 
         # Build the initial user message via PromptSampler using the tool-runner template.
         system_prompt, user_prompt = self._build_initial_prompt(request, ctx)
@@ -178,6 +180,7 @@ class AnthropicToolRunnerWorker:
                     messages=messages,
                     tools=tool_schemas,
                     is_reasoning=is_reasoning,
+                    is_47_plus=is_47_plus,
                     container=container_id,
                 )
             except WorkerError as we:
@@ -645,7 +648,7 @@ class AnthropicToolRunnerWorker:
 
         return system_text, user_text
 
-    async def _call_with_retry(self, *, model, system_prompt, messages, tools, is_reasoning, container=None):
+    async def _call_with_retry(self, *, model, system_prompt, messages, tools, is_reasoning, is_47_plus, container=None):
         params: Dict[str, Any] = {
             "model": model,
             "max_tokens": self.max_tokens,
@@ -656,14 +659,34 @@ class AnthropicToolRunnerWorker:
         if container is not None:
             params["container"] = container
         if is_reasoning:
-            # Opus 4.7+ uses adaptive thinking + output_config.effort (not budget_tokens).
-            # display="summarized" restores reasoning text (Opus 4.7 defaults to omitted).
-            params["thinking"] = {"type": "adaptive", "display": self.thinking_display}
-            output_config: Dict[str, Any] = {"effort": self.thinking_effort}
-            if self.task_budget_total > 0:
+            # Adaptive thinking + output_config.effort. Supported on Opus 4.6,
+            # Sonnet 4.6, and Opus 4.7+. `budget_tokens` is rejected on 4.7 and
+            # deprecated on 4.6 — adaptive replaces it.
+            thinking: Dict[str, Any] = {"type": "adaptive"}
+            # `display: "summarized"` restores reasoning text on Opus 4.7 (it
+            # defaults to "omitted" there). On 4.6 the field is undocumented;
+            # we don't send it to avoid 400s.
+            if is_47_plus:
+                thinking["display"] = self.thinking_display
+            params["thinking"] = thinking
+
+            # `xhigh` is Opus 4.7-only; 4.6 accepts low/medium/high/max only.
+            # Downgrade silently rather than 400 — keeps existing 4.7 configs
+            # drop-in compatible when the model_id is swapped to 4.6.
+            effort = self.thinking_effort
+            if effort == "xhigh" and not is_47_plus:
+                logger.info(
+                    "thinking_effort=xhigh is Opus 4.7-only; downgrading to 'high' for model=%s",
+                    model,
+                )
+                effort = "high"
+            output_config: Dict[str, Any] = {"effort": effort}
+
+            if self.task_budget_total > 0 and is_47_plus:
                 # Task Budgets: tell the model how many total tokens it has for this
                 # agentic iteration; it sees a countdown and self-moderates.
                 # Distinct from max_tokens (per-response ceiling, model unaware).
+                # Beta-gated to Opus 4.7+ (the `task-budgets-2026-03-13` beta).
                 output_config["task_budget"] = {
                     "type": "tokens",
                     "total": self.task_budget_total,
@@ -751,7 +774,12 @@ class AnthropicToolRunnerWorker:
         # Task Budgets requires the beta namespace + beta header. When the feature
         # is disabled we use the regular messages.stream to avoid any beta header
         # side-effects on non-reasoning models or when the feature isn't needed.
-        use_beta_stream = self.task_budget_total > 0
+        # Gate on the actual params: _call_with_retry only injects task_budget
+        # when the model is Opus 4.7+, so on 4.6 the beta stream stays off
+        # even if `task_budget_total` was set in the worker config.
+        use_beta_stream = bool(
+            params.get("output_config", {}).get("task_budget")
+        )
         stream_ctx = (
             self.client.beta.messages.stream(
                 **params,

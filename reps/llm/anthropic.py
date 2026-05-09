@@ -14,8 +14,23 @@ logger = logging.getLogger(__name__)
 
 _logged_models: set = set()
 
-# Reasoning models reject the temperature param.
-REASONING_MODEL_PATTERNS = ("opus-4-7", "opus-4-8", "opus-4-9", "opus-5")
+# Adaptive-thinking-capable Claude models. They accept `thinking={"type": "adaptive"}`
+# + `output_config.effort` and either reject (Opus 4.7+) or no longer benefit from
+# (Opus 4.6, Sonnet 4.6) the `temperature` sampling param. Tool-runner consumers gate
+# adaptive-thinking config off this; AnthropicLLM uses it to skip temperature.
+REASONING_MODEL_PATTERNS = (
+    "opus-4-6",
+    "opus-4-7",
+    "opus-4-8",
+    "opus-4-9",
+    "opus-5",
+    "sonnet-4-6",
+)
+
+# Strict subset: features that are Opus-4.7-only (and presumed forward-compat with
+# 4.8+/5+). Used to gate `thinking.display`, the `xhigh` effort level, and the
+# `task_budget` beta — all of which 400 or no-op on Opus 4.6 / Sonnet 4.6.
+OPUS_47_PLUS_PATTERNS = ("opus-4-7", "opus-4-8", "opus-4-9", "opus-5")
 
 
 def _to_int(v: Any) -> int:

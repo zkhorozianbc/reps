@@ -1,0 +1,132 @@
+# Online bin packing — Opus 4.7 via native Anthropic API
+# Seed: Best Fit (combined_score 0.9532; OR3 5.37%, Weibull 5k 3.98% excess)
+# Target: beat FunSearch (Weibull 5k 0.68% excess, OR3 ~3.85%).
+harness: reps
+provider: anthropic
+task: ../benchmarks/online_bin_packing
+max_iterations: 50
+log_level: INFO
+random_seed: 42
+
+# priority() bodies are short — 10k default is plenty.
+max_code_length: 10000
+
+llm:
+  primary_model: "anthropic/claude-opus-4-7"
+  primary_model_weight: 1.0
+  api_key: "${ANTHROPIC_API_KEY}"
+  temperature: 0.7
+  max_tokens: 8192
+  timeout: 180
+
+prompt:
+  num_top_programs: 3
+  use_template_stochasticity: true
+
+database:
+  population_size: 60
+  archive_size: 25
+  num_islands: 4
+  elite_selection_ratio: 0.3
+  exploitation_ratio: 0.7
+
+evaluator:
+  # Seed evaluates in ~0.4s; 60s is generous for buggy heuristics that
+  # spin in numpy.
+  timeout: 60
+  cascade_evaluation: false
+  parallel_evaluations: 4
+
+diff_based_evolution: false
+
+reps:
+  enabled: true
+  batch_size: 5
+
+  reflection:
+    enabled: true
+    top_k: 3
+    bottom_k: 2
+
+  revisitation:
+    enabled: true
+    epsilon_start: 0.15
+    epsilon_end: 0.05
+    decay: "linear"
+    recency_window: 20
+
+  workers:
+    types:
+      - name: atr_exploiter
+        impl: anthropic_tool_runner
+        role: exploiter
+        model_id: claude-opus-4-7
+        temperature: 0.3
+        generation_mode: full
+        tools: [view_parent, view_program, edit_file, run_tests, submit_child, mark_converged]
+        max_turns: 20
+        uses_evaluator: true
+        owns_temperature: true
+        weight: 0.6
+        template_variations:
+          role_directive:
+            - "Refine the parent's existing priority() formula. Keep the same algorithmic family (e.g. ratio-based, polynomial, piecewise). Tweak ONE coefficient, exponent, or threshold; vectorize a slow path; or replace a Python loop over bins with a numpy expression. The goal is a strict numerical improvement on at least one of OR3 / Weibull 5k while not regressing the other meaningfully."
+            - "Tune ONE constant in the parent's priority. Pick the lever you think is bottlenecking — e.g. an exponent on `bins`, a divisor scaling with `item`, the threshold where the sign flips, the weight on a fragmentation penalty term — and adjust it by a factor not yet tried. Keep the rest verbatim so the archive can attribute the delta cleanly."
+            - "Add fragmentation awareness without changing the core formula. The parent's heuristic likely ignores how *useful* the leftover capacity will be for future items. Add a penalty that disfavors leftovers below a 'dead zone' threshold (e.g. smaller than the smallest plausible item) — 5-10 lines, no rewrite of the main scoring."
+            - "Reduce ties. If the parent's priority() returns identical scores for many bins, `argmax` picks the lowest-indexed (oldest) bin and you're effectively First Fit on ties. Add a small tiebreaker term that prefers either fresher or older bins consistently — measure which direction helps."
+            - "Make ONE targeted improvement to whichever dataset is the parent's weak spot. Read the metrics: if OR3 excess is much worse than Weibull 5k, the parent is over-fitted to large-capacity bins; widen its scoring to handle the smaller-bin regime. Vice versa for the opposite case."
+      - name: atr_explorer
+        impl: anthropic_tool_runner
+        role: explorer
+        model_id: claude-opus-4-7
+        temperature: 1.0
+        generation_mode: full
+        tools: [view_parent, view_program, edit_file, run_tests, submit_child, mark_converged]
+        max_turns: 20
+        uses_evaluator: true
+        owns_temperature: true
+        weight: 0.25
+        template_variations:
+          role_directive:
+            - "PIVOT TO HOW-MANY-MORE-FIT REASONING. The FunSearch Weibull heuristic implicitly counts how many copies of the current item could still fit per bin. Write a priority() whose dominant term is `floor(bins / item)` — preferring bins where the leftover after placement still admits an integer number of future items of size near `item`. This is structurally different from leftover-minimization heuristics."
+            - "PIVOT TO A POLYNOMIAL IN (bins, item). Drop linear scoring entirely. Build priority as a weighted sum of monomials: `bins`, `bins^2`, `item`, `item^2`, `bins*item`, `bins^2/item`, `bins/item^2`, etc. Pick coefficients informed by the regime (OR3 has capacity 150, Weibull 100). The freedom to combine many monomials lets you discover non-obvious shapes."
+            - "PIVOT TO A PIECEWISE / STEP-FUNCTION SCORE. The FunSearch OR-discovered heuristic is literally a 12-step ladder over `bin - item`. Write priority() as a piecewise function with explicit cutoffs (e.g. bands at 0, 2, 5, 10, 20, 50). This rewards 'almost full' bins with sharp boosts and ignores fine-grained differences elsewhere."
+            - "PIVOT TO RELATIVE FILL FRACTION. Score each candidate by how full the bin would be *after* placement, expressed as a non-linear function of fill fraction (e.g. `f(fill)^k` with `k>1` so near-full bins dominate). Capacity-relative scoring may transfer better across the OR3 (cap=150) and Weibull (cap=100) regimes than absolute-leftover scoring."
+            - "PIVOT TO A LEARNED-LIKE FORMULA. Pretend you've trained a small neural net on (bin_remaining, item, capacity) and write a smooth approximation: a sigmoid or softmax-weighted combination of two or three competing strategies (Best Fit, Worst Fit, Almost-Worst Fit). Make the soft mix lean toward Best Fit only when the leftover would be very small."
+            - "PIVOT TO HARMONIC / RECIPROCAL SCORING. Score each bin by `1 / (bins - item + epsilon)^k` for some `k`. This is Best Fit's logical extreme (k→∞ → exact-match wins; k→0 → uniform). Sweep `k` mentally and pick a starting value, then tune. The 1/leftover family was a strong baseline pre-FunSearch and may rediscover useful shapes."
+      - name: atr_crossover
+        impl: anthropic_tool_runner
+        role: crossover
+        model_id: claude-opus-4-7
+        generation_mode: full
+        tools: [view_parent, view_program, edit_file, run_tests, submit_child, mark_converged]
+        max_turns: 20
+        uses_evaluator: true
+        weight: 0.15
+        template_variations:
+          role_directive:
+            - "MERGE the two parents' SHAPES. Read both parents end-to-end via view_program. If parent uses leftover-minimization and second_parent uses how-many-fit reasoning, build a child whose priority is a weighted sum of both parents' formulas (with weights that sum to 1). Tune the mix toward whichever parent dominates on which dataset."
+            - "GRAFT second_parent's tiebreaker / penalty term onto parent's main score. Many heuristics differ only in their secondary terms; this graft preserves parent's primary mechanism while adding second_parent's signal."
+            - "RUN BOTH PARENTS' priorities AND BLEND. Compute scores from each parent's logic, normalize, and return a learned-style blend (e.g. softmax-mix). Tune the temperature so the blend leans toward the better parent on each call. The child's code must contain recognizable code blocks from both parents."
+
+  convergence:
+    enabled: true
+    window_size: 10
+    entropy_threshold_mild: 0.5
+    entropy_threshold_moderate: 0.3
+    entropy_threshold_severe: 0.15
+
+  contracts:
+    enabled: false
+
+  sota:
+    enabled: true
+    # FunSearch's published Weibull heuristic scores ~0.977 on the joint set;
+    # we set a slightly aspirational target so the SOTA-steering signal stays
+    # active even if we land near FunSearch's level.
+    target_score: 0.985
+    target_metric: combined_score
+
+  annotations:
+    enabled: true
+    dead_end_awareness: true

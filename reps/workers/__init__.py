@@ -1,4 +1,6 @@
 """reps.workers — Worker primitive and implementations."""
+import warnings
+
 from reps.workers.base import (
     ContentBlock,
     TurnRecord,
@@ -20,6 +22,13 @@ from reps.workers import openai_tool_runner  # noqa: F401
 # in their YAML will get a clear ImportError at use-time from
 # reps.controller's lazy `make_dspy_lm` import.
 try:
-    from reps.workers import dspy_react  # noqa: F401
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"The 'prefix' argument in InputField/OutputField is deprecated.*",
+            category=DeprecationWarning,
+            module=r"dspy\..*",
+        )
+        from reps.workers import dspy_react  # noqa: F401
 except ImportError:
     pass
