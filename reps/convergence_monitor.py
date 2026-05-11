@@ -132,19 +132,26 @@ class ConvergenceMonitor:
         self._last_entropy = self._compute_edit_entropy()
         self._last_divergence = self._compute_strategy_divergence()
 
+        # All three levels log at INFO: convergence detection is a designed
+        # harness signal that triggers the corresponding adaptive action
+        # (SEVERE_RESTART / MODERATE_DIVERSIFY / MILD_BOOST) — it's
+        # informational, not a problem the operator needs to investigate.
         if self._last_entropy < self.thresholds["severe"]:
-            logger.warning(
-                f"SEVERE convergence collapse detected: entropy={self._last_entropy:.4f}"
+            logger.info(
+                f"Severe convergence collapse: entropy={self._last_entropy:.4f} "
+                f"-> triggering SEVERE_RESTART"
             )
             return ConvergenceAction.SEVERE_RESTART
         elif self._last_entropy < self.thresholds["moderate"]:
-            logger.warning(
-                f"Moderate convergence detected: entropy={self._last_entropy:.4f}"
+            logger.info(
+                f"Moderate convergence: entropy={self._last_entropy:.4f} "
+                f"-> triggering MODERATE_DIVERSIFY"
             )
             return ConvergenceAction.MODERATE_DIVERSIFY
         elif self._last_entropy < self.thresholds["mild"]:
             logger.info(
-                f"Mild convergence detected: entropy={self._last_entropy:.4f}"
+                f"Mild convergence: entropy={self._last_entropy:.4f} "
+                f"-> triggering MILD_BOOST"
             )
             return ConvergenceAction.MILD_BOOST
 
