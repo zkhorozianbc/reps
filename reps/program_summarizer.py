@@ -45,14 +45,14 @@ def build_summarizer_llm(cfg) -> "SummarizerLLM":
     provider = cfg.provider or provider_of_model(model_id)
 
     # Resolve api_key with a provider-appropriate env-var default.
-    api_key = cfg.api_key
+    _PROVIDER_ENV = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+    }
+    env_var = _PROVIDER_ENV.get(provider, "ANTHROPIC_API_KEY")
+    api_key = cfg.api_key or os.environ.get(env_var)
     if not api_key:
-        if provider == "anthropic":
-            api_key = os.environ.get("ANTHROPIC_API_KEY")
-        elif provider == "openai":
-            api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        env_var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
         raise ValueError(
             f"summarizer: provider={provider!r} but no api_key set "
             f"(neither reps.summarizer.api_key nor {env_var} in env)"
@@ -134,11 +134,27 @@ class SummarizerLLM:
             # needed; `_openai_responses_call` constructs AsyncOpenAI per
             # call. We still validate the key is present here.
             return None
+        if self.provider == "openrouter":
+            from reps.config import LLMModelConfig
+            from reps.llm.openai_compatible import OpenAICompatibleLLM
+
+            cfg = LLMModelConfig(
+                name=self.model_id,
+                api_key=self.api_key,
+                api_base=self.api_base or "https://openrouter.ai/api/v1",
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                timeout=self.timeout,
+                retries=self.retries,
+                retry_delay=self.retry_delay,
+                provider="openrouter",
+            )
+            return OpenAICompatibleLLM(cfg)
         raise ValueError(f"summarizer: unknown provider {self.provider!r}")
 
     async def call(self, *, system_prompt: str, user_text: str) -> str:
         """Invoke the summarizer. Returns the raw response text."""
-        if self.provider == "anthropic":
+        if self.provider in ("anthropic", "openrouter"):
             return await self._client.generate_with_context(
                 system_message=system_prompt,
                 messages=[{"role": "user", "content": user_text}],

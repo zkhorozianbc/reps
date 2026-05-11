@@ -96,6 +96,32 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
             if getattr(model, "provider", None) is None:
                 model.provider = "anthropic"
 
+    # The per-iteration summarizer has its own dedicated client (independent
+    # of the worker ensemble), so it doesn't pick up the top-level provider
+    # automatically. If the user set `provider: openrouter` and left the
+    # summarizer block at defaults, the summarizer would otherwise try to
+    # hit Anthropic-direct and fail on every iteration. Inherit unset
+    # summarizer fields here so the common case "everything via OpenRouter"
+    # works without an extra YAML block.
+    summarizer_cfg = getattr(config.reps, "summarizer", None)
+    if summarizer_cfg is not None and config.provider:
+        if summarizer_cfg.provider is None:
+            summarizer_cfg.provider = config.provider
+        if summarizer_cfg.api_base is None:
+            summarizer_cfg.api_base = config.llm.api_base
+        if summarizer_cfg.api_key is None:
+            summarizer_cfg.api_key = config.llm.api_key
+        # When the summarizer model_id is still the dataclass default and we're
+        # routing through OpenRouter, that id ("claude-opus-4-7") isn't a valid
+        # OpenRouter slug. Fall back to the user's primary model so the
+        # summarizer matches the rest of the run.
+        if (
+            config.provider == "openrouter"
+            and summarizer_cfg.model_id == "claude-opus-4-7"
+            and config.llm.primary_model
+        ):
+            summarizer_cfg.model_id = config.llm.primary_model
+
     # Top-level `reasoning:` propagates to every model unless that model
     # explicitly set its own `reasoning_effort`. This lets configs say
     # `reasoning: high` once instead of repeating the effort on each model.
@@ -187,6 +213,11 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
                     spec.loader.exec_module(viz)
                     viz.visualize_from_program(str(best_code_path),
                                                save_path=str(Path(output_dir) / "packing.png"))
+            except ImportError as e:
+                logger.info(
+                    f"Skipping visualization ({e.name} not installed; "
+                    f"`uv pip install matplotlib` to enable)."
+                )
             except Exception as e:
                 logger.warning(f"Could not generate visualization: {e}")
 
