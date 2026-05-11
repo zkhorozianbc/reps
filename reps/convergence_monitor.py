@@ -78,6 +78,50 @@ def classify_edit(diff: str) -> str:
     return f"{size}_{content}"
 
 
+def _current_best_score(database) -> Optional[float]:
+    """Best `combined_score` (or numeric-average fallback) across the database."""
+    try:
+        best = database.get_best_program()
+    except Exception:
+        return None
+    if best is None or not getattr(best, "metrics", None):
+        return None
+    score = best.metrics.get("combined_score")
+    if isinstance(score, (int, float)):
+        return float(score)
+    nums = [v for v in best.metrics.values() if isinstance(v, (int, float))]
+    return sum(nums) / len(nums) if nums else None
+
+
+_ACTION_SEVERITY = {
+    ConvergenceAction.NONE: 0,
+    ConvergenceAction.MILD_BOOST: 1,
+    ConvergenceAction.MODERATE_DIVERSIFY: 2,
+    ConvergenceAction.SEVERE_RESTART: 3,
+}
+
+
+def _most_severe(*actions: ConvergenceAction) -> ConvergenceAction:
+    return max(actions, key=lambda a: _ACTION_SEVERITY[a])
+
+
+def _classify_against_thresholds(
+    value: float, thresholds: Dict[str, float]
+) -> tuple[ConvergenceAction, Optional[str]]:
+    """Map a measurement against {mild, moderate, severe} thresholds.
+
+    Lower values are worse (consistent with niche-growth semantics). Returns
+    (action, level_name) where level_name is None for NONE.
+    """
+    if value < thresholds["severe"]:
+        return ConvergenceAction.SEVERE_RESTART, "severe"
+    if value < thresholds["moderate"]:
+        return ConvergenceAction.MODERATE_DIVERSIFY, "moderate"
+    if value < thresholds["mild"]:
+        return ConvergenceAction.MILD_BOOST, "mild"
+    return ConvergenceAction.NONE, None
+
+
 def _feature_map_capacity(database) -> int:
     """Total addressable cells across all islands.
 
@@ -114,6 +158,11 @@ class ConvergenceMonitor:
                 - window_size: int — batches in the growth window
                 - niche_growth_threshold_{mild,moderate,severe}: float in [0,1]
                 - entropy_threshold_{mild,moderate,severe}: legacy alias
+                - score_plateau_threshold_{mild,moderate,severe}: float — minimum
+                  best-score improvement over the window. If improvement falls
+                  below the threshold, the corresponding action fires. Catches
+                  the "filling new niches with same-fitness programs" failure
+                  mode that niche-growth alone can't see.
                 - saturation_threshold: float in [0,1] — when occupied/capacity
                   exceeds this, skip stall detection (a full map means the
                   search succeeded, not collapsed).
@@ -123,6 +172,7 @@ class ConvergenceMonitor:
 
         # +1 so we can compare current vs window_size batches ago
         self.niche_history: deque = deque(maxlen=self.window_size + 1)
+        self.score_history: deque = deque(maxlen=self.window_size + 1)
         # Edit history for informational entropy / divergence signals only.
         self.edit_history: deque = deque(maxlen=self.window_size * 50)
 
@@ -133,11 +183,19 @@ class ConvergenceMonitor:
             )
             for level, default in (("mild", 0.5), ("moderate", 0.3), ("severe", 0.15))
         }
+        # Score-plateau thresholds: minimum best-score improvement over the
+        # window. `mild` is "barely improving", `severe` is "no improvement at all".
+        # Defaults are small-but-nonzero — calibrated for [0,1] combined_score.
+        self.score_plateau_thresholds = {
+            level: config.get(f"score_plateau_threshold_{level}", default)
+            for level, default in (("mild", 0.01), ("moderate", 0.001), ("severe", 0.0))
+        }
         self.saturation_threshold = config.get("saturation_threshold", 0.8)
 
         self._last_entropy = 0.0
         self._last_divergence = 0.0
         self._last_niche_growth: Optional[float] = None
+        self._last_score_improvement: Optional[float] = None
         self._last_saturation = 0.0
 
     @property
@@ -153,24 +211,37 @@ class ConvergenceMonitor:
         return self._last_niche_growth
 
     @property
+    def last_score_improvement(self) -> Optional[float]:
+        return self._last_score_improvement
+
+    @property
     def last_saturation(self) -> float:
         return self._last_saturation
 
     def update(self, batch_results: List, database=None) -> ConvergenceAction:
         """Called after each batch returns from the process pool.
 
+        The action returned is the **most severe** of two parallel signals:
+          - niche-growth stall: MAP-Elites is not finding new behaviors
+          - score plateau: best fitness is not improving
+
+        Both must be running because they catch different failure modes:
+        score can plateau while niches keep filling (same-fitness programs in
+        new cells — the failure mode we hit on Sonnet/circle_packing), and
+        niches can stop growing while score is still climbing late in a run.
+
         Args:
             batch_results: List of IterationResult objects
-            database: ProgramDatabase. When None, falls back to NONE (no
-                action) — the action driver requires the niche map.
+            database: ProgramDatabase. When None, returns NONE — both signals
+                read database state.
 
         Returns:
-            ConvergenceAction indicating what corrective action to take
+            ConvergenceAction at the highest escalation level either signal
+            detected this batch.
         """
         if not self.enabled:
             return ConvergenceAction.NONE
 
-        # Update informational edit signals (drive CSV columns, not actions).
         for r in batch_results:
             if r.error is None:
                 self.edit_history.append({
@@ -185,6 +256,11 @@ class ConvergenceMonitor:
         if database is None:
             return ConvergenceAction.NONE
 
+        niche_action = self._evaluate_niche_signal(batch_results, database)
+        plateau_action = self._evaluate_score_signal(database)
+        return _most_severe(niche_action, plateau_action)
+
+    def _evaluate_niche_signal(self, batch_results, database) -> ConvergenceAction:
         occupied = sum(
             len(fmap) for fmap in getattr(database, "island_feature_maps", [])
         )
@@ -192,7 +268,6 @@ class ConvergenceMonitor:
         self._last_saturation = occupied / capacity if capacity else 0.0
         self.niche_history.append(occupied)
 
-        # Wait for a full window before computing growth.
         if len(self.niche_history) <= self.window_size:
             return ConvergenceAction.NONE
 
@@ -203,36 +278,48 @@ class ConvergenceMonitor:
 
         # Normalize growth-per-batch by the per-batch ceiling: at most one
         # new niche per non-error child. A normalized growth of 1.0 means
-        # every child landed in an unoccupied cell over the whole window;
-        # 0.0 means none did.
+        # every child landed in an unoccupied cell over the whole window.
         batch_size = max(1, sum(1 for r in batch_results if r.error is None))
         growth_per_batch = (self.niche_history[-1] - self.niche_history[0]) / self.window_size
         normalized = growth_per_batch / batch_size
         self._last_niche_growth = normalized
 
-        if normalized < self.thresholds["severe"]:
+        action, level = _classify_against_thresholds(normalized, self.thresholds)
+        if level:
             logger.info(
-                f"Severe stall: niche growth={normalized:.3f}/batch "
-                f"(saturation={self._last_saturation:.1%}) "
-                f"-> triggering SEVERE_RESTART"
+                f"{level.title()} niche stall: growth={normalized:.3f}/batch "
+                f"(saturation={self._last_saturation:.1%}) -> {action.name}"
             )
-            return ConvergenceAction.SEVERE_RESTART
-        if normalized < self.thresholds["moderate"]:
-            logger.info(
-                f"Moderate stall: niche growth={normalized:.3f}/batch "
-                f"(saturation={self._last_saturation:.1%}) "
-                f"-> triggering MODERATE_DIVERSIFY"
-            )
-            return ConvergenceAction.MODERATE_DIVERSIFY
-        if normalized < self.thresholds["mild"]:
-            logger.info(
-                f"Mild stall: niche growth={normalized:.3f}/batch "
-                f"(saturation={self._last_saturation:.1%}) "
-                f"-> triggering MILD_BOOST"
-            )
-            return ConvergenceAction.MILD_BOOST
+        return action
 
-        return ConvergenceAction.NONE
+    def _evaluate_score_signal(self, database) -> ConvergenceAction:
+        best = _current_best_score(database)
+        if best is None:
+            return ConvergenceAction.NONE
+        self.score_history.append(best)
+
+        if len(self.score_history) <= self.window_size:
+            return ConvergenceAction.NONE
+
+        improvement = self.score_history[-1] - self.score_history[0]
+        self._last_score_improvement = improvement
+
+        # Inverted threshold semantics for plateau detection: action fires
+        # when improvement is *below* threshold (small or zero gain).
+        if improvement <= self.score_plateau_thresholds["severe"]:
+            action, level = ConvergenceAction.SEVERE_RESTART, "severe"
+        elif improvement <= self.score_plateau_thresholds["moderate"]:
+            action, level = ConvergenceAction.MODERATE_DIVERSIFY, "moderate"
+        elif improvement <= self.score_plateau_thresholds["mild"]:
+            action, level = ConvergenceAction.MILD_BOOST, "mild"
+        else:
+            return ConvergenceAction.NONE
+
+        logger.info(
+            f"{level.title()} score plateau: improvement={improvement:+.4f} "
+            f"over last {self.window_size} batches -> {action.name}"
+        )
+        return action
 
     def _compute_edit_entropy(self) -> float:
         """Shannon entropy over edit type distribution across the window.

@@ -207,25 +207,41 @@ class _FakeDatabase:
             self.feature_dimensions = dims
             self.feature_bins = bins
 
-    def __init__(self, *, niche_sequence, num_islands=1, dims=("a", "b"), bins=10):
-        # niche_sequence: list of total occupied counts to return on
-        # consecutive calls. We expand into island maps by distributing
-        # cells across islands; the monitor only reads len(fmap), so the
-        # values can be arbitrary.
-        self._seq = list(niche_sequence)
+    class _Program:
+        def __init__(self, score):
+            self.metrics = {"combined_score": score} if score is not None else {}
+
+    def __init__(
+        self,
+        *,
+        niche_sequence,
+        score_sequence=None,
+        num_islands=1,
+        dims=("a", "b"),
+        bins=10,
+    ):
+        self._niche_seq = list(niche_sequence)
+        self._score_seq = list(score_sequence) if score_sequence is not None else None
         self._step = 0
         self._num_islands = num_islands
         self.config = self._Cfg(list(dims), bins)
         self.feature_bins = bins
         self.island_feature_maps = [{} for _ in range(num_islands)]
+        self._best_program = None
 
     def advance(self):
-        total = self._seq[min(self._step, len(self._seq) - 1)]
-        self._step += 1
-        # Distribute `total` cells across islands.
+        total = self._niche_seq[min(self._step, len(self._niche_seq) - 1)]
         self.island_feature_maps = [{} for _ in range(self._num_islands)]
         for i in range(total):
             self.island_feature_maps[i % self._num_islands][f"k{i}"] = f"p{i}"
+
+        if self._score_seq is not None:
+            idx = min(self._step, len(self._score_seq) - 1)
+            self._best_program = self._Program(self._score_seq[idx])
+        self._step += 1
+
+    def get_best_program(self):
+        return self._best_program
 
 
 class TestConvergenceMonitor:
@@ -333,6 +349,68 @@ class TestConvergenceMonitor:
             "entropy_threshold_mild": 0.3,
         })
         assert monitor.thresholds == {"mild": 0.3, "moderate": 0.4, "severe": 0.5}
+
+    def test_score_plateau_triggers_action(self):
+        """Niches growing healthily but best-score flat -> escalate on plateau.
+
+        Replicates the Sonnet/circle_packing failure mode: search keeps
+        filling new MAP-Elites cells, but with same-fitness programs, so
+        niche-growth says "healthy" while score is stuck.
+        """
+        monitor = ConvergenceMonitor({
+            "enabled": True, "window_size": 4,
+            "niche_growth_threshold_severe": 0.0,  # don't fire on niche
+            "niche_growth_threshold_moderate": 0.0,
+            "niche_growth_threshold_mild": 0.0,
+            "score_plateau_threshold_severe": 0.0,
+            "score_plateau_threshold_moderate": 0.001,
+            "score_plateau_threshold_mild": 0.01,
+        })
+        # Niches grow steadily (1/batch * 3 children = 1.0 normalized) but
+        # best_score sits at 0.93 the whole window.
+        db = _FakeDatabase(
+            niche_sequence=[3, 6, 9, 12, 15, 18],
+            score_sequence=[0.93, 0.93, 0.93, 0.93, 0.93, 0.93],
+        )
+        results = [self._make_result(diff=f"x = {i}") for i in range(3)]
+        action = self._drive(monitor, db, results, n_batches=6)
+        assert action == ConvergenceAction.SEVERE_RESTART
+
+    def test_score_improving_returns_none(self):
+        """Score climbing across the window -> no plateau action."""
+        monitor = ConvergenceMonitor({
+            "enabled": True, "window_size": 4,
+            "niche_growth_threshold_mild": 0.0,  # never fires
+            "score_plateau_threshold_mild": 0.01,
+        })
+        db = _FakeDatabase(
+            niche_sequence=[3, 6, 9, 12, 15, 18],
+            score_sequence=[0.5, 0.6, 0.7, 0.8, 0.9, 0.95],
+        )
+        results = [self._make_result(diff=f"x = {i}") for i in range(3)]
+        action = self._drive(monitor, db, results, n_batches=6)
+        assert action == ConvergenceAction.NONE
+
+    def test_most_severe_action_wins(self):
+        """When both signals fire, the higher-severity action is returned."""
+        monitor = ConvergenceMonitor({
+            "enabled": True, "window_size": 4,
+            # Niche fires MILD (low growth)
+            "niche_growth_threshold_mild": 0.5,
+            "niche_growth_threshold_moderate": 0.3,
+            "niche_growth_threshold_severe": 0.15,
+            # Score fires SEVERE (zero improvement)
+            "score_plateau_threshold_severe": 0.0,
+            "score_plateau_threshold_moderate": 0.001,
+            "score_plateau_threshold_mild": 0.01,
+        })
+        db = _FakeDatabase(
+            niche_sequence=[10, 11, 12, 13, 14, 15],  # mild growth
+            score_sequence=[0.5] * 6,                  # severe plateau
+        )
+        results = [self._make_result(diff=f"x = {i}") for i in range(3)]
+        action = self._drive(monitor, db, results, n_batches=6)
+        assert action == ConvergenceAction.SEVERE_RESTART
 
 
 # ---------------------------------------------------------------------------

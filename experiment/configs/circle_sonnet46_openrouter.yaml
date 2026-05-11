@@ -83,7 +83,10 @@ reps:
 
   convergence:
     enabled: true
-    window_size: 8
+    # window_size 4 gives the score-plateau detector room to fire at ~batch 5
+    # of a 9-batch run, leaving time for the SEVERE_RESTART action (doubles
+    # epsilon-revisitation) to inject diversity before the run ends.
+    window_size: 4
     entropy_threshold_mild: 0.5
     entropy_threshold_moderate: 0.3
     entropy_threshold_severe: 0.15
