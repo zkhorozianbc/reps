@@ -779,3 +779,137 @@ class TestMetricsLogger:
                 entry = json.loads(f.readline())
             assert entry["batch"] == 1
             assert entry["reflection"]["working_patterns"] == ["test pattern"]
+
+
+# ---------------------------------------------------------------------------
+# Run-health tracker (annotation success + convergence-action recovery)
+# ---------------------------------------------------------------------------
+
+
+class TestRunHealthTracking:
+    """Tests for MetricsLogger.write_health + per-run health counters.
+
+    Covers Gap 1 (annotation success rate) and Gap 2 (action recovery)
+    described in the task. Counters are exercised directly the same way the
+    controller would call them; we don't spin up the full controller.
+    """
+
+    def test_annotation_counters_persisted_to_health_json(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            ml.record_annotation_attempt(success=True)
+            ml.record_annotation_attempt(success=True)
+            ml.record_annotation_attempt(success=False)
+            health = ml.write_health()
+            assert health["annotations"]["attempts"] == 3
+            assert health["annotations"]["successes"] == 2
+            assert abs(health["annotations"]["success_rate"] - 2 / 3) < 1e-9
+            health_path = os.path.join(tmpdir, "metrics", "health.json")
+            assert os.path.exists(health_path)
+            with open(health_path) as f:
+                on_disk = json.load(f)
+            assert on_disk["annotations"]["attempts"] == 3
+
+    def test_low_annotation_rate_emits_warning(self, caplog):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            for _ in range(10):
+                ml.record_annotation_attempt(success=False)
+            ml.record_annotation_attempt(success=True)
+            with caplog.at_level("WARNING", logger="reps.metrics_logger"):
+                ml.write_health()
+            assert any(
+                "summarizer success rate" in r.message and r.levelname == "WARNING"
+                for r in caplog.records
+            ), caplog.text
+
+    def test_healthy_annotation_rate_does_not_warn(self, caplog):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            for _ in range(10):
+                ml.record_annotation_attempt(success=True)
+            with caplog.at_level("WARNING", logger="reps.metrics_logger"):
+                ml.write_health()
+            assert not any(
+                "summarizer success rate" in r.message for r in caplog.records
+            )
+
+    def test_action_recovery_via_score_improvement(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            # Fire SEVERE_RESTART at batch 5 with best=0.5, niche=10
+            ml.record_action_fired("SEVERE_RESTART", 5, best_score=0.5, niche_occupancy=10)
+            # Next batch: best score climbed → recovered.
+            ml.observe_post_action(6, best_score=0.6, niche_occupancy=10)
+            health = ml.write_health()
+            assert health["convergence_actions"]["fired_per_level"] == {"SEVERE_RESTART": 1}
+            assert health["convergence_actions"]["recovered_per_level"] == {"SEVERE_RESTART": 1}
+            assert health["convergence_actions"]["recovery_rate"] == 1.0
+
+    def test_action_recovery_via_niche_growth(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            ml.record_action_fired("MILD_BOOST", 5, best_score=0.5, niche_occupancy=10)
+            # Score flat, niche jumps from 10 -> 13 (30% growth, > 20% threshold).
+            ml.observe_post_action(6, best_score=0.5, niche_occupancy=13)
+            health = ml.write_health()
+            assert health["convergence_actions"]["recovered_per_level"] == {"MILD_BOOST": 1}
+
+    def test_action_no_recovery_after_lookahead(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            ml.record_action_fired("SEVERE_RESTART", 5, best_score=0.5, niche_occupancy=10)
+            # Two flat batches → exceeds lookahead, never recovers.
+            ml.observe_post_action(6, best_score=0.5, niche_occupancy=10)
+            ml.observe_post_action(7, best_score=0.5, niche_occupancy=10)
+            health = ml.write_health()
+            assert health["convergence_actions"]["recovered_per_level"] == {}
+            assert health["convergence_actions"]["recovery_rate"] == 0.0
+
+    def test_repeated_unrecovered_actions_emit_warning(self, caplog):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            # Fire 3 actions, none recover (flat score + flat niches).
+            for batch in range(1, 4):
+                ml.record_action_fired(
+                    "SEVERE_RESTART", batch, best_score=0.5, niche_occupancy=10,
+                )
+                ml.observe_post_action(batch + 1, best_score=0.5, niche_occupancy=10)
+                ml.observe_post_action(batch + 2, best_score=0.5, niche_occupancy=10)
+            with caplog.at_level("WARNING", logger="reps.metrics_logger"):
+                ml.write_health()
+            assert any(
+                "adaptive escalation appears ineffective" in r.message
+                and r.levelname == "WARNING"
+                for r in caplog.records
+            ), caplog.text
+
+    def test_healthy_actions_do_not_warn(self, caplog):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            # Fire 3 actions, all recover via score improvement.
+            for batch in range(1, 4):
+                ml.record_action_fired(
+                    "MILD_BOOST", batch, best_score=0.5 + batch * 0.01, niche_occupancy=10,
+                )
+                ml.observe_post_action(batch + 1, best_score=0.5 + batch * 0.01 + 0.05, niche_occupancy=10)
+            with caplog.at_level("WARNING", logger="reps.metrics_logger"):
+                ml.write_health()
+            assert not any(
+                "adaptive escalation appears ineffective" in r.message
+                for r in caplog.records
+            )
+
+    def test_no_warnings_on_quiet_run(self, caplog):
+        """Empty run (no annotations attempted, no actions fired) — silent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            with caplog.at_level("WARNING", logger="reps.metrics_logger"):
+                health = ml.write_health()
+            assert health["annotations"]["success_rate"] is None
+            assert health["convergence_actions"]["recovery_rate"] is None
+            assert not any(
+                "summarizer success rate" in r.message
+                or "adaptive escalation" in r.message
+                for r in caplog.records
+            )

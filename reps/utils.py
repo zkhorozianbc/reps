@@ -13,6 +13,43 @@ from typing import Any, Dict, List, Optional, Tuple
 # ---------------------------------------------------------------------------
 
 
+def is_failed_evaluation_metrics(metrics: Dict[str, Any]) -> bool:
+    """
+    Detect whether a metrics dict represents a failed/aborted evaluation
+    (timeout, exception, cascade-stage failure) rather than a normal result.
+
+    The harness's evaluator returns sentinel-shaped metrics dicts on failure
+    paths (see ``reps/evaluator.py``): timeouts emit ``{"timeout": True, ...}``;
+    exception/retry-exhaustion paths emit ``{"error": 0.0}``; cascade-stage
+    failures emit ``{"stage1_passed": 0.0, "error": 0.0, ...}``. In every case
+    the failure is logged upstream — downstream code should treat these dicts
+    as "no real metrics" rather than as a misconfigured-evaluator situation
+    (which is what a normal-shaped dict missing ``combined_score`` would be).
+
+    Args:
+        metrics: Metrics dict produced by an evaluator run.
+
+    Returns:
+        True if the dict matches a known failure shape, False otherwise.
+    """
+    if not metrics:
+        # An empty dict isn't an explicit failure marker; let callers decide.
+        return False
+
+    # Any explicit timeout marker counts as failure regardless of value.
+    if "timeout" in metrics and metrics.get("timeout"):
+        return True
+
+    # The evaluator's exception/retry-exhaustion path returns ``{"error": 0.0}``.
+    # Treat the bare presence of the ``error`` key as a failure signal — it's
+    # only emitted by failure paths, never by user evaluators returning real
+    # scores. (User evaluators surface error info via ``feedback`` / artifacts.)
+    if "error" in metrics:
+        return True
+
+    return False
+
+
 def safe_numeric_average(metrics: Dict[str, Any]) -> float:
     """
     Calculate the average of numeric values in a metrics dictionary,

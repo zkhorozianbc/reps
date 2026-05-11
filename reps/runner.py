@@ -184,6 +184,7 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
 
     # Run evolution
     controller.start()
+    best = None  # so the `finally` block can reference it even if run_evolution raises
     try:
         best = await controller.run_evolution(
             start_iteration=1,
@@ -196,6 +197,15 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
         # Save all programs, prompts, and responses to disk
         db.save(output_dir)
         logger.info(f"Database saved to {output_dir}")
+
+        # Write per-run health snapshot (annotation success rate +
+        # convergence-action recovery). Emits WARNINGs at run end if either
+        # signal is degraded — see MetricsLogger thresholds.
+        if getattr(controller, "_reps_metrics", None) is not None:
+            try:
+                controller._reps_metrics.write_health()
+            except Exception as e:
+                logger.warning(f"Failed to write health.json: {e}")
 
         # Save best program code and visualization
         if best and best.code:
