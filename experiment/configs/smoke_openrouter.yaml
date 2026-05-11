@@ -1,0 +1,68 @@
+# Smoke test: REPS harness via OpenRouter, cheap model, 3 iterations.
+# Validates the OpenRouter path end-to-end without spending much.
+harness: reps
+provider: openrouter
+task: ../benchmarks/circle_packing
+max_iterations: 3
+log_level: INFO
+random_seed: 42
+
+llm:
+  primary_model: "openai/gpt-4o-mini"
+  primary_model_weight: 1.0
+  api_base: "https://openrouter.ai/api/v1"
+  api_key: "${OPENROUTER_API_KEY}"
+  temperature: 0.7
+  max_tokens: 4000
+  timeout: 300
+
+prompt:
+  num_top_programs: 2
+  use_template_stochasticity: true
+
+database:
+  population_size: 10
+  archive_size: 5
+  num_islands: 2
+
+evaluator:
+  timeout: 120
+  cascade_evaluation: false
+  parallel_evaluations: 1
+
+diff_based_evolution: false
+
+reps:
+  enabled: true
+  batch_size: 1
+
+  reflection:
+    enabled: false
+
+  revisitation:
+    enabled: false
+
+  workers:
+    types:
+      - name: sc_exploiter
+        impl: single_call
+        role: exploiter
+        model_id: openai/gpt-4o-mini
+        temperature: 0.3
+        generation_mode: full
+        max_turns: 1
+        uses_evaluator: false
+        owns_temperature: true
+        weight: 1.0
+
+  convergence:
+    enabled: false
+
+  contracts:
+    enabled: false
+
+  sota:
+    enabled: false
+
+  annotations:
+    enabled: false
