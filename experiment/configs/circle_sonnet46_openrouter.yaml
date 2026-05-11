@@ -1,0 +1,101 @@
+# Circle packing n=26 — Claude Sonnet 4-6 via OpenRouter.
+# Success criterion: improve the seed's combined_score (0.78) within 25 iterations.
+harness: reps
+provider: openrouter
+task: ../benchmarks/circle_packing
+max_iterations: 25
+log_level: INFO
+random_seed: 42
+
+llm:
+  primary_model: "anthropic/claude-sonnet-4.6"
+  primary_model_weight: 1.0
+  api_base: "https://openrouter.ai/api/v1"
+  api_key: "${OPENROUTER_API_KEY}"
+  temperature: 0.7
+  max_tokens: 8000
+  timeout: 600
+
+prompt:
+  num_top_programs: 3
+  use_template_stochasticity: true
+
+database:
+  population_size: 40
+  archive_size: 20
+  num_islands: 3
+  elite_selection_ratio: 0.3
+  exploitation_ratio: 0.7
+
+evaluator:
+  timeout: 180
+  cascade_evaluation: false
+  parallel_evaluations: 2
+
+diff_based_evolution: false
+
+reps:
+  enabled: true
+  batch_size: 3
+
+  reflection:
+    enabled: true
+    top_k: 3
+    bottom_k: 2
+
+  revisitation:
+    enabled: true
+    epsilon_start: 0.15
+    epsilon_end: 0.05
+    decay: "linear"
+    recency_window: 15
+
+  workers:
+    types:
+      - name: sc_exploiter
+        impl: single_call
+        role: exploiter
+        model_id: anthropic/claude-sonnet-4.6
+        temperature: 0.3
+        generation_mode: full
+        max_turns: 1
+        uses_evaluator: false
+        owns_temperature: true
+        weight: 0.6
+      - name: sc_explorer
+        impl: single_call
+        role: explorer
+        model_id: anthropic/claude-sonnet-4.6
+        temperature: 1.0
+        generation_mode: full
+        max_turns: 1
+        uses_evaluator: false
+        owns_temperature: true
+        weight: 0.3
+      - name: sc_crossover
+        impl: single_call
+        role: crossover
+        model_id: anthropic/claude-sonnet-4.6
+        generation_mode: full
+        max_turns: 1
+        uses_evaluator: false
+        weight: 0.1
+
+  convergence:
+    enabled: true
+    window_size: 8
+    entropy_threshold_mild: 0.5
+    entropy_threshold_moderate: 0.3
+    entropy_threshold_severe: 0.15
+
+  contracts:
+    enabled: false
+
+  sota:
+    enabled: true
+    target_score: 2.6361
+    target_metric: sum_radii
+
+  annotations:
+    enabled: true
+    dead_end_awareness: true

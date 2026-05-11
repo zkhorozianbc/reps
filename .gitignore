@@ -17,3 +17,6 @@ experiment/results/**/logs/
 experiment/results/**/checkpoints/
 experiment/results/**/*.log
 experiment/results/**/best/
+
+# Ad-hoc run output written by `reps-run --output runs/...`. Always ephemeral.
+runs/
