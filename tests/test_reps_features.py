@@ -194,6 +194,40 @@ class TestClassifyEdit:
         assert result.startswith("large_")
 
 
+class _FakeDatabase:
+    """Minimal database stand-in for ConvergenceMonitor tests.
+
+    Exposes the surface the monitor reads: `island_feature_maps` (list of
+    dicts) plus a `config.feature_dimensions` / `feature_bins` so capacity
+    can be computed.
+    """
+
+    class _Cfg:
+        def __init__(self, dims, bins):
+            self.feature_dimensions = dims
+            self.feature_bins = bins
+
+    def __init__(self, *, niche_sequence, num_islands=1, dims=("a", "b"), bins=10):
+        # niche_sequence: list of total occupied counts to return on
+        # consecutive calls. We expand into island maps by distributing
+        # cells across islands; the monitor only reads len(fmap), so the
+        # values can be arbitrary.
+        self._seq = list(niche_sequence)
+        self._step = 0
+        self._num_islands = num_islands
+        self.config = self._Cfg(list(dims), bins)
+        self.feature_bins = bins
+        self.island_feature_maps = [{} for _ in range(num_islands)]
+
+    def advance(self):
+        total = self._seq[min(self._step, len(self._seq) - 1)]
+        self._step += 1
+        # Distribute `total` cells across islands.
+        self.island_feature_maps = [{} for _ in range(self._num_islands)]
+        for i in range(total):
+            self.island_feature_maps[i % self._num_islands][f"k{i}"] = f"p{i}"
+
+
 class TestConvergenceMonitor:
     """Tests for the ConvergenceMonitor (F4)."""
 
@@ -205,65 +239,100 @@ class TestConvergenceMonitor:
             error=None,
         )
 
+    def _drive(self, monitor, db, results_per_batch, n_batches):
+        """Run n batches, returning the action from the final one."""
+        last = ConvergenceAction.NONE
+        for _ in range(n_batches):
+            db.advance()
+            last = monitor.update(results_per_batch, database=db)
+        return last
+
     def test_returns_none_when_insufficient_data(self):
-        monitor = ConvergenceMonitor({"enabled": True})
-        # Fewer than 10 results
+        monitor = ConvergenceMonitor({"enabled": True, "window_size": 8})
+        db = _FakeDatabase(niche_sequence=[1, 2, 3])
         results = [self._make_result(diff=f"x = {i}") for i in range(3)]
-        action = monitor.update(results)
+        # Need window_size+1 batches before any action fires.
+        action = self._drive(monitor, db, results, n_batches=3)
         assert action == ConvergenceAction.NONE
 
     def test_returns_none_when_disabled(self):
         monitor = ConvergenceMonitor({"enabled": False})
+        db = _FakeDatabase(niche_sequence=[1] * 20)
         results = [self._make_result(diff=f"x = {i}") for i in range(20)]
-        action = monitor.update(results)
+        action = self._drive(monitor, db, results, n_batches=20)
         assert action == ConvergenceAction.NONE
 
-    def test_high_entropy_returns_none(self):
-        """Diverse edits should produce high entropy and NONE action."""
+    def test_returns_none_without_database(self):
+        """Without a database the action driver has no signal to read."""
+        monitor = ConvergenceMonitor({"enabled": True, "window_size": 4})
+        results = [self._make_result(diff="x = 1") for _ in range(3)]
+        for _ in range(10):
+            assert monitor.update(results) == ConvergenceAction.NONE
+
+    def test_healthy_growth_returns_none(self):
+        """Niche map filling steadily means search is exploring; no action."""
         monitor = ConvergenceMonitor({
-            "enabled": True,
-            "entropy_threshold_mild": 0.5,
+            "enabled": True, "window_size": 4,
+            "niche_growth_threshold_mild": 0.2,
         })
-        # Feed diverse edits across multiple types
-        diverse_diffs = [
-            "def foo(): pass",          # function
-            "class Bar: pass",          # class
-            "import os",                # import
-            "for i in range(10): pass", # loop
-            "if x > 0: y = 1",         # conditional
-            "return x + y",            # return
-            "x += 1",                  # arithmetic
-            "def baz(): return 0",     # function
-            "class Qux: pass",         # class
-            "while True: break",       # loop
-            "from sys import exit",    # import
-            "x = y + z * 2",          # arithmetic
-        ]
-        results = [
-            self._make_result(diff=d, worker_type=wt)
-            for d, wt in zip(diverse_diffs, ["exploiter", "explorer"] * 6)
-        ]
-        action = monitor.update(results)
+        # 3 children per batch, 3 new niches per batch -> normalized growth 1.0
+        db = _FakeDatabase(niche_sequence=[3, 6, 9, 12, 15, 18])
+        results = [self._make_result(diff=f"x = {i}") for i in range(3)]
+        action = self._drive(monitor, db, results, n_batches=6)
         assert action == ConvergenceAction.NONE
 
-    def test_low_entropy_triggers_escalation(self):
-        """Identical edits should produce low entropy and trigger escalation."""
+    def test_stalled_growth_triggers_severe(self):
+        """Niche map stops growing -> normalized growth 0 -> severe action."""
         monitor = ConvergenceMonitor({
-            "enabled": True,
-            "entropy_threshold_mild": 0.999,  # Very high threshold to guarantee trigger
-            "entropy_threshold_moderate": 0.998,
-            "entropy_threshold_severe": 0.997,
+            "enabled": True, "window_size": 4,
+            "niche_growth_threshold_mild": 0.5,
+            "niche_growth_threshold_moderate": 0.3,
+            "niche_growth_threshold_severe": 0.15,
         })
-        # All identical edits => minimal entropy
-        results = [self._make_result(diff="x = 1", worker_type="exploiter") for _ in range(15)]
-        action = monitor.update(results)
-        # With all identical edits, entropy should be 0 (one category => normalized to 0)
-        # which is below severe threshold
-        assert action in (
-            ConvergenceAction.MILD_BOOST,
-            ConvergenceAction.MODERATE_DIVERSIFY,
-            ConvergenceAction.SEVERE_RESTART,
-        )
+        # Niche map sits at 20 for the whole window -> growth = 0
+        db = _FakeDatabase(niche_sequence=[20] * 8)
+        results = [self._make_result(diff="x = 1") for _ in range(3)]
+        action = self._drive(monitor, db, results, n_batches=6)
+        assert action == ConvergenceAction.SEVERE_RESTART
+
+    def test_partial_growth_triggers_mild(self):
+        """Growth above severe but below mild -> mild action."""
+        monitor = ConvergenceMonitor({
+            "enabled": True, "window_size": 4,
+            "niche_growth_threshold_mild": 0.5,
+            "niche_growth_threshold_moderate": 0.3,
+            "niche_growth_threshold_severe": 0.15,
+        })
+        # 3 children/batch, gain 1 niche/batch -> normalized 0.33
+        # That lands in [moderate=0.3, mild=0.5) -> MILD_BOOST
+        db = _FakeDatabase(niche_sequence=[10, 11, 12, 13, 14, 15])
+        results = [self._make_result(diff=f"x = {i}") for i in range(3)]
+        action = self._drive(monitor, db, results, n_batches=6)
+        assert action == ConvergenceAction.MILD_BOOST
+
+    def test_saturated_map_returns_none(self):
+        """A nearly-full map is success, not collapse; skip escalation."""
+        monitor = ConvergenceMonitor({
+            "enabled": True, "window_size": 4,
+            "niche_growth_threshold_severe": 0.99,  # would otherwise always fire
+            "saturation_threshold": 0.5,
+        })
+        # 1 island * 10**2 bins = 100-cell capacity. Hold at 80 (saturation
+        # 0.80 >= threshold 0.5) -> no escalation despite zero growth.
+        db = _FakeDatabase(niche_sequence=[80] * 8, num_islands=1, dims=("a", "b"), bins=10)
+        results = [self._make_result(diff="x = 1") for _ in range(3)]
+        action = self._drive(monitor, db, results, n_batches=6)
+        assert action == ConvergenceAction.NONE
+
+    def test_legacy_entropy_threshold_keys_still_accepted(self):
+        """Existing YAMLs use `entropy_threshold_*` — keep them working."""
+        monitor = ConvergenceMonitor({
+            "enabled": True, "window_size": 4,
+            "entropy_threshold_severe": 0.5,
+            "entropy_threshold_moderate": 0.4,
+            "entropy_threshold_mild": 0.3,
+        })
+        assert monitor.thresholds == {"mild": 0.3, "moderate": 0.4, "severe": 0.5}
 
 
 # ---------------------------------------------------------------------------

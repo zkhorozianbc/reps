@@ -1755,7 +1755,7 @@ class ProcessParallelController:
 
         # F4: Convergence Monitor
         from reps.convergence_monitor import ConvergenceAction
-        action = self._reps_convergence.update(reps_results)
+        action = self._reps_convergence.update(reps_results, database=self.database)
 
         if action == ConvergenceAction.MILD_BOOST:
             self._reps_worker_pool.boost_explorer(0.2)
