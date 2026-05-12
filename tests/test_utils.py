@@ -8,9 +8,50 @@ from reps.utils import (
     apply_diff,
     extract_diffs,
     format_metrics_safe,
+    is_failed_evaluation_metrics,
     parse_full_rewrite,
     safe_numeric_average,
 )
+
+
+# ---------------------------------------------------------------------------
+# is_failed_evaluation_metrics
+# ---------------------------------------------------------------------------
+
+
+class TestIsFailedEvaluationMetrics:
+    def test_timeout_shape_is_failure(self):
+        # Matches reps/evaluator.py:373 (asyncio.TimeoutError path).
+        assert is_failed_evaluation_metrics({"error": 0.0, "timeout": True}) is True
+
+    def test_cascade_stage1_timeout_shape_is_failure(self):
+        # Matches reps/evaluator.py:539 (cascade stage1 timeout).
+        assert (
+            is_failed_evaluation_metrics(
+                {"stage1_passed": 0.0, "error": 0.0, "timeout": True}
+            )
+            is True
+        )
+
+    def test_retries_exhausted_shape_is_failure(self):
+        # Matches reps/evaluator.py:409 (all retries failed).
+        assert is_failed_evaluation_metrics({"error": 0.0}) is True
+
+    def test_normal_metrics_without_combined_score_is_not_failure(self):
+        # Operator-misconfigured evaluator: real numbers but no combined_score.
+        assert (
+            is_failed_evaluation_metrics({"score": 0.5, "performance": 0.6}) is False
+        )
+
+    def test_normal_metrics_with_combined_score_is_not_failure(self):
+        assert (
+            is_failed_evaluation_metrics({"combined_score": 0.9, "score": 0.85})
+            is False
+        )
+
+    def test_empty_dict_is_not_failure(self):
+        # Empty dict isn't a sentinel — caller decides what to do.
+        assert is_failed_evaluation_metrics({}) is False
 
 
 # ---------------------------------------------------------------------------

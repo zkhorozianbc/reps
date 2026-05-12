@@ -257,5 +257,132 @@ def evaluate(program_path):
         self.assertAlmostEqual(controller._reps_worker_pool.allocation["crossover"], 0.15)
 
 
+class TestNoCombinedScoreWarning(unittest.TestCase):
+    """
+    The "no 'combined_score'" WARNING must distinguish a misconfigured
+    evaluator (no combined_score in an otherwise normal metrics dict) from
+    a timeout/error sentinel result (already warned upstream by the evaluator
+    or by the iteration error handler).
+    """
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+
+        self.config = Config()
+        self.config.max_iterations = 1
+        self.config.evaluator.parallel_evaluations = 1
+        self.config.evaluator.timeout = 10
+        self.config.database.num_islands = 1
+        self.config.database.in_memory = True
+        self.config.checkpoint_interval = 5
+
+        self.eval_file = os.path.join(self.test_dir, "evaluator.py")
+        with open(self.eval_file, "w") as f:
+            f.write("def evaluate(p):\n    return {}\n")
+
+        self.database = ProgramDatabase(self.config.database)
+        self.database.add(
+            Program(
+                id="seed",
+                code="def f(): pass",
+                language="python",
+                metrics={"combined_score": 0.5},
+                iteration_found=0,
+            )
+        )
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def _run_one_iter_with_metrics(self, metrics):
+        """Drive a single controller iteration whose child has the given metrics
+        and reps_meta with a non-zero token count (the warning is gated behind
+        the reps_meta token block). Returns the captured log records."""
+
+        async def run_test():
+            controller = ProcessParallelController(
+                self.config, self.eval_file, self.database
+            )
+            controller.start()
+
+            stub_result = SerializableResult(
+                child_program_dict={
+                    "id": "child_x",
+                    "code": "def evolved(): pass",
+                    "language": "python",
+                    "parent_id": "seed",
+                    "generation": 1,
+                    "metrics": metrics,
+                    "iteration_found": 1,
+                    "metadata": {"changes": "test", "island": 0},
+                },
+                parent_id="seed",
+                iteration_time=0.1,
+                iteration=1,
+                reps_meta={"tokens_in": 1, "tokens_out": 1},
+            )
+
+            with patch.object(
+                controller, "_run_iteration", new=AsyncMock(return_value=stub_result)
+            ):
+                await controller.run_evolution(
+                    start_iteration=1, max_iterations=1, target_score=None
+                )
+            return controller
+
+        import logging
+
+        handler_records = []
+
+        class _ListHandler(logging.Handler):
+            def emit(self, record):
+                handler_records.append(record)
+
+        controller_logger = logging.getLogger("reps.controller")
+        list_handler = _ListHandler(level=logging.WARNING)
+        controller_logger.addHandler(list_handler)
+        prev_level = controller_logger.level
+        controller_logger.setLevel(logging.DEBUG)
+        try:
+            controller = asyncio.run(run_test())
+        finally:
+            controller_logger.removeHandler(list_handler)
+            controller_logger.setLevel(prev_level)
+
+        return controller, handler_records
+
+    def _has_combined_score_warning(self, records):
+        return any(
+            r.levelname == "WARNING" and "No 'combined_score' metric" in r.getMessage()
+            for r in records
+        )
+
+    def test_warning_suppressed_for_timeout_shaped_metrics(self):
+        """Timeout sentinel ({error: 0.0, timeout: True}) must not trigger
+        the misleading misconfiguration warning."""
+        controller, records = self._run_one_iter_with_metrics(
+            {"error": 0.0, "timeout": True}
+        )
+        self.assertFalse(
+            self._has_combined_score_warning(records),
+            "no-combined_score WARNING should be suppressed for timeout sentinel",
+        )
+        self.assertFalse(controller._warned_about_combined_score)
+
+    def test_warning_fires_for_misconfigured_evaluator_metrics(self):
+        """A normal-shaped metrics dict that genuinely lacks combined_score
+        (operator misconfiguration) MUST still trigger the warning."""
+        controller, records = self._run_one_iter_with_metrics(
+            {"score": 0.5, "performance": 0.6}
+        )
+        self.assertTrue(
+            self._has_combined_score_warning(records),
+            "no-combined_score WARNING should fire for operator misconfiguration",
+        )
+        self.assertTrue(controller._warned_about_combined_score)
+
+
 if __name__ == "__main__":
     unittest.main()

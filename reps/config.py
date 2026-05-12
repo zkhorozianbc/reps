@@ -570,7 +570,10 @@ class Config:
 
     # Evolution settings
     diff_based_evolution: bool = True
-    max_code_length: int = 10000
+    # 10k was tuned for tiny seed-style programs and silently rejects most
+    # scipy.optimize-based packings (~11-12k). Production runs with capable
+    # models legitimately produce 12-16k programs; reject only true outliers.
+    max_code_length: int = 20000
     diff_pattern: str = r"<<<<<<< SEARCH\n(.*?)=======\n(.*?)>>>>>>> REPLACE"
 
     # Early stopping settings

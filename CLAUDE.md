@@ -7,7 +7,7 @@ REPS (Recursive Evolutionary Program Search) — a self-contained harness for ev
 ## Running
 
 ```bash
-uv pip install -e .
+uv pip install -e '.[benchmarks]'   # `[benchmarks]` brings in scipy + matplotlib
 reps-run <initial_program> <evaluator> --config <config.yaml> --output <output_dir> --iterations N
 ```
 
