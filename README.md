@@ -11,12 +11,13 @@ REPS evolves whole Python programs. You give it a seed program and an
 evaluator; it generates candidate edits, scores them, reflects on what worked,
 keeps a diverse population, and steers compute toward better programs.
 
-## At a Glance
+## How It Works
 
-- **Use it as a library** with `reps.Optimizer(...).optimize(initial, evaluate)`.
-- **Use it as a harness** with `reps-run --config <config.yaml>` for reproducible experiments.
-- **Score simply or richly**: evaluators can return a float, a metrics dict, or `reps.EvaluationResult` with per-instance scores and feedback.
-- **Search with memory**: REPS includes island diversity, reflection, revisitation, convergence monitoring, Pareto selection, trace reflection, and merge-aware crossover.
+- **Start with code**: a seed Python program, either as a string or an `initial_program.py` file.
+- **Score candidates**: write an evaluator that returns a higher-is-better score, metrics dict, or `reps.EvaluationResult`.
+- **Search iteratively**: REPS asks LLM workers to mutate, refine, and merge programs while islands preserve different approaches.
+- **Feed back evidence**: reflection, per-instance scores, evaluator feedback, convergence signals, and SOTA targets steer later edits.
+- **Run it your way**: call `reps.Optimizer(...).optimize(...)` from Python, or use `reps-run --config ...` for YAML experiments.
 
 ## Install
 
