@@ -48,9 +48,9 @@ jobs:
     environment:
       name: pypi
       # The URL hardcodes the PyPI distribution name as resolved in
-      # pyproject.toml ([project].name = "reps-search"). The Python
+      # pyproject.toml ([project].name = "reps-py"). The Python
       # module name (`import reps`) is independent and unchanged.
-      url: https://pypi.org/p/reps-search
+      url: https://pypi.org/p/reps-py
     permissions:
       id-token: write
     steps:

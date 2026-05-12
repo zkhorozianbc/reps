@@ -221,18 +221,14 @@ class Optimizer:
             Path(run_dir).mkdir(parents=True, exist_ok=True)
             persisted_output = run_dir
 
-        # Write seed code + the dispatch shim to the run dir.
+        # Write seed code + the per-run dispatch shim to the run dir.
         initial_path = Path(run_dir) / "initial_program.py"
         initial_path.write_text(initial)
-        evaluator_path = write_shim(run_dir)
 
         registry_id = register_user_evaluate(evaluate)
+        evaluator_path = write_shim(run_dir, registry_id=registry_id)
         cfg = self._build_config(seed=seed)
 
-        # The shim reads its registry id from the env var.
-        import os
-        prev = os.environ.get("REPS_USER_EVALUATOR_ID")
-        os.environ["REPS_USER_EVALUATOR_ID"] = registry_id
         try:
             await run_reps(
                 config=cfg,
@@ -244,10 +240,6 @@ class Optimizer:
                 run_dir, cfg=cfg, persisted_output=persisted_output
             )
         finally:
-            if prev is None:
-                os.environ.pop("REPS_USER_EVALUATOR_ID", None)
-            else:
-                os.environ["REPS_USER_EVALUATOR_ID"] = prev
             unregister_user_evaluate(registry_id)
             if cleanup_tempdir is not None:
                 cleanup_tempdir.cleanup()
@@ -306,6 +298,9 @@ class Optimizer:
         # Top-level provider so runner.run_reps's "anthropic" path stamps
         # provider= on each model.
         cfg.provider = "anthropic" if self.model.provider == "anthropic" else "openrouter"
+
+        if cfg.reps.enabled and not cfg.reps.workers.types:
+            cfg.reps.workers.types = [_default_api_worker_config(model_cfg.name)]
 
         # Disable the per-program summarizer by default — it would try to
         # build its own anthropic LLM out of the user's lm and most users
@@ -371,9 +366,7 @@ class Optimizer:
             ),
             best_feedback=best.feedback,
             iterations_run=iterations_run,
-            # One metric call per program (excluding the seed it's the
-            # same as iterations_run + 1 for the seed eval).
-            total_metric_calls=len(db.programs),
+            total_metric_calls=db.metric_call_count or len(db.programs),
             total_tokens={"in": tokens_in, "out": tokens_out},
             output_dir=persisted_output,
         )
@@ -402,6 +395,26 @@ def _clone_model_cfg(src: LLMModelConfig) -> LLMModelConfig:
         random_seed=src.random_seed,
         reasoning_effort=src.reasoning_effort,
         provider=src.provider,
+    )
+
+
+def _default_api_worker_config(model_id: str):
+    """Minimal worker preset for public API REPS knobs.
+
+    This mirrors the controller's non-REPS fallback worker so enabling
+    trace reflection or merge does not require users to know the internal
+    worker YAML surface.
+    """
+    from reps.workers.base import WorkerConfig
+
+    return WorkerConfig(
+        name="exploiter",
+        impl="single_call",
+        role="exploiter",
+        model_id=model_id,
+        temperature=0.7,
+        generation_mode="diff",
+        weight=1.0,
     )
 
 

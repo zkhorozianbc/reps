@@ -123,8 +123,11 @@ class LLMEnsemble:
         """
         model_override = kwargs.pop("model", None)
         if model_override:
-            for m in self.models:
-                if getattr(m, "model", None) == model_override:
+            override_aliases = self._model_aliases(model_override)
+            for cfg, m in zip(self.models_cfg, self.models):
+                aliases = self._model_aliases(getattr(m, "model", None))
+                aliases.update(self._model_aliases(getattr(cfg, "name", None)))
+                if aliases & override_aliases:
                     logger.info(f"Using model override: {model_override}")
                     return m
             # No match found — fail loudly so the caller sees its config
@@ -137,6 +140,20 @@ class LLMEnsemble:
                 f"LLM client for out-of-ensemble use."
             )
         return self._sample_model()
+
+    @staticmethod
+    def _model_aliases(model_name: Optional[str]) -> set[str]:
+        """Return equivalent names for override matching across provider prefixes."""
+        if not model_name:
+            return set()
+        raw = str(model_name)
+        aliases = {raw}
+        if "/" in raw:
+            aliases.add(raw.split("/", 1)[1])
+        else:
+            for provider in ("anthropic", "openai", "openrouter"):
+                aliases.add(f"{provider}/{raw}")
+        return aliases
 
     def _sample_model(self) -> LLMInterface:
         """Sample a model from the ensemble based on weights"""

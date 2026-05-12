@@ -1,6 +1,6 @@
 # Release Runbook
 
-Per-release procedure for the `reps-search` package on PyPI.
+Per-release procedure for the `reps-py` package on PyPI.
 
 ## One-time bootstrap (do these first, exactly once)
 
@@ -10,12 +10,12 @@ just a tag push.
 
 ### 1. Manually upload `0.1.0` to PyPI
 
-Claim the `reps-search` namespace from a maintainer's laptop. PyPI's
+Claim the `reps-py` namespace from a maintainer's laptop. PyPI's
 Trusted Publishing requires the project to already exist before it
 can be configured, so the first release MUST be a manual upload.
 
 Prerequisites: a PyPI account, and the maintainer is a Project Owner
-(or Project Maintainer with upload permission) on `reps-search` once
+(or Project Maintainer with upload permission) on `reps-py` once
 created.
 
 ```bash
@@ -28,7 +28,7 @@ uv publish                            # prompts for PyPI credentials
 `uv publish` reads `~/.pypirc` or `PYPI_TOKEN`/`UV_PUBLISH_TOKEN` from
 the env. See [uv publish docs](https://docs.astral.sh/uv/reference/cli/#uv-publish).
 
-Verify: visit `https://pypi.org/project/reps-search/0.1.0/` and
+Verify: visit `https://pypi.org/project/reps-py/0.1.0/` and
 confirm the wheel + sdist are listed.
 
 ### 2. Configure Trusted Publishing on PyPI
@@ -37,7 +37,7 @@ Trusted Publishing lets the GitHub Actions workflow obtain a
 short-lived credential via OIDC instead of storing a long-lived API
 token. This is what `release.yml` already expects.
 
-1. Open `https://pypi.org/manage/project/reps-search/settings/publishing/`.
+1. Open `https://pypi.org/manage/project/reps-py/settings/publishing/`.
 2. Under **Add a new pending publisher**, create one with:
    - **Owner:** `zkhorozianbc`
    - **Repository name:** `reps`
@@ -127,11 +127,11 @@ publish step blocks on your approval. Click through to approve.
 ### 5. Verify
 
 ```bash
-uv pip install reps-search==X.Y.Z   # in a clean env
+uv pip install reps-py==X.Y.Z   # in a clean env
 python -c "import reps; print(reps.__version__ if hasattr(reps, '__version__') else 'ok')"
 ```
 
-Visit `https://pypi.org/project/reps-search/X.Y.Z/` to confirm.
+Visit `https://pypi.org/project/reps-py/X.Y.Z/` to confirm.
 
 ## Hotfix procedure
 
@@ -143,9 +143,9 @@ For urgent fixes (e.g., a broken release):
 4. Tag + push as in the per-release procedure.
 
 For a *yanked* release (broken enough to not run): use PyPI's web UI
-at `https://pypi.org/manage/project/reps-search/release/X.Y.Z/` to
+at `https://pypi.org/manage/project/reps-py/release/X.Y.Z/` to
 yank. Yanked releases stay installable by exact-pinned consumers but
-disappear from `pip install reps-search` resolution.
+disappear from `pip install reps-py` resolution.
 
 ## Rollback procedure
 

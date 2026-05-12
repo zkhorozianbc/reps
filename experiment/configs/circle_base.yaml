@@ -39,4 +39,3 @@ evaluator:
   use_llm_feedback: false
 
 diff_based_evolution: false
-allow_full_rewrites: true

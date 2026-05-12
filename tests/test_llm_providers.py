@@ -112,6 +112,27 @@ def test_ensemble_model_override_selection(mock_openai_cls):
         ensemble._select_model(model="nonexistent/model")
 
 
+@patch("reps.llm.anthropic.anthropic.Anthropic")
+@patch("reps.llm.openai_compatible.openai.OpenAI")
+def test_ensemble_model_override_matches_provider_prefixed_aliases(
+    mock_openai_cls, mock_anthropic_cls
+):
+    """Override matching accepts raw or provider-prefixed model aliases."""
+    cfgs = [
+        _make_model_cfg(
+            name="anthropic/claude-sonnet-4.6",
+            api_base=None,
+            provider="anthropic",
+        ),
+        _make_model_cfg(name="openai/gpt-4o-mini", provider="openai"),
+    ]
+    ensemble = LLMEnsemble(cfgs)
+
+    assert ensemble._select_model(model="anthropic/claude-sonnet-4.6").model == "claude-sonnet-4.6"
+    assert ensemble._select_model(model="claude-sonnet-4.6").model == "claude-sonnet-4.6"
+    assert ensemble._select_model(model="gpt-4o-mini").model == "openai/gpt-4o-mini"
+
+
 # ---------------------------------------------------------------------------
 # AnthropicLLM
 # ---------------------------------------------------------------------------
@@ -242,6 +263,27 @@ def test_anthropic_generate_with_context(mock_anthropic_cls):
     ]
     assert call_kwargs["messages"] == [{"role": "user", "content": "Say hello"}]
     assert call_kwargs["model"] == "claude-sonnet-4-20250514"
+
+
+@patch("reps.llm.anthropic.anthropic.Anthropic")
+def test_anthropic_reasoning_models_keep_temperature(mock_anthropic_cls):
+    """AnthropicLLM's class override means Claude reasoning models still pass temperature."""
+    mock_client = MagicMock()
+    _make_anthropic_stream_mock(mock_client, text_answer="ok")
+    mock_anthropic_cls.return_value = mock_client
+
+    cfg = _make_anthropic_cfg(name="anthropic/claude-opus-4-7", temperature=0.42)
+    provider = AnthropicLLM(cfg)
+
+    asyncio.run(
+        provider.generate_with_context(
+            system_message="System",
+            messages=[{"role": "user", "content": "Hi"}],
+        )
+    )
+
+    call_kwargs = mock_client.messages.stream.call_args[1]
+    assert call_kwargs["temperature"] == 0.42
 
 
 @patch("reps.llm.anthropic.anthropic.Anthropic")

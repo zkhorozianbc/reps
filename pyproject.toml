@@ -1,13 +1,14 @@
 [build-system]
-requires = ["setuptools>=42"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "reps-search"
+name = "reps-py"
 version = "0.1.0"
 description = "Recursive Evolutionary Program Search — LLM-driven evolutionary code search"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 authors = [{name = "Zach Khorozian", email = "zkhorozianbc@gmail.com"}]
 keywords = ["evolutionary", "llm", "code-search", "optimization", "ai"]
@@ -15,7 +16,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",

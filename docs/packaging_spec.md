@@ -281,7 +281,7 @@ Documentation = "https://github.com/zkhorozianbc/reps#readme"
   `pyproject.toml:2`), so no setuptools bump needed.
 - **`readme = "README.md"`** assumes the executor adds a `[tool.setuptools]` `include-package-data = true` or similar so the README ships in the sdist. The wheel typically embeds README into `PKG-INFO` automatically; verify in §6.
 - **No `LICENSE` file exists** at `/home/user/reps/LICENSE` today — `ls /home/user/reps/LICENSE*` returned nothing. The executor must create one before publishing. See §7.
-- **Distribution name** — `name = "reps"` is almost certainly taken on PyPI (`reps` is a common short word). The Python module name (`import reps`) is independent of the PyPI distribution name, so we can publish under e.g. `reps-search` while users still write `import reps`. See §7 for candidates.
+- **Distribution name** — `name = "reps"` is almost certainly taken on PyPI (`reps` is a common short word). The Python module name (`import reps`) is independent of the PyPI distribution name, so we can publish under e.g. `reps-py` while users still write `import reps`. See §7 for candidates.
 
 ### Cross-spec interaction
 
@@ -452,15 +452,15 @@ The bare name `reps` is almost certainly taken on PyPI (it's an English word and
 
 | Candidate | Pros | Cons |
 |---|---|---|
-| `reps-search` | Descriptive (evolutionary **search**); hyphenated names are common on PyPI | Slightly long |
+| `reps-py` | Short; clearly a Python package; hyphenated names are common on PyPI | Less descriptive than a longer search-oriented name |
 | `reps-ai` | Trendy; signals LLM-driven | Generic; risks AI-buzzword fatigue |
 | `repsearch` | Memorable, single token | Less searchable |
 | `reps-evo` | Short, signals evolutionary | Cryptic |
 | `recursive-evolutionary-program-search` | Spells out the acronym | Mouthful |
 
-Recommendation: **`reps-search`** — descriptive, available (per a quick PyPI namesearch), and clearly signals what the package does.
+Recommendation: **`reps-py`** — available on PyPI, concise, and keeps the published distribution close to the `import reps` module name.
 
-Action: bump `name = "reps"` → `name = "reps-search"` (or chosen alternative) in `pyproject.toml:6`. Module imports stay `import reps`.
+Action: bump `name = "reps"` → `name = "reps-py"` (or chosen alternative) in `pyproject.toml:6`. Module imports stay `import reps`.
 
 ### 7.3 License choice (Sub-spec 3)
 

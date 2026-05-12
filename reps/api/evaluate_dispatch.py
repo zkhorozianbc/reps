@@ -7,8 +7,8 @@ the public API give us a callable that accepts the program text directly
 (`evaluate(code: str) -> float | dict | EvaluationResult`).
 
 We bridge the two by writing a tiny shim `_reps_user_evaluator.py` to the
-run's output directory. The shim reads a registry id from `os.environ`,
-looks up the registered callable, and dispatches:
+run's output directory. The shim embeds this run's registry id, looks up
+the registered callable, and dispatches:
 
     1. Read the program text from the temp file.
     2. Call the user's `evaluate(code, **kwargs)` — `kwargs` populated via
@@ -21,15 +21,13 @@ looks up the registered callable, and dispatches:
          - `EvaluationResult` -> EvaluationResult (passes through)
 
 The registry is process-local — the asyncio runner stays in one process,
-so this is safe. If REPS ever forks workers, the registry hands off via
-the env-var registry id, but the callable would need to be re-registered
-in the child (out of scope for v1, which is asyncio-only).
+so this is safe. If REPS ever forks workers, the callable would need to be
+re-registered in the child (out of scope for v1, which is asyncio-only).
 """
 
 from __future__ import annotations
 
 import inspect
-import os
 import threading
 import uuid
 from pathlib import Path
@@ -39,28 +37,33 @@ from reps.evaluation_result import EvaluationResult
 
 
 # Process-local registry. Keys are short hex ids; values are the user's
-# evaluate callable. We keep this module-level (no global mutable state
-# leaked outside the API surface) so the shim file can look it up by id.
+# evaluate callable. We keep this module-level so the per-run shim file can
+# look it up by its embedded id.
 _REGISTRY: Dict[str, Callable[..., Any]] = {}
 _REGISTRY_LOCK = threading.Lock()
-_REGISTRY_ENV_VAR = "REPS_USER_EVALUATOR_ID"
 
 
-# Shim source written verbatim to <output_dir>/_reps_user_evaluator.py.
+# Shim source written to <output_dir>/_reps_user_evaluator.py.
 # It must be self-contained (only imports stdlib + reps.api.evaluate_dispatch).
-_SHIM_SOURCE = '''"""Auto-generated shim — bridges the path-based Evaluator contract to
+_SHIM_SOURCE_TEMPLATE = '''"""Auto-generated shim — bridges the path-based Evaluator contract to
 a user-supplied `evaluate(code: str)` callable. Do not edit by hand.
 
 This file is regenerated each `reps.Optimizer.optimize()` call.
 """
-import os
 
 from reps.api.evaluate_dispatch import dispatch_user_evaluate
 
+_REGISTRY_ID = {registry_id!r}
 
-def evaluate(program_path, **kwargs):
-    registry_id = os.environ["REPS_USER_EVALUATOR_ID"]
-    return dispatch_user_evaluate(registry_id, program_path, **kwargs)
+
+def evaluate(program_path, *, env=None, instances=None, **kwargs):
+    return dispatch_user_evaluate(
+        _REGISTRY_ID,
+        program_path,
+        env=env,
+        instances=instances,
+        **kwargs,
+    )
 '''
 
 
@@ -82,12 +85,12 @@ def unregister_user_evaluate(rid: str) -> None:
         _REGISTRY.pop(rid, None)
 
 
-def write_shim(output_dir: Union[str, Path]) -> str:
+def write_shim(output_dir: Union[str, Path], *, registry_id: str) -> str:
     """Write the dispatch shim into `output_dir` and return its path."""
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     shim_path = out / "_reps_user_evaluator.py"
-    shim_path.write_text(_SHIM_SOURCE)
+    shim_path.write_text(_SHIM_SOURCE_TEMPLATE.format(registry_id=registry_id))
     return str(shim_path)
 
 
@@ -116,6 +119,11 @@ def coerce_return(value: Any) -> Union[Dict[str, Any], EvaluationResult]:
     if isinstance(value, EvaluationResult):
         return value
     if isinstance(value, dict):
+        if "combined_score" not in value:
+            raise ValueError(
+                "reps.Optimizer.optimize: dict evaluator returns must include "
+                "`combined_score`"
+            )
         return value
     if isinstance(value, bool):
         # bool is a subclass of int — treat True/False as 1.0 / 0.0 to

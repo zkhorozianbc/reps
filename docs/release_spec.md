@@ -423,7 +423,7 @@ jobs:
       name: pypi
       # NOTE: the URL hardcodes the PyPI distribution name. If the
       # packaging spec resolves to a name other than `reps` (e.g.
-      # `reps-search` per its recommendation), the executor MUST
+      # `reps-py` per its recommendation), the executor MUST
       # update this URL to match. The `[project].name` field in
       # pyproject.toml is the source of truth.
       url: https://pypi.org/p/reps
@@ -692,7 +692,7 @@ first real release:
    footer, and `pyproject.toml` `[project.urls]` need updating.
 3. **PyPI distribution name** — `reps` is the current `[project].name`
    in `pyproject.toml`. The name may already be taken on PyPI; the
-   packaging spec owns the rename decision (`reps-search`,
+   packaging spec owns the rename decision (`reps-py`,
    `reps-llm`, etc. all candidates). The release workflow refers to
    whatever name lands in `pyproject.toml`, so this is a downstream
    decision.

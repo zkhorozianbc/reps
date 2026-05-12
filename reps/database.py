@@ -18,7 +18,11 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import numpy as np
 
 from reps.config import DatabaseConfig
-from reps.utils import safe_numeric_average, get_fitness_score
+from reps.utils import (
+    get_fitness_score,
+    is_failed_evaluation_metrics,
+    safe_numeric_average,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +192,10 @@ class ProgramDatabase:
         # Track the last iteration number (for resuming)
         self.last_iteration: int = 0
 
+        # Count actual benchmark evaluator function calls when known. Older
+        # saved databases omit this and callers fall back to program count.
+        self.metric_call_count: int = 0
+
         # Load database from disk if path is provided
         if config.db_path and os.path.exists(config.db_path):
             self.load(config.db_path)
@@ -238,7 +246,7 @@ class ProgramDatabase:
 
     def add(
         self, program: Program, iteration: int = None, target_island: Optional[int] = None
-    ) -> str:
+    ) -> bool:
         """
         Add a program to the database
 
@@ -248,19 +256,16 @@ class ProgramDatabase:
             target_island: Specific island to add to (auto-detects parent's island if None)
 
         Returns:
-            Program ID
+            True if the program was accepted into the database, False if it
+            was rejected by novelty filtering.
         """
-        # Store the program
         # If iteration is provided, update the program's iteration_found
         if iteration is not None:
             program.iteration_found = iteration
             # Update last_iteration if needed
             self.last_iteration = max(self.last_iteration, iteration)
 
-        self.programs[program.id] = program
-
-        # Calculate feature coordinates for MAP-Elites
-        feature_coords = self._calculate_feature_coords(program)
+        self._ensure_combined_score(program)
 
         # Determine target island
         # If target_island is not specified and program has a parent, inherit parent's island
@@ -293,11 +298,16 @@ class ProgramDatabase:
         island_idx = island_idx % len(self.islands)  # Ensure valid island
 
         # Novelty check before adding
-        if not self._is_novel(program.id, island_idx):
+        if not self._is_novel(program, island_idx):
             logger.debug(
                 f"Program {program.id} failed in novelty check and won't be added in the island {island_idx}"
             )
-            return program.id  # Do not add non-novel program
+            return False  # Do not add non-novel program
+
+        self.programs[program.id] = program
+
+        # Calculate feature coordinates for MAP-Elites
+        feature_coords = self._calculate_feature_coords(program)
 
         # Add to island-specific feature map (replacing existing if better)
         feature_key = self._feature_coords_to_key(feature_coords)
@@ -393,7 +403,7 @@ class ProgramDatabase:
 
         logger.debug(f"Added program {program.id} to island {island_idx}")
 
-        return program.id
+        return True
 
     def get(self, program_id: str) -> Optional[Program]:
         """
@@ -726,6 +736,7 @@ class ProgramDatabase:
 
         # create directory if it doesn't exist
         os.makedirs(save_path, exist_ok=True)
+        self._prune_stale_program_files(save_path)
 
         # Save each program
         for program in self.programs.values():
@@ -750,12 +761,37 @@ class ProgramDatabase:
             "island_generations": self.island_generations,
             "last_migration_generation": self.last_migration_generation,
             "feature_stats": self._serialize_feature_stats(),
+            "metric_call_count": self.metric_call_count,
         }
 
         with open(os.path.join(save_path, "metadata.json"), "w") as f:
             json.dump(metadata, f)
 
         logger.info(f"Saved database with {len(self.programs)} programs to {save_path}")
+
+    def _prune_stale_program_files(self, save_path: str) -> None:
+        """Remove persisted program files that are not in the current database."""
+        programs_dir = os.path.join(save_path, "programs")
+        if not os.path.isdir(programs_dir):
+            return
+
+        current_ids = set(self.programs)
+        for filename in os.listdir(programs_dir):
+            file_path = os.path.join(programs_dir, filename)
+            if not os.path.isfile(file_path):
+                continue
+
+            stale = False
+            if filename.endswith(".trace.json"):
+                program_id = filename[: -len(".trace.json")]
+                stale = program_id not in current_ids
+            elif filename.endswith(".json"):
+                program_id = filename[: -len(".json")]
+                stale = program_id not in current_ids
+
+            if stale:
+                os.remove(file_path)
+                logger.debug("Removed stale program persistence file %s", file_path)
 
     def load(self, path: str) -> None:
         """
@@ -788,6 +824,7 @@ class ProgramDatabase:
             self.current_island = metadata.get("current_island", 0)
             self.island_generations = metadata.get("island_generations", [0] * len(saved_islands))
             self.last_migration_generation = metadata.get("last_migration_generation", 0)
+            self.metric_call_count = int(metadata.get("metric_call_count", 0) or 0)
 
             # Load feature_stats for MAP-Elites grid stability
             self.feature_stats = self._deserialize_feature_stats(metadata.get("feature_stats", {}))
@@ -800,6 +837,8 @@ class ProgramDatabase:
         programs_dir = os.path.join(path, "programs")
         if os.path.exists(programs_dir):
             for program_file in os.listdir(programs_dir):
+                if program_file.endswith(".trace.json"):
+                    continue
                 if program_file.endswith(".json"):
                     program_path = os.path.join(programs_dir, program_file)
                     try:
@@ -807,6 +846,7 @@ class ProgramDatabase:
                             program_data = json.load(f)
 
                         program = Program.from_dict(program_data)
+                        self._ensure_combined_score(program)
                         self.programs[program.id] = program
                     except Exception as e:
                         logger.warning(f"Error loading program {program_file}: {str(e)}")
@@ -1192,7 +1232,7 @@ class ProgramDatabase:
 
         return True
 
-    def _is_novel(self, program_id: int, island_idx: int) -> bool:
+    def _is_novel(self, program: Program, island_idx: int) -> bool:
         """
         Determine if a program is novel based on diversity to existing programs
 
@@ -1207,9 +1247,8 @@ class ProgramDatabase:
             # Novelty checking disabled
             return True
 
-        program = self.programs[program_id]
         embd = self.embedding_client.get_embedding(program.code)
-        self.programs[program_id].embedding = embd
+        program.embedding = embd
 
         max_smlty = float("-inf")
         max_smlty_pid = None
@@ -1234,6 +1273,19 @@ class ProgramDatabase:
             return True
 
         return self._llm_judge_novelty(program, self.programs[max_smlty_pid])
+
+    def _ensure_combined_score(self, program: Program) -> None:
+        """Backfill combined_score for legacy metric dicts ranked by database fitness."""
+        if not program.metrics:
+            return
+        if "combined_score" in program.metrics:
+            return
+        if is_failed_evaluation_metrics(program.metrics):
+            return
+
+        program.metrics["combined_score"] = get_fitness_score(
+            program.metrics, self.config.feature_dimensions
+        )
 
     def _is_better(self, program1: Program, program2: Program) -> bool:
         """
@@ -2527,8 +2579,14 @@ class ProgramDatabase:
         if large_artifacts:
             artifact_dir = self._create_artifact_dir(program_id)
             program.artifact_dir = artifact_dir
+            used_filenames = set()
+            manifest = []
             for key, value in large_artifacts.items():
-                self._write_artifact_file(artifact_dir, key, value)
+                entry = self._write_artifact_file(artifact_dir, key, value, used_filenames)
+                if entry:
+                    manifest.append(entry)
+            if manifest:
+                self._write_artifact_manifest(artifact_dir, manifest)
             logger.debug(f"Stored {len(large_artifacts)} large artifacts for program {program_id}")
 
     def get_artifacts(self, program_id: str) -> Dict[str, Union[str, bytes]]:
@@ -2550,7 +2608,9 @@ class ProgramDatabase:
         # Load small artifacts from JSON
         if program.artifacts_json:
             try:
-                small_artifacts = json.loads(program.artifacts_json)
+                small_artifacts = json.loads(
+                    program.artifacts_json, object_hook=self._artifact_deserializer
+                )
                 artifacts.update(small_artifacts)
             except json.JSONDecodeError as e:
                 logger.warning(f"Failed to decode artifacts JSON for program {program_id}: {e}")
@@ -2637,12 +2697,46 @@ class ProgramDatabase:
         if deleted_count > 0:
             logger.info(f"Cleaned up {deleted_count} old artifact directories.")
 
-    def _write_artifact_file(self, artifact_dir: str, key: str, value: Union[str, bytes]) -> None:
-        """Write an artifact to a file"""
+    def _artifact_manifest_path(self, artifact_dir: str) -> str:
+        """Return the path for the large-artifact manifest."""
+        return os.path.join(artifact_dir, ".reps_artifacts_manifest.json")
+
+    def _sanitize_artifact_filename(self, key: str) -> str:
+        """Convert an artifact key to a storage filename."""
         # Sanitize filename
         safe_key = "".join(c for c in key if c.isalnum() or c in "._-")
         if not safe_key:
             safe_key = "artifact"
+        return safe_key
+
+    def _dedupe_artifact_filename(self, filename: str, used_filenames: Set[str]) -> str:
+        """Return a unique filename within an artifact write batch."""
+        candidate = filename
+        stem, ext = os.path.splitext(filename)
+        counter = 2
+        while candidate in used_filenames:
+            candidate = f"{stem}-{counter}{ext}"
+            counter += 1
+        used_filenames.add(candidate)
+        return candidate
+
+    def _write_artifact_manifest(self, artifact_dir: str, manifest: List[Dict[str, str]]) -> None:
+        """Write metadata that maps storage filenames back to original artifact keys."""
+        with open(self._artifact_manifest_path(artifact_dir), "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+
+    def _write_artifact_file(
+        self,
+        artifact_dir: str,
+        key: str,
+        value: Union[str, bytes],
+        used_filenames: Optional[Set[str]] = None,
+    ) -> Optional[Dict[str, str]]:
+        """Write an artifact to a file and return its manifest entry."""
+        used_filenames = used_filenames if used_filenames is not None else set()
+        safe_key = self._dedupe_artifact_filename(
+            self._sanitize_artifact_filename(key), used_filenames
+        )
 
         file_path = os.path.join(artifact_dir, safe_key)
 
@@ -2650,22 +2744,47 @@ class ProgramDatabase:
             if isinstance(value, str):
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(value)
+                kind = "text"
             elif isinstance(value, bytes):
                 with open(file_path, "wb") as f:
                     f.write(value)
+                kind = "bytes"
             else:
                 # Convert to string and write
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(str(value))
+                kind = "text"
+            return {"key": key, "filename": safe_key, "kind": kind}
         except Exception as e:
             logger.warning(f"Failed to write artifact {key} to {file_path}: {e}")
+            return None
 
     def _load_artifact_dir(self, artifact_dir: str) -> Dict[str, Union[str, bytes]]:
         """Load artifacts from a directory"""
         artifacts = {}
 
         try:
+            manifest_path = self._artifact_manifest_path(artifact_dir)
+            if os.path.exists(manifest_path):
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    manifest = json.load(f)
+
+                for entry in manifest:
+                    file_path = os.path.join(artifact_dir, entry["filename"])
+                    try:
+                        if entry.get("kind") == "bytes":
+                            with open(file_path, "rb") as f:
+                                artifacts[entry["key"]] = f.read()
+                        else:
+                            with open(file_path, "r", encoding="utf-8") as f:
+                                artifacts[entry["key"]] = f.read()
+                    except Exception as e:
+                        logger.warning(f"Failed to read artifact file {file_path}: {e}")
+                return artifacts
+
             for filename in os.listdir(artifact_dir):
+                if filename == os.path.basename(self._artifact_manifest_path(artifact_dir)):
+                    continue
                 file_path = os.path.join(artifact_dir, filename)
                 if os.path.isfile(file_path):
                     try:

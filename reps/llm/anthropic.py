@@ -92,7 +92,9 @@ class AnthropicLLM(LLMInterface):
         self, system_message: str, messages: List[Dict[str, str]], **kwargs
     ) -> str:
         model_name = kwargs.get("model") or self.model
-        is_reasoning = any(p in model_name.lower() for p in REASONING_MODEL_PATTERNS)
+        is_reasoning = any(
+            p in model_name.lower() for p in self.REASONING_MODEL_PATTERNS
+        )
 
         params = {
             "model": model_name,

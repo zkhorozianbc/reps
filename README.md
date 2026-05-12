@@ -38,7 +38,7 @@ REPS is pre-1.0. The Python API
 and may still evolve. Per [`docs/release_spec.md`](docs/release_spec.md),
 minor version bumps (0.1 → 0.2) may include breaking changes during
 the pre-1.0 era. Pin to a specific minor version (e.g.
-`reps-search==0.1.*`) if you need stability across upgrades. Strict
+`reps-py==0.1.*`) if you need stability across upgrades. Strict
 semver applies once REPS reaches 1.0.0.
 
 ## Install
@@ -52,7 +52,7 @@ uv venv .venv --python 3.12
 uv pip install -e .
 ```
 
-PyPI publish is in flight; this README will be updated to `pip install reps-search` once the package lands. Optional extras: `[dspy]` (the `dspy_react` worker), `[benchmarks]` (`scipy` + `matplotlib` for the bundled circle-packing benchmark).
+Install from PyPI with `pip install reps-py`. Optional extras: `[dspy]` (the `dspy_react` worker), `[benchmarks]` (`scipy` + `matplotlib` for the bundled circle-packing benchmark).
 
 Set the API key matching your model's provider:
 

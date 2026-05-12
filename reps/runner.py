@@ -21,11 +21,13 @@ import argparse
 import asyncio
 import logging
 import os
+import re
 import subprocess
 import sys
+from dataclasses import fields, is_dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import yaml
 
@@ -42,16 +44,20 @@ def _next_run_dir(base: str) -> str:
     base_path = Path(base)
     base_path.mkdir(parents=True, exist_ok=True)
 
-    existing = sorted(base_path.glob("run_*"))
-    if existing:
-        last_num = max(int(d.name.split("_")[1]) for d in existing if d.name.split("_")[1].isdigit())
-        next_num = last_num + 1
-    else:
-        next_num = 1
+    run_nums = []
+    for entry in base_path.iterdir():
+        match = re.fullmatch(r"run_(\d+)", entry.name)
+        if match and entry.is_dir():
+            run_nums.append(int(match.group(1)))
 
-    run_dir = base_path / f"run_{next_num:03d}"
-    run_dir.mkdir()
-    return str(run_dir)
+    next_num = max(run_nums, default=0) + 1
+    while True:
+        run_dir = base_path / f"run_{next_num:03d}"
+        try:
+            run_dir.mkdir()
+            return str(run_dir)
+        except FileExistsError:
+            next_num += 1
 
 
 async def run_reps(config: Config, initial_program: str, evaluator: str, output_dir: str):
@@ -144,6 +150,7 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
         from reps.evaluator import Evaluator
         seed_evaluator = Evaluator(config.evaluator, evaluator)
         seed_outcome = await seed_evaluator.evaluate_isolated(initial_code, program_id="initial")
+        db.metric_call_count += seed_evaluator.metric_call_count
         seed_metrics = seed_outcome.metrics
         if seed_outcome.artifacts:
             seed_evaluator._pending_artifacts.setdefault("initial", {}).update(seed_outcome.artifacts)
@@ -183,6 +190,8 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
                 start_iteration=1,
                 max_iterations=config.max_iterations,
             )
+            if controller.evaluator is not None:
+                db.metric_call_count += controller.evaluator.metric_call_count
             if best:
                 logger.info(f"Best program: {best.id}, metrics: {best.metrics}")
         finally:
@@ -240,30 +249,38 @@ def run_openevolve(config_path: str, initial_program: str, evaluator: str, outpu
     subprocess.run(cmd, check=True)
 
 
-def _load_dotenv() -> Optional[Path]:
-    """Walk up from CWD looking for .env; export non-overriding vars into environ.
+def _load_dotenv(*start_dirs: Path) -> Optional[Path]:
+    """Walk up from start dirs looking for .env; export non-overriding vars.
 
     Saves users from having to run `set -a && source .env && set +a`. Shell-exported
     vars always win over .env values (we don't overwrite os.environ).
     """
-    d = Path.cwd().resolve()
-    for _ in range(6):
-        p = d / ".env"
-        if p.exists():
-            for raw in p.read_text().splitlines():
-                line = raw.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, value = line.partition("=")
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                if key and key not in os.environ:
-                    os.environ[key] = value
-            return p
-        if d.parent == d:
-            break
-        d = d.parent
-    return None
+    starts = start_dirs or (Path.cwd(),)
+    seen: set[Path] = set()
+    first_loaded: Optional[Path] = None
+    for start in starts:
+        d = Path(start).resolve()
+        for _ in range(6):
+            if d in seen:
+                break
+            seen.add(d)
+            p = d / ".env"
+            if p.exists():
+                for raw in p.read_text().splitlines():
+                    line = raw.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, _, value = line.partition("=")
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    if key and key not in os.environ:
+                        os.environ[key] = value
+                if first_loaded is None:
+                    first_loaded = p
+            if d.parent == d:
+                break
+            d = d.parent
+    return first_loaded
 
 
 def _apply_overrides(config, overrides):
@@ -273,21 +290,185 @@ def _apply_overrides(config, overrides):
     without extra quoting: `-o reps.batch_size=10`, `-o llm.temperature=0.9`,
     `-o reps.workers.types='[exploiter, explorer]'`.
     """
+    old_provider = getattr(config, "provider", None)
+    old_llm_api_base = getattr(config.llm, "api_base", None)
+    old_llm_api_key = getattr(config.llm, "api_key", None)
+    provider_overridden = False
+    explicit_provider_paths: set[str] = set()
+    llm_shared_overrides: set[str] = set()
+
     for expr in overrides:
         if "=" not in expr:
             raise ValueError(f"--override must be key=value, got {expr!r}")
         path, _, raw = expr.partition("=")
         value = yaml.safe_load(raw)
         parts = path.strip().split(".")
+        if not all(parts):
+            raise ValueError(f"Unknown override path {path!r}")
+
         obj = config
         for p in parts[:-1]:
-            obj = getattr(obj, p)
-        setattr(obj, parts[-1], value)
+            obj = _get_override_child(obj, p, path)
+        _set_override_value(obj, parts[-1], value, path)
+
+        if parts[0] == "llm" and len(parts) == 2 and parts[1] in _llm_shared_fields(config):
+            llm_shared_overrides.add(parts[1])
+        if parts == ["provider"]:
+            provider_overridden = True
+        if parts[-1] == "provider":
+            explicit_provider_paths.add(".".join(parts))
+
+    if provider_overridden:
+        _clear_inherited_provider_fields(
+            config,
+            old_provider,
+            old_llm_api_base,
+            old_llm_api_key,
+            explicit_provider_paths,
+        )
+
+    config.finalize(
+        llm_shared_overrides=llm_shared_overrides or None,
+        overwrite_llm_shared=bool(llm_shared_overrides),
+    )
+
+
+def _clear_inherited_provider_fields(
+    config: Config,
+    old_provider: Optional[str],
+    old_llm_api_base: Optional[str],
+    old_llm_api_key: Optional[str],
+    explicit_provider_paths: set[str],
+) -> None:
+    """Let top-level provider overrides restamp inherited provider fields."""
+    for section_name in ("models", "evaluator_models"):
+        for idx, model in enumerate(getattr(config.llm, section_name)):
+            path = f"llm.{section_name}.{idx}.provider"
+            if path not in explicit_provider_paths and model.provider == old_provider:
+                model.provider = None
+
+    summarizer_path = "reps.summarizer.provider"
+    summarizer = getattr(config.reps, "summarizer", None)
+    if (
+        summarizer is not None
+        and summarizer_path not in explicit_provider_paths
+        and summarizer.provider == old_provider
+    ):
+        summarizer.provider = None
+    if summarizer is not None:
+        if summarizer.api_base == old_llm_api_base:
+            summarizer.api_base = None
+        if summarizer.api_key == old_llm_api_key:
+            summarizer.api_key = None
+
+
+def _get_override_child(obj: Any, part: str, full_path: str) -> Any:
+    if isinstance(obj, list):
+        try:
+            return obj[int(part)]
+        except (ValueError, IndexError) as e:
+            raise ValueError(f"Unknown override path {full_path!r}") from e
+    if is_dataclass(obj):
+        names = {field.name for field in fields(obj)}
+        if part in names:
+            return getattr(obj, part)
+    if isinstance(obj, dict) and part in obj:
+        return obj[part]
+    raise ValueError(f"Unknown override path {full_path!r}")
+
+
+def _set_override_value(obj: Any, part: str, value: Any, full_path: str) -> None:
+    if isinstance(obj, list):
+        try:
+            obj[int(part)] = value
+            return
+        except (ValueError, IndexError) as e:
+            raise ValueError(f"Unknown override path {full_path!r}") from e
+    if is_dataclass(obj):
+        names = {field.name for field in fields(obj)}
+        if part in names:
+            setattr(obj, part, value)
+            return
+    if isinstance(obj, dict) and part in obj:
+        obj[part] = value
+        return
+    raise ValueError(f"Unknown override path {full_path!r}")
+
+
+def _llm_shared_fields(config: Config) -> set[str]:
+    model_fields = {field.name for field in fields(type(config.llm.models[0]))} if config.llm.models else set()
+    return {field.name for field in fields(config.llm)} & model_fields
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a positive integer") from e
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("--iterations must be a positive integer")
+    return parsed
+
+
+def _resolve_run_inputs(
+    config: Config,
+    *,
+    config_path: str,
+    initial_program_arg: Optional[str],
+    evaluator_arg: Optional[str],
+    output_arg: Optional[str],
+) -> tuple[str, str, str]:
+    config_dir = Path(config_path).resolve().parent
+
+    initial_program = (
+        _resolve_cli_path(initial_program_arg)
+        if initial_program_arg
+        else _resolve_config_path(config.initial_program, config_dir)
+    )
+    evaluator = (
+        _resolve_cli_path(evaluator_arg)
+        if evaluator_arg
+        else _resolve_config_path(config.evaluator_path, config_dir)
+    )
+
+    if (initial_program is None or evaluator is None) and config.task:
+        task_dir = Path(config.task)
+        if not task_dir.is_absolute():
+            task_dir = (config_dir / task_dir).resolve()
+        initial_program = initial_program or str((task_dir / "initial_program.py").resolve())
+        evaluator = evaluator or str((task_dir / "evaluator.py").resolve())
+
+    output = (
+        _resolve_cli_path(output_arg)
+        if output_arg
+        else _resolve_config_path(config.output, config_dir)
+    )
+    if output is None:
+        output = f"experiment/results/{Path(config_path).stem}"
+
+    if not initial_program or not evaluator:
+        raise ValueError(
+            "Config must set `task: <benchmark_dir>` (recommended) or `initial_program:` + "
+            "`evaluator_path:`. Alternatively pass them as positional args to reps-run."
+        )
+
+    return initial_program, evaluator, output
+
+
+def _resolve_config_path(value: Optional[str], config_dir: Path) -> Optional[str]:
+    if not value:
+        return None
+    path = Path(value)
+    return str(path if path.is_absolute() else (config_dir / path).resolve())
+
+
+def _resolve_cli_path(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    return str(Path(value).expanduser().resolve())
 
 
 def main():
-    _load_dotenv()
-
     parser = argparse.ArgumentParser(
         description="REPS Experiment Runner",
         epilog=(
@@ -306,7 +487,7 @@ def main():
     )
     parser.add_argument("--output", default=None,
                         help="Output base directory (defaults to experiment/results/<config-stem>/)")
-    parser.add_argument("--iterations", type=int, default=None,
+    parser.add_argument("--iterations", type=_positive_int, default=None,
                         help="Shortcut for -o max_iterations=N")
     parser.add_argument(
         "-o", "--override", action="append", default=[], metavar="KEY=VALUE",
@@ -314,29 +495,24 @@ def main():
     )
     args = parser.parse_args()
 
+    _load_dotenv(Path(args.config).resolve().parent, Path.cwd())
     config = load_experiment_config(args.config)
 
     _apply_overrides(config, args.override)
 
-    output = args.output or f"experiment/results/{Path(args.config).stem}"
-
-    if args.iterations:
+    if args.iterations is not None:
         config.max_iterations = args.iterations
 
-    # Resolve initial_program + evaluator: positional CLI args win, then
-    # config.initial_program / config.evaluator_path, then derive from
-    # config.task (convention: <task_dir>/{initial_program.py,evaluator.py}).
-    initial_program = args.initial_program or config.initial_program
-    evaluator = args.evaluator or config.evaluator_path
-    if (initial_program is None or evaluator is None) and config.task:
-        task_dir = Path(config.task)
-        initial_program = initial_program or str(task_dir / "initial_program.py")
-        evaluator = evaluator or str(task_dir / "evaluator.py")
-    if not initial_program or not evaluator:
-        parser.error(
-            "Config must set `task: <benchmark_dir>` (recommended) or `initial_program:` + "
-            "`evaluator_path:`. Alternatively pass them as positional args to reps-run."
+    try:
+        initial_program, evaluator, output = _resolve_run_inputs(
+            config,
+            config_path=args.config,
+            initial_program_arg=args.initial_program,
+            evaluator_arg=args.evaluator,
+            output_arg=args.output,
         )
+    except ValueError as e:
+        parser.error(str(e))
 
     # Auto-version the output directory
     run_dir = _next_run_dir(output)

@@ -6,6 +6,7 @@ role=="crossover" participates in the second-parent sampling path.
 from __future__ import annotations
 
 import logging
+import math
 import random as _random
 from collections import deque
 from typing import Dict, List, Optional
@@ -15,8 +16,6 @@ from reps.workers.base import WorkerConfig
 
 logger = logging.getLogger(__name__)
 
-_rng = _random.Random()
-
 
 class WorkerPool:
     def __init__(
@@ -24,6 +23,7 @@ class WorkerPool:
         workers_config,
         *,
         default_model_id: str = "",
+        random_seed: Optional[int] = None,
     ):
         """
         Args:
@@ -33,7 +33,8 @@ class WorkerPool:
                 during pool construction.
         """
         typed_types: List[WorkerConfig] = list(getattr(workers_config, "types", []) or [])
-        random_seed = getattr(workers_config, "random_seed", None)
+        if random_seed is None:
+            random_seed = getattr(workers_config, "random_seed", None)
 
         if not typed_types:
             raise ValueError(
@@ -42,18 +43,25 @@ class WorkerPool:
                 "in your YAML config."
             )
 
+        names = [c.name for c in typed_types]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise ValueError(f"Duplicate worker name(s): {', '.join(duplicates)}")
+
+        for cfg in typed_types:
+            if not isinstance(cfg.weight, (int, float)) or not math.isfinite(cfg.weight) or cfg.weight <= 0:
+                raise ValueError(
+                    f"Worker {cfg.name!r} weight must be positive finite; got {cfg.weight!r}"
+                )
+
+        self._rng = _random.Random(random_seed)
         self._configs: Dict[str, WorkerConfig] = {c.name: c for c in typed_types}
-        total = sum(max(c.weight, 0.0) for c in typed_types) or 1.0
-        self._weights: Dict[str, float] = {
-            c.name: max(c.weight, 0.0) / total for c in typed_types
-        }
+        total = sum(c.weight for c in typed_types)
+        self._weights: Dict[str, float] = {c.name: c.weight / total for c in typed_types}
         self.yield_tracker: Dict[str, deque] = {
             c.name: deque(maxlen=100) for c in typed_types
         }
         self._force_explorer_batches = 0
-
-        if random_seed is not None:
-            _rng.seed(random_seed)
 
         logger.info(
             "WorkerPool initialized: %s",
@@ -141,9 +149,9 @@ class WorkerPool:
         if self._force_explorer_batches > 0:
             self._force_explorer_batches -= 1
             explorers = [n for n in names if self._configs[n].role == "explorer"]
-            if explorers and _rng.random() < 0.5:
-                return _rng.choice(explorers)
-        return _rng.choices(names, weights=weights, k=1)[0]
+            if explorers and self._rng.random() < 0.5:
+                return self._rng.choice(explorers)
+        return self._rng.choices(names, weights=weights, k=1)[0]
 
     def _sample_distant_parent(
         self, database, target_island: Optional[int]
@@ -159,11 +167,11 @@ class WorkerPool:
             other = [i for i in range(num_islands) if i != current]
             if not other:
                 return None
-            pick_island = _rng.choice(other)
+            pick_island = self._rng.choice(other)
             pids = list(database.islands[pick_island])
             if not pids:
                 return None
-            return _rng.choice(pids)
+            return self._rng.choice(pids)
         except Exception as e:
             logger.debug(f"distant parent sample failed: {e}")
             return None
@@ -174,10 +182,21 @@ class WorkerPool:
 
     def set_allocation(self, new_allocation: Dict[str, float]):
         """Set worker allocation directly (used by SOTA controller)."""
-        total = sum(max(v, 0) for v in new_allocation.values()) or 1.0
+        for name, weight in new_allocation.items():
+            if name in self._weights and (
+                not isinstance(weight, (int, float))
+                or not math.isfinite(weight)
+                or weight < 0
+            ):
+                raise ValueError(
+                    f"Worker {name!r} allocation weight must be positive finite; got {weight!r}"
+                )
+        total = sum(new_allocation.get(name, 0.0) for name in self._weights)
+        if not math.isfinite(total) or total <= 0:
+            raise ValueError("Worker allocation must include at least one positive finite weight")
         for name, weight in new_allocation.items():
             if name in self._weights:
-                self._weights[name] = max(weight, 0) / total
+                self._weights[name] = weight / total
         logger.info(f"Worker allocation set to: {self._weights}")
 
     def boost_explorer(self, amount: float):
@@ -209,7 +228,7 @@ class WorkerPool:
     def get_alternative_worker_name(self, original: str) -> str:
         """Get a different worker name for revisitation."""
         names = [n for n in self._configs if n != original]
-        return _rng.choice(names) if names else original
+        return self._rng.choice(names) if names else original
 
     # Backward-compat alias
     def get_alternative_worker_type(self, original_type: str) -> str:

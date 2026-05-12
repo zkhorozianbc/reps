@@ -230,6 +230,7 @@ class ProcessParallelController:
             self._reps_worker_pool = WorkerPool(
                 reps.workers,
                 default_model_id=primary_model,
+                random_seed=config.random_seed,
             )
             self._reps_convergence = ConvergenceMonitor(asdict(reps.convergence))
             contracts_cfg = asdict(reps.contracts)
@@ -400,6 +401,7 @@ class ProcessParallelController:
             self.worker_pool = WorkerPool(
                 minimal_cfg,
                 default_model_id=primary_model,
+                random_seed=self.config.random_seed,
             )
 
         logger.info(
@@ -771,19 +773,15 @@ class ProcessParallelController:
         inspiration_ids: List[str],
         iteration_config: "IterationConfig",
     ) -> "SerializableResult":
-        """Semaphore-bounded wrapper that shields siblings from one failure."""
+        """Semaphore-bounded wrapper for one iteration task."""
         assert self._iter_semaphore is not None, "start() must be called first"
         async with self._iter_semaphore:
-            try:
-                return await self._run_iteration(
-                    iteration=iteration,
-                    parent_id=parent_id,
-                    inspiration_ids=inspiration_ids,
-                    iteration_config=iteration_config,
-                )
-            except Exception as e:
-                logger.exception(f"iteration {iteration} failed in spawn")
-                return SerializableResult(error=str(e), iteration=iteration)
+            return await self._run_iteration(
+                iteration=iteration,
+                parent_id=parent_id,
+                inspiration_ids=inspiration_ids,
+                iteration_config=iteration_config,
+            )
 
     async def _maybe_generate_trace_directive(self, parent: Program) -> str:
         """Per-candidate trace-grounded reflection (Phase 3.2).
@@ -1009,6 +1007,25 @@ class ProcessParallelController:
 
         return parent.id, [p.id for p in inspirations], reps_iter_config
 
+    def _validate_seed_programs_for_run(self) -> None:
+        """Fail fast when the loaded seed already carries evaluator failure signals."""
+        seed_programs = [
+            program
+            for program in self.database.programs.values()
+            if program.parent_id is None and program.generation == 0
+        ]
+        for program in seed_programs:
+            if not program.metrics:
+                raise RuntimeError(
+                    f"seed program {program.id} has no evaluation metrics; "
+                    "refusing to start evolution"
+                )
+            if is_failed_evaluation_metrics(program.metrics):
+                raise RuntimeError(
+                    f"seed program {program.id} has failed evaluation metrics "
+                    f"{program.metrics}; refusing to start evolution"
+                )
+
     # ------------------------------------------------------------------ #
     # Main loop
     # ------------------------------------------------------------------ #
@@ -1031,6 +1048,8 @@ class ProcessParallelController:
 
         if self.evaluator is None or self.llm_ensemble is None:
             raise RuntimeError("Controller not started — call .start() first")
+
+        self._validate_seed_programs_for_run()
 
         total_iterations = start_iteration + max_iterations
 
@@ -1060,15 +1079,22 @@ class ProcessParallelController:
                     return cfg
             return IterationConfig(target_island=island_id)
 
-        def _spawn(iteration: int, island_id: int) -> Optional[asyncio.Task]:
+        async def _cancel_pending_tasks() -> None:
+            if not pending:
+                return
+            for pending_task in pending.values():
+                pending_task.cancel()
+            await asyncio.gather(*pending.values(), return_exceptions=True)
+            pending.clear()
+
+        def _spawn(iteration: int, island_id: int) -> asyncio.Task:
             try:
                 iteration_config = _build_iter_config(island_id)
                 parent_id, inspiration_ids, iteration_config = self._pick_iteration_inputs(
                     iteration, island_id, iteration_config
                 )
             except Exception as e:
-                logger.error(f"Error preparing iteration {iteration}: {e}")
-                return None
+                raise RuntimeError(f"Error preparing iteration {iteration}") from e
             return asyncio.create_task(
                 self._spawn_iteration(
                     iteration=iteration,
@@ -1086,10 +1112,13 @@ class ProcessParallelController:
         for island_id in range(self.num_islands):
             for _ in range(batch_per_island):
                 if current_iteration < total_iterations:
-                    task = _spawn(current_iteration, island_id)
-                    if task is not None:
-                        pending[current_iteration] = task
-                        island_pending[island_id].append(current_iteration)
+                    try:
+                        task = _spawn(current_iteration, island_id)
+                    except Exception:
+                        await _cancel_pending_tasks()
+                        raise
+                    pending[current_iteration] = task
+                    island_pending[island_id].append(current_iteration)
                     current_iteration += 1
 
         next_iteration = current_iteration
@@ -1155,12 +1184,13 @@ class ProcessParallelController:
                     )
                     completed_iterations += 1
                     continue
-                except Exception as e:
-                    logger.error(
-                        f"Error processing result from iteration {completed_iteration}: {e}"
+                except Exception:
+                    logger.exception(
+                        "Hard failure from iteration task %d",
+                        completed_iteration,
                     )
-                    completed_iterations += 1
-                    continue
+                    await _cancel_pending_tasks()
+                    raise
 
                 try:
                     if result is None:
@@ -1192,11 +1222,35 @@ class ProcessParallelController:
                         if result.reps_meta:
                             child_program.metadata["reps_meta"] = result.reps_meta
 
-                        self.database.add(
+                        original_metrics = dict(child_program.metrics or {})
+                        if (
+                            original_metrics
+                            and "combined_score" not in original_metrics
+                            and not self._warned_about_combined_score
+                            and not is_failed_evaluation_metrics(original_metrics)
+                        ):
+                            avg_score = safe_numeric_average(original_metrics)
+                            logger.warning(
+                                f"No 'combined_score' metric found in evaluation results. "
+                                f"Using average of all numeric metrics ({avg_score:.4f}) for evolution guidance. "
+                                f"Return a 'combined_score' from your evaluator for better results."
+                            )
+                            self._warned_about_combined_score = True
+
+                        added_to_database = self.database.add(
                             child_program,
                             iteration=completed_iteration,
                             target_island=result.target_island,
                         )
+                        if not added_to_database:
+                            logger.info(
+                                "Iteration %d: Program %s rejected by database; "
+                                "skipping artifacts and persistence",
+                                completed_iteration,
+                                child_program.id,
+                            )
+                            completed_iterations += 1
+                            continue
 
                         if result.artifacts:
                             self.database.store_artifacts(
@@ -1207,15 +1261,9 @@ class ProcessParallelController:
                         # so a killed or crashed run doesn't lose completed work.
                         # Checkpoint / final save_database still happen; this
                         # just ensures no per-iter state is in-memory-only.
-                        try:
-                            self.database._save_program(
-                                child_program, base_path=self.output_dir
-                            )
-                        except Exception as persist_exc:
-                            logger.warning(
-                                "per-iteration persist failed for %s: %s",
-                                child_program.id[:8], persist_exc,
-                            )
+                        self.database._save_program(
+                            child_program, base_path=self.output_dir
+                        )
 
                         if result.prompt:
                             self.database.log_prompt(
@@ -1380,10 +1428,13 @@ class ProcessParallelController:
                                         )
                                         self.early_stopping_triggered = True
                                         break
-                except Exception as e:
-                    logger.error(
-                        f"Error processing result from iteration {completed_iteration}: {e}"
+                except Exception:
+                    logger.exception(
+                        "Hard failure processing result from iteration %d",
+                        completed_iteration,
                     )
+                    await _cancel_pending_tasks()
+                    raise
 
                 completed_iterations += 1
 
@@ -1430,12 +1481,15 @@ class ProcessParallelController:
                         and next_iteration < total_iterations
                         and not self._shutdown.is_set()
                     ):
-                        task = _spawn(next_iteration, island_id)
-                        if task is not None:
-                            pending[next_iteration] = task
-                            island_pending[island_id].append(next_iteration)
-                            next_iteration += 1
-                            break
+                        try:
+                            task = _spawn(next_iteration, island_id)
+                        except Exception:
+                            await _cancel_pending_tasks()
+                            raise
+                        pending[next_iteration] = task
+                        island_pending[island_id].append(next_iteration)
+                        next_iteration += 1
+                        break
 
             # End of done_tasks loop; check for early-stopping flags from inside.
             if self.early_stopping_triggered:
@@ -1912,4 +1966,3 @@ class ProcessParallelController:
 
         # Per-program summaries moved to per-iteration path (see
         # _summarize_child_inline). Batch annotation only adds tags now.
-

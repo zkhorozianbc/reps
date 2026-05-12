@@ -16,8 +16,10 @@ to a follow-up test agent.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import os
+import threading
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -35,6 +37,7 @@ from reps.api.optimizer import Optimizer, _StubModel
 from reps.api.result import OptimizationResult
 from reps.config import Config
 from reps.evaluation_result import EvaluationResult
+from reps.evaluator import Evaluator
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +75,11 @@ def test_coerce_dict_passthrough():
     payload = {"combined_score": 0.5, "extra": 1}
     out = coerce_return(payload)
     assert out is payload
+
+
+def test_coerce_dict_requires_combined_score():
+    with pytest.raises(ValueError, match="dict.*combined_score"):
+        coerce_return({"accuracy": 0.9})
 
 
 def test_coerce_evaluation_result_passthrough():
@@ -156,11 +164,14 @@ def test_dispatch_shim_unknown_id_raises():
 
 
 def test_write_shim_creates_dispatcher(tmp_path):
-    shim_path = write_shim(tmp_path)
+    shim_path = write_shim(tmp_path, registry_id="abc123")
     assert Path(shim_path).exists()
     contents = Path(shim_path).read_text()
     assert "dispatch_user_evaluate" in contents
-    assert "REPS_USER_EVALUATOR_ID" in contents
+    assert "abc123" in contents
+    assert "REPS_USER_EVALUATOR_ID" not in contents
+    assert "env=None" in contents
+    assert "instances=None" in contents
 
 
 # ---------------------------------------------------------------------------
@@ -439,8 +450,9 @@ def test_optimize_happy_path_returns_optimization_result(monkeypatch, tmp_path):
         assert Path(initial_program).exists()
         assert Path(evaluator).exists()
         assert Path(evaluator).name == "_reps_user_evaluator.py"
-        # Verify the registry env var is live during the "run".
-        assert os.environ.get("REPS_USER_EVALUATOR_ID")
+        # The shim captures its registry id in the generated source; no
+        # process-global env var is needed during the run.
+        assert os.environ.get("REPS_USER_EVALUATOR_ID") is None
         _seed_database(output_dir, num_islands=config.database.num_islands)
 
     def evaluate(code: str) -> float:
@@ -469,7 +481,7 @@ def test_optimize_happy_path_returns_optimization_result(monkeypatch, tmp_path):
     # Initial code was written verbatim to the run dir.
     assert Path(captured["initial_program"]).read_text() == "def f(): return 0"
 
-    # Registry env var is cleared after optimize() returns.
+    # Registry env var remains unset after optimize() returns.
     assert os.environ.get("REPS_USER_EVALUATOR_ID") is None
 
 
@@ -521,6 +533,96 @@ def test_optimize_runs_user_evaluate_via_shim(monkeypatch, tmp_path):
         opt.optimize("seed_code", evaluate)
 
     assert received_codes == ["seed_code"]
+
+
+def test_optimize_shim_forwards_env_through_real_evaluator(monkeypatch, tmp_path):
+    """Drive the generated shim through Evaluator.evaluate_isolated so the
+    real signature gate forwards env into the public user callable."""
+    lm = _make_lm(monkeypatch)
+    output_dir = tmp_path / "run"
+    opt = Optimizer(model=lm, max_iterations=1, output_dir=str(output_dir))
+
+    seen = {}
+
+    def evaluate(code: str, *, env=None):
+        seen["code"] = code
+        seen["program_id"] = env["REPS_PROGRAM_ID"]
+        seen["run_dir"] = env["REPS_RUN_DIR"]
+        return {"combined_score": 0.8}
+
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+        config.evaluator.cascade_evaluation = False
+        config.evaluator.max_retries = 0
+        real_evaluator = Evaluator(config.evaluator, evaluator)
+        outcome = await real_evaluator.evaluate_isolated(
+            Path(initial_program).read_text(),
+            program_id="program-123",
+            run_dir=output_dir,
+        )
+        assert outcome.metrics == {"combined_score": 0.8}
+        _seed_database(output_dir, num_islands=config.database.num_islands)
+
+    with patch("reps.runner.run_reps", new=fake_run_reps):
+        opt.optimize("seed_code", evaluate)
+
+    assert seen == {
+        "code": "seed_code",
+        "program_id": "program-123",
+        "run_dir": str(output_dir.resolve()),
+    }
+
+
+def test_overlapping_optimize_calls_keep_user_evaluators_separate(monkeypatch, tmp_path):
+    """Two public optimize() calls may overlap in one process; each generated
+    shim must dispatch to its own registered callable."""
+    lm_a = _make_lm(monkeypatch)
+    lm_b = _make_lm(monkeypatch)
+    barrier = threading.Barrier(2)
+
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            f"_reps_user_evaluator_{Path(output_dir).name}",
+            evaluator,
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        barrier.wait(timeout=5)
+        out = module.evaluate(initial_program)
+
+        seed_text = Path(initial_program).read_text()
+        expected_score = 0.1 if seed_text == "seed-a" else 0.9
+        assert out["combined_score"] == expected_score
+        _seed_database(output_dir, num_islands=config.database.num_islands)
+
+    def evaluate_a(code: str) -> float:
+        return 0.1
+
+    def evaluate_b(code: str) -> float:
+        return 0.9
+
+    opt_a = Optimizer(
+        model=lm_a,
+        max_iterations=1,
+        output_dir=str(tmp_path / "run-a"),
+    )
+    opt_b = Optimizer(
+        model=lm_b,
+        max_iterations=1,
+        output_dir=str(tmp_path / "run-b"),
+    )
+
+    with patch("reps.runner.run_reps", new=fake_run_reps):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            fut_a = pool.submit(opt_a.optimize, "seed-a", evaluate_a)
+            fut_b = pool.submit(opt_b.optimize, "seed-b", evaluate_b)
+            result_a = fut_a.result(timeout=10)
+            result_b = fut_b.result(timeout=10)
+
+    assert result_a.best_score == 0.9
+    assert result_b.best_score == 0.9
 
 
 # ---------------------------------------------------------------------------
@@ -772,12 +874,13 @@ def test_unregister_unknown_id_is_silent():
     unregister_user_evaluate("never-registered-12345")  # no exception
 
 
-def test_registry_env_var_does_not_collide_with_existing_reps_env_vars():
-    """The shim env var name must not collide with existing REPS_* env
-    vars (REPS_PROGRAM_ID, REPS_RUN_DIR, REPS_ATR_MSG_DEBUG)."""
-    from reps.api.evaluate_dispatch import _REGISTRY_ENV_VAR
-    forbidden = {"REPS_PROGRAM_ID", "REPS_RUN_DIR", "REPS_ATR_MSG_DEBUG"}
-    assert _REGISTRY_ENV_VAR not in forbidden
+def test_generated_shim_does_not_read_process_global_registry_env(tmp_path):
+    """The shim must carry per-run registry state in its own source."""
+    shim_path = write_shim(tmp_path, registry_id="runlocal")
+    contents = Path(shim_path).read_text()
+    assert "runlocal" in contents
+    assert "os.environ" not in contents
+    assert "REPS_USER_EVALUATOR_ID" not in contents
 
 
 def test_optimize_cleans_up_registry_and_shim_on_success(monkeypatch, tmp_path):
@@ -792,16 +895,18 @@ def test_optimize_cleans_up_registry_and_shim_on_success(monkeypatch, tmp_path):
     captured_id = {}
 
     async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
-        captured_id["env"] = os.environ.get("REPS_USER_EVALUATOR_ID")
+        contents = Path(evaluator).read_text()
+        import re
+        captured_id["shim"] = re.search(r"_REGISTRY_ID = '([^']+)'", contents).group(1)
         _seed_database(output_dir, num_islands=config.database.num_islands)
 
     with patch("reps.runner.run_reps", new=fake_run_reps):
         opt.optimize("seed", lambda c: 0.5)
 
-    # Env var cleared.
+    # Env var was never used.
     assert os.environ.get("REPS_USER_EVALUATOR_ID") is None
     # Registry no longer holds that id.
-    rid = captured_id["env"]
+    rid = captured_id["shim"]
     assert rid is not None
     from reps.api.evaluate_dispatch import _REGISTRY
     assert rid not in _REGISTRY
@@ -817,26 +922,26 @@ def test_optimize_cleans_up_registry_on_exception(monkeypatch, tmp_path):
     captured_id = {}
 
     async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
-        captured_id["env"] = os.environ.get("REPS_USER_EVALUATOR_ID")
+        contents = Path(evaluator).read_text()
+        import re
+        captured_id["shim"] = re.search(r"_REGISTRY_ID = '([^']+)'", contents).group(1)
         raise RuntimeError("simulated controller crash")
 
     with patch("reps.runner.run_reps", new=fake_run_reps):
         with pytest.raises(RuntimeError, match="simulated controller crash"):
             opt.optimize("seed", lambda c: 0.5)
 
-    # Env var cleared even on failure.
+    # Env var was never used, even on failure.
     assert os.environ.get("REPS_USER_EVALUATOR_ID") is None
     # Registry no longer holds that id.
-    rid = captured_id["env"]
+    rid = captured_id["shim"]
     assert rid is not None
     from reps.api.evaluate_dispatch import _REGISTRY
     assert rid not in _REGISTRY
 
 
-def test_optimize_restores_pre_existing_env_var(monkeypatch, tmp_path):
-    """If the env var was already set when optimize() was called
-    (nested run, weird env), the prior value must be restored on exit
-    — not blindly popped."""
+def test_optimize_does_not_touch_pre_existing_env_var(monkeypatch, tmp_path):
+    """Per-run shim state must not mutate process-global evaluator env."""
     monkeypatch.setenv("REPS_USER_EVALUATOR_ID", "preexisting-value")
 
     lm = _make_lm(monkeypatch)
@@ -844,9 +949,7 @@ def test_optimize_restores_pre_existing_env_var(monkeypatch, tmp_path):
     opt = Optimizer(model=lm, max_iterations=1, output_dir=str(output_dir))
 
     async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
-        # During the run, the env var should carry the new id, not the
-        # preexisting one.
-        assert os.environ.get("REPS_USER_EVALUATOR_ID") != "preexisting-value"
+        assert os.environ.get("REPS_USER_EVALUATOR_ID") == "preexisting-value"
         _seed_database(output_dir, num_islands=config.database.num_islands)
 
     with patch("reps.runner.run_reps", new=fake_run_reps):
@@ -877,24 +980,31 @@ def test_build_config_pareto_fraction_default_is_zero(monkeypatch):
 
 def test_build_config_master_switch_only_trace_reflection(monkeypatch):
     """Setting only `trace_reflection=True` (without merge) flips
-    cfg.reps.enabled."""
+    cfg.reps.enabled and installs the public API's default worker preset."""
     lm = _make_lm(monkeypatch)
     opt = Optimizer(model=lm, trace_reflection=True)
     cfg = opt._build_config(seed=None)
     assert cfg.reps.enabled is True
     assert cfg.reps.trace_reflection.enabled is True
     assert cfg.reps.merge.enabled is False
+    assert len(cfg.reps.workers.types) == 1
+    worker = cfg.reps.workers.types[0]
+    assert worker.impl == "single_call"
+    assert worker.role == "exploiter"
+    assert worker.model_id == cfg.llm.models[0].name
 
 
 def test_build_config_master_switch_only_merge(monkeypatch):
     """Setting only `merge=True` (without trace_reflection) flips
-    cfg.reps.enabled."""
+    cfg.reps.enabled and installs the public API's default worker preset."""
     lm = _make_lm(monkeypatch)
     opt = Optimizer(model=lm, merge=True)
     cfg = opt._build_config(seed=None)
     assert cfg.reps.enabled is True
     assert cfg.reps.merge.enabled is True
     assert cfg.reps.trace_reflection.enabled is False
+    assert len(cfg.reps.workers.types) == 1
+    assert cfg.reps.workers.types[0].impl == "single_call"
 
 
 def test_build_config_summarizer_disabled_by_default(monkeypatch):
@@ -1155,6 +1265,88 @@ def test_collect_result_total_metric_calls_counts_all_programs(monkeypatch, tmp_
 
     assert result.total_metric_calls == 3
     assert result.iterations_run == 4  # max iteration_found among non-seeds (i=2 -> 4)
+
+
+def test_collect_result_total_metric_calls_uses_persisted_evaluator_count(
+    monkeypatch, tmp_path
+):
+    lm = _make_lm(monkeypatch)
+    output_dir = tmp_path / "run"
+    opt = Optimizer(model=lm, max_iterations=1, output_dir=str(output_dir))
+
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+        out = Path(output_dir)
+        (out / "programs").mkdir(parents=True, exist_ok=True)
+        metadata = {
+            "best_program_id": "p0",
+            "islands": [[] for _ in range(config.database.num_islands)],
+            "island_best_programs": [None] * config.database.num_islands,
+            "archive": [],
+            "last_iteration": 1,
+            "current_island": 0,
+            "island_generations": [0] * config.database.num_islands,
+            "last_migration_generation": 0,
+            "feature_stats": {},
+            "metric_call_count": 7,
+        }
+        (out / "metadata.json").write_text(json.dumps(metadata))
+        prog = {
+            "id": "p0",
+            "code": "# p0",
+            "language": "python",
+            "metrics": {"combined_score": 0.8},
+            "iteration_found": 1,
+            "metadata": {},
+        }
+        (out / "programs" / "p0.json").write_text(json.dumps(prog))
+
+    with patch("reps.runner.run_reps", new=fake_run_reps):
+        result = opt.optimize("seed", lambda c: 0.5)
+
+    assert result.total_metric_calls == 7
+
+
+def test_collect_result_best_score_uses_database_fitness_fallback(monkeypatch, tmp_path):
+    """When saved programs predate/omit combined_score, result collection
+    should report the same fallback score the database used to choose best."""
+    lm = _make_lm(monkeypatch)
+    output_dir = tmp_path / "run"
+    opt = Optimizer(model=lm, max_iterations=1, output_dir=str(output_dir))
+
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+        out = Path(output_dir)
+        (out / "programs").mkdir(parents=True, exist_ok=True)
+        metadata = {
+            "best_program_id": "p1",
+            "islands": [[] for _ in range(config.database.num_islands)],
+            "island_best_programs": [None] * config.database.num_islands,
+            "archive": [],
+            "last_iteration": 1,
+            "current_island": 0,
+            "island_generations": [0] * config.database.num_islands,
+            "last_migration_generation": 0,
+            "feature_stats": {},
+        }
+        (out / "metadata.json").write_text(json.dumps(metadata))
+        for program_id, metrics in [
+            ("p0", {"accuracy": 0.2, "latency": 0.4}),
+            ("p1", {"accuracy": 0.8, "latency": 0.6}),
+        ]:
+            prog = {
+                "id": program_id,
+                "code": f"# {program_id}",
+                "language": "python",
+                "metrics": metrics,
+                "iteration_found": 1,
+                "metadata": {},
+            }
+            (out / "programs" / f"{program_id}.json").write_text(json.dumps(prog))
+
+    with patch("reps.runner.run_reps", new=fake_run_reps):
+        result = opt.optimize("seed", lambda c: 0.5)
+
+    assert result.best_score == 0.7
+    assert result.best_metrics["combined_score"] == 0.7
 
 
 def test_collect_result_aggregates_tokens_across_programs(monkeypatch, tmp_path):

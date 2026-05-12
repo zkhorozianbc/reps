@@ -14,7 +14,7 @@ import tempfile
 import time
 import traceback
 import uuid
-from contextvars import ContextVar
+from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -26,9 +26,13 @@ from reps.llm.ensemble import LLMEnsemble
 from reps.async_utils import TaskPool, run_in_executor
 from reps.prompt_sampler import PromptSampler
 from reps.runtime import set_current_program_id, reset_current_program_id
-from reps.utils import format_metrics_safe
+from reps.utils import format_metrics_safe, is_failed_evaluation_metrics
 
 logger = logging.getLogger(__name__)
+
+
+_SEED_PROGRAM_IDS = {"initial", "seed"}
+_THREAD_TIMEOUT_SEMANTICS = "async wait timed out; executor thread may continue running"
 
 
 @dataclass
@@ -77,6 +81,7 @@ class Evaluator:
         self.llm_ensemble = llm_ensemble
         self.prompt_sampler = prompt_sampler
         self.database = database
+        self.metric_call_count = 0
 
         # Create a task pool for parallel evaluation
         self.task_pool = TaskPool(max_concurrency=config.parallel_evaluations)
@@ -177,6 +182,7 @@ class Evaluator:
         program_id: Optional[str] = None,
         scratch: bool = False,
         run_dir: Optional[str] = None,
+        fail_fast: Optional[bool] = None,
     ) -> "EvaluationOutcome":
         """Run one isolated evaluation. Safe to call concurrently from asyncio Tasks.
 
@@ -184,8 +190,12 @@ class Evaluator:
         - `scratch`: informational flag; caller guarantees this is a throwaway
           (e.g., from a tool-call); artifacts are returned but not stored globally.
         - `run_dir`: optional override for REPS_RUN_DIR passed to the subprocess env.
+        - `fail_fast`: when true, evaluator exceptions/timeouts are raised instead
+          of converted to sentinel metrics. Defaults true for seed-style program ids
+          so broken seed/evaluator infrastructure fails before expensive runs.
         """
         pid = program_id or f"scratch-{uuid.uuid4().hex[:12]}"
+        fail_fast = pid in _SEED_PROGRAM_IDS if fail_fast is None else fail_fast
         async with self._eval_semaphore:
             token_artifacts = _call_artifacts.set({})
             token_pid = set_current_program_id(pid)
@@ -199,6 +209,7 @@ class Evaluator:
                     program_code=program_code,
                     program_id=pid,
                     env=call_env,
+                    fail_fast=fail_fast,
                 )
                 artifacts = dict(_call_artifacts.get() or {})
                 return EvaluationOutcome(
@@ -217,6 +228,7 @@ class Evaluator:
         program_code: str,
         program_id: str,
         env: Optional[Dict[str, str]] = None,
+        fail_fast: bool = False,
     ) -> EvaluationResult:
         """Run the full retry/cascade evaluation pipeline.
 
@@ -255,27 +267,37 @@ class Evaluator:
                 # Process the result based on type
                 eval_result = self._process_evaluation_result(result)
 
+                if fail_fast and is_failed_evaluation_metrics(eval_result.metrics):
+                    if eval_result.metrics.get("timeout"):
+                        raise TimeoutError(
+                            f"Evaluation for program {program_id!r} returned timeout "
+                            f"metrics after {self.config.timeout}s. "
+                            f"{_THREAD_TIMEOUT_SEMANTICS}."
+                        )
+                    failure_message = (
+                        eval_result.artifacts.get("stderr")
+                        or eval_result.artifacts.get("error_message")
+                        or format_metrics_safe(eval_result.metrics)
+                    )
+                    raise RuntimeError(
+                        f"Evaluation for program {program_id!r} failed: {failure_message}"
+                    )
+
                 # Capture timeout artifacts into contextvar-scoped dict
                 if artifacts_enabled and program_id and eval_result.metrics.get("timeout") is True:
                     ctx_artifacts = _call_artifacts.get()
+                    timeout_data = {
+                        "timeout": True,
+                        "timeout_duration": self.config.timeout,
+                        "failure_stage": "evaluation",
+                        "error_type": "timeout",
+                        "timeout_hard_kill": False,
+                        "timeout_semantics": _THREAD_TIMEOUT_SEMANTICS,
+                    }
                     if ctx_artifacts is not None:
-                        ctx_artifacts.update(
-                            {
-                                "timeout": True,
-                                "timeout_duration": self.config.timeout,
-                                "failure_stage": "evaluation",
-                                "error_type": "timeout",
-                            }
-                        )
+                        ctx_artifacts.update(timeout_data)
                     else:
-                        self._pending_artifacts.setdefault(program_id, {}).update(
-                            {
-                                "timeout": True,
-                                "timeout_duration": self.config.timeout,
-                                "failure_stage": "evaluation",
-                                "error_type": "timeout",
-                            }
-                        )
+                        self._pending_artifacts.setdefault(program_id, {}).update(timeout_data)
 
                 # Add LLM feedback if configured
                 llm_eval_result = None
@@ -357,18 +379,26 @@ class Evaluator:
                 logger.warning(f"Evaluation timed out after {self.config.timeout}s")
 
                 # Capture timeout artifacts into contextvar-scoped dict
+                timeout_data = {
+                    "timeout": True,
+                    "timeout_duration": self.config.timeout,
+                    "failure_stage": "evaluation",
+                    "error_type": "timeout",
+                    "timeout_hard_kill": False,
+                    "timeout_semantics": _THREAD_TIMEOUT_SEMANTICS,
+                }
                 if artifacts_enabled and program_id:
-                    timeout_data = {
-                        "timeout": True,
-                        "timeout_duration": self.config.timeout,
-                        "failure_stage": "evaluation",
-                        "error_type": "timeout",
-                    }
                     ctx_artifacts = _call_artifacts.get()
                     if ctx_artifacts is not None:
                         ctx_artifacts.update(timeout_data)
                     else:
                         self._pending_artifacts[program_id] = timeout_data
+
+                if fail_fast:
+                    raise TimeoutError(
+                        f"Evaluation for program {program_id!r} timed out after "
+                        f"{self.config.timeout}s. {_THREAD_TIMEOUT_SEMANTICS}."
+                    ) from None
 
                 return EvaluationResult(metrics={"error": 0.0, "timeout": True})
 
@@ -406,7 +436,21 @@ class Evaluator:
         logger.error(
             f"All evaluation attempts failed for program{program_id_str}. Last error: {str(last_exception)}"
         )
+        if fail_fast and last_exception is not None:
+            raise last_exception
         return EvaluationResult(metrics={"error": 0.0})
+
+    async def _run_evaluator_callable(self, fn: Callable[..., Any], *args, **kwargs) -> Any:
+        """Run a benchmark evaluator callable in the default executor.
+
+        ``ContextVar`` state is task-local, but executor threads do not inherit it
+        automatically. Copy the active context so helpers such as
+        reps.runtime.current_program_id() work inside benchmark functions.
+        """
+        loop = asyncio.get_running_loop()
+        context = copy_context()
+        self.metric_call_count += 1
+        return await loop.run_in_executor(None, lambda: context.run(fn, *args, **kwargs))
 
     def _process_evaluation_result(self, result: Any) -> EvaluationResult:
         """
@@ -470,9 +514,8 @@ class Evaluator:
 
         # Create a coroutine that runs the evaluation function in an executor
         async def run_evaluation():
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                None, lambda: self.evaluate_function(program_path, **kwargs)
+            return await self._run_evaluator_callable(
+                self.evaluate_function, program_path, **kwargs
             )
 
         # Run the evaluation with timeout - let exceptions bubble up for retry handling
@@ -526,10 +569,8 @@ class Evaluator:
                 stage1_kwargs = _make_stage_kwargs(module.evaluate_stage1)
 
                 async def run_stage1():
-                    loop = asyncio.get_running_loop()
-                    return await loop.run_in_executor(
-                        None,
-                        lambda: module.evaluate_stage1(program_path, **stage1_kwargs),
+                    return await self._run_evaluator_callable(
+                        module.evaluate_stage1, program_path, **stage1_kwargs
                     )
 
                 stage1_result = await asyncio.wait_for(run_stage1(), timeout=self.config.timeout)
@@ -571,10 +612,8 @@ class Evaluator:
                 stage2_kwargs = _make_stage_kwargs(module.evaluate_stage2)
 
                 async def run_stage2():
-                    loop = asyncio.get_running_loop()
-                    return await loop.run_in_executor(
-                        None,
-                        lambda: module.evaluate_stage2(program_path, **stage2_kwargs),
+                    return await self._run_evaluator_callable(
+                        module.evaluate_stage2, program_path, **stage2_kwargs
                     )
 
                 stage2_result = await asyncio.wait_for(run_stage2(), timeout=self.config.timeout)
@@ -645,10 +684,8 @@ class Evaluator:
                 stage3_kwargs = _make_stage_kwargs(module.evaluate_stage3)
 
                 async def run_stage3():
-                    loop = asyncio.get_running_loop()
-                    return await loop.run_in_executor(
-                        None,
-                        lambda: module.evaluate_stage3(program_path, **stage3_kwargs),
+                    return await self._run_evaluator_callable(
+                        module.evaluate_stage3, program_path, **stage3_kwargs
                     )
 
                 stage3_result = await asyncio.wait_for(run_stage3(), timeout=self.config.timeout)

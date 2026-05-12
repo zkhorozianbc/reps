@@ -78,9 +78,8 @@ def _anthropic_schema_to_openai(schema: Dict[str, Any]) -> Dict[str, Any]:
 class OpenAIToolRunnerWorker:
     def __init__(self, config: WorkerConfig):
         self.config = config
-        api_key = config.impl_options.get("api_key") or os.environ.get("OPENAI_API_KEY")
-        timeout = float(config.impl_options.get("timeout", 900.0))
-        self.client = AsyncOpenAI(api_key=api_key, timeout=timeout, max_retries=0)
+        self.client: Optional[AsyncOpenAI] = None
+        self._client_signature: Optional[Tuple[Any, ...]] = None
         self.retries = int(config.impl_options.get("retries", 3))
         self.retry_base_delay = float(config.impl_options.get("retry_base_delay", 1.0))
         # Wall-clock ceiling for a single responses.stream() call.
@@ -95,6 +94,7 @@ class OpenAIToolRunnerWorker:
 
     async def run(self, request: WorkerRequest, ctx: WorkerContext) -> WorkerResult:
         t0 = time.monotonic()
+        self._configure_client(ctx)
         model = self.config.model_id or request.model_id or ""
 
         system_prompt, user_prompt = self._build_initial_prompt(request, ctx)
@@ -125,6 +125,7 @@ class OpenAIToolRunnerWorker:
         submitted_desc: Optional[str] = None
         converged_flag: bool = False
         converged_reason: Optional[str] = None
+        terminal_tool_error: Optional[str] = None
 
         previous_response_id: Optional[str] = None
         # `current_input` is what we hand to responses.stream for the next call.
@@ -307,10 +308,24 @@ class OpenAIToolRunnerWorker:
                                 + json.dumps(metrics_precise, sort_keys=True)
                             )
                         except Exception as re_exc:
-                            accept_text = (
-                                "accepted\n\n## Submitted program auto-reevaluation\n"
-                                f"ERROR: {type(re_exc).__name__}: {re_exc}"
+                            err_text = (
+                                "Submitted program auto-reevaluation failed: "
+                                f"{type(re_exc).__name__}: {re_exc}"
                             )
+                            terminal_tool_error = err_text
+                            tool_outputs.append({
+                                "type": "function_call_output",
+                                "call_id": call_id,
+                                "output": err_text,
+                            })
+                            tool_result_turn_blocks.append(ContentBlock(
+                                type="tool_result",
+                                tool_use_id=call_id,
+                                tool_result_for_id=call_id,
+                                tool_result_content=err_text,
+                                tool_result_is_error=True,
+                            ))
+                            continue
                     else:
                         accept_text = (
                             "accepted\n\n## Submitted program auto-reevaluation\n"
@@ -430,6 +445,14 @@ class OpenAIToolRunnerWorker:
             # usage_total>) as a text input item alongside tool_outputs.
             # Deferred — too invasive for the current PROMPT-team scope.
 
+        if terminal_tool_error is not None:
+            return self._fail(
+                WorkerError(kind="TOOL_ERROR", detail=terminal_tool_error),
+                turns,
+                usage_total,
+                t0,
+            )
+
         # Turn budget exhausted without submit_child or mark_converged.
         # Auto-eject: synthesize a mark_converged result so the iteration
         # closes cleanly. (Parallel to anthropic_tool_runner's fix.)
@@ -448,9 +471,42 @@ class OpenAIToolRunnerWorker:
         )
 
     # -------------------------------------------- helpers
+    def _configure_client(self, ctx: WorkerContext) -> None:
+        llm_cfg = getattr(getattr(ctx, "config", None), "llm", None)
+        opts = self.config.impl_options or {}
+
+        api_key = opts.get("api_key") or getattr(llm_cfg, "api_key", None) or os.environ.get("OPENAI_API_KEY")
+        api_base = opts.get("api_base") or opts.get("base_url") or getattr(llm_cfg, "api_base", None)
+        timeout = float(opts.get("timeout", getattr(llm_cfg, "timeout", 900.0) or 900.0))
+        self.retries = int(opts.get("retries", getattr(llm_cfg, "retries", 3) or 3))
+        self.retry_base_delay = float(
+            opts.get(
+                "retry_base_delay",
+                opts.get("retry_delay", getattr(llm_cfg, "retry_delay", 1.0) or 1.0),
+            )
+        )
+        self.wall_clock_timeout = float(opts.get("wall_clock_timeout", 1800.0))
+        self.max_tokens = int(opts.get("max_tokens", getattr(llm_cfg, "max_tokens", 16000) or 16000))
+        reasoning = opts.get("reasoning_effort", getattr(llm_cfg, "reasoning_effort", None))
+        if reasoning is None:
+            top_level_reasoning = getattr(getattr(ctx, "config", None), "reasoning", None)
+            reasoning = None if top_level_reasoning == "off" else top_level_reasoning
+        self.reasoning_effort = reasoning or None
+
+        signature = (api_key, api_base, timeout)
+        if self.client is None or signature != self._client_signature:
+            self.client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=api_base,
+                timeout=timeout,
+                max_retries=0,
+            )
+            self._client_signature = signature
+
     def _build_initial_prompt(
         self, request: WorkerRequest, ctx: WorkerContext
     ) -> Tuple[str, str]:
+        explicit_template = self.config.system_prompt_template is not None
         template_key = self.config.system_prompt_template or "system_message_tool_runner"
         sampler = ctx.prompt_sampler
         prompt = sampler.build_prompt(
@@ -468,9 +524,14 @@ class OpenAIToolRunnerWorker:
             current_changes_description=None,
             **request.prompt_extras,
         )
+        template_path = _TEMPLATE_DIR / f"{template_key}.txt"
         try:
-            system_text = (_TEMPLATE_DIR / f"{template_key}.txt").read_text()
-        except Exception:
+            system_text = template_path.read_text()
+        except FileNotFoundError:
+            if explicit_template:
+                raise FileNotFoundError(
+                    f"Explicit tool-runner system prompt template not found: {template_path}"
+                ) from None
             system_text = prompt.get("system", "")
 
         bc = (self.config.baseline_context or "").strip()

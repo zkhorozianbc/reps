@@ -4,6 +4,7 @@ Configuration handling for REPS (extracted from OpenEvolve)
 
 import os
 import re
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
@@ -20,6 +21,40 @@ from reps.workers.base import WorkerConfig  # noqa: E402
 
 
 _ENV_VAR_PATTERN = re.compile(r"^\$\{([^}]+)\}$")  # ${VAR}
+OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
+_VALID_PROVIDERS = {"openrouter", "anthropic", "openai"}
+_VALID_MODEL_PROVIDERS = _VALID_PROVIDERS | {"local"}
+_PROVIDER_ENV_VARS = {
+    "openrouter": "OPENROUTER_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+}
+_KNOWN_PROVIDER_ENV_VARS = set(_PROVIDER_ENV_VARS.values())
+_VALID_HARNESSES = {"reps", "openevolve"}
+_VALID_REASONING = {None, "low", "medium", "high", "xhigh", "max", "off"}
+_VALID_SELECTION_STRATEGIES = {"map_elites", "pareto", "mixed"}
+_VALID_DIVERSITY_METRICS = {"edit_distance", "feature_based"}
+_VALID_WORKER_IMPLS = {
+    "single_call",
+    "anthropic_tool_runner",
+    "openai_tool_runner",
+    "dspy_react",
+}
+_VALID_WORKER_ROLES = {"exploiter", "explorer", "crossover"}
+_VALID_GENERATION_MODES = {"diff", "full"}
+_VALID_REVISITATION_DECAYS = {"linear", "exponential"}
+_LLM_SHARED_MODEL_FIELDS = {
+    "api_base",
+    "api_key",
+    "temperature",
+    "top_p",
+    "max_tokens",
+    "timeout",
+    "retries",
+    "retry_delay",
+    "random_seed",
+    "reasoning_effort",
+}
 
 
 def _resolve_env_var(value: Optional[str]) -> Optional[str]:
@@ -96,10 +131,8 @@ class LLMConfig(LLMModelConfig):
     """Configuration for LLM models"""
 
     # API configuration
-    # Default to None so configs that omit `api_base` flow through as
-    # "OpenAI Direct" (the openai SDK defaults base_url to api.openai.com when
-    # None). Non-OpenAI providers (OpenRouter, custom gateways) must set
-    # api_base explicitly in their YAML.
+    # Provider finalization fills this for provider-specific defaults such as
+    # OpenRouter while leaving native OpenAI/Anthropic configs unset.
     api_base: str = None
 
     # Generation parameters
@@ -191,6 +224,12 @@ class LLMConfig(LLMModelConfig):
             for key, value in args.items():
                 if overwrite or getattr(model, key, None) is None:
                     setattr(model, key, value)
+
+    def sync_shared_model_params(self, keys: Optional[set[str]] = None, *, overwrite: bool = False) -> None:
+        """Propagate selected shared LLM fields to concrete model entries."""
+        selected = keys or _LLM_SHARED_MODEL_FIELDS
+        shared_config = {key: getattr(self, key) for key in selected}
+        self.update_model_params(shared_config, overwrite=overwrite)
 
 
 @dataclass
@@ -546,14 +585,13 @@ class Config:
     file_suffix: str = ".py"
 
     # Top-level provider and harness selection
-    provider: str = "openrouter"  # valid: "openrouter", "anthropic"
+    provider: str = "openrouter"  # valid: "openrouter", "anthropic", "openai"
     harness: str = "reps"         # valid: "reps", "openevolve"
 
     # Top-level reasoning / extended-thinking toggle. Applied uniformly across
     # providers by the runner: translates to `reasoning_effort` for OpenAI and
     # OpenRouter-hosted models, and to native Anthropic `thinking` with a
-    # mapped budget for `provider: anthropic`. Valid: None (default), "low",
-    # "medium", "high", or "off".
+    # mapped budget for `provider: anthropic`.
     reasoning: Optional[str] = None
 
     # Path to benchmark directory. When set, `reps-run` derives
@@ -586,7 +624,7 @@ class Config:
         """Load configuration from a YAML file"""
         config_path = Path(path).resolve()
         with open(config_path, "r") as f:
-            config_dict = yaml.safe_load(f)
+            config_dict = yaml.safe_load(f) or {}
         config = cls.from_dict(config_dict)
 
         # Resolve template_dir relative to config file location
@@ -595,16 +633,20 @@ class Config:
             if not template_path.is_absolute():
                 config.prompt.template_dir = str((config_path.parent / template_path).resolve())
 
-        # Resolve task directory relative to config file location
-        if config.task:
-            task_path = Path(config.task)
-            if not task_path.is_absolute():
-                config.task = str((config_path.parent / task_path).resolve())
+        for attr in ("task", "initial_program", "evaluator_path", "output"):
+            value = getattr(config, attr)
+            if value:
+                path_value = Path(value)
+                if not path_value.is_absolute():
+                    setattr(config, attr, str((config_path.parent / path_value).resolve()))
 
         return config
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> "Config":
+        config_dict = deepcopy(config_dict or {})
+        _validate_provider_env_refs(config_dict)
+
         if "diff_pattern" in config_dict:
             try:
                 re.compile(config_dict["diff_pattern"])
@@ -619,17 +661,25 @@ class Config:
             if "top_p" in config_dict["llm"] and config_dict["llm"]["top_p"] is None:
                 del config_dict["llm"]["top_p"]
 
-        config: Config = dacite.from_dict(
-            data_class=cls,
-            data=config_dict,
-            config=dacite.Config(
-                cast=[List, Union],
-                forward_references={"LLMInterface": Any},
-            ),
-        )
+        try:
+            config: Config = dacite.from_dict(
+                data_class=cls,
+                data=config_dict,
+                config=dacite.Config(
+                    cast=[List, Union],
+                    forward_references={"LLMInterface": Any},
+                    strict=True,
+                ),
+            )
+        except dacite.exceptions.UnexpectedDataError as e:
+            raise ValueError(f"unknown config field: {e}") from e
+        except dacite.exceptions.DaciteError as e:
+            raise ValueError(str(e)) from e
 
         if config.database.random_seed is None and config.random_seed is not None:
             config.database.random_seed = config.random_seed
+
+        config.finalize()
 
         if config.prompt.programs_as_changes_description and not config.diff_based_evolution:
             raise ValueError(
@@ -647,6 +697,21 @@ class Config:
         with open(path, "w") as f:
             yaml.dump(self.to_dict(), f, default_flow_style=False)
 
+    def finalize(
+        self,
+        *,
+        llm_shared_overrides: Optional[set[str]] = None,
+        overwrite_llm_shared: bool = False,
+    ) -> None:
+        """Validate and complete derived config fields before use."""
+        _validate_config_enums(self)
+        _finalize_provider_config(self)
+        if llm_shared_overrides:
+            self.llm.sync_shared_model_params(llm_shared_overrides, overwrite=overwrite_llm_shared)
+        else:
+            self.llm.sync_shared_model_params()
+        _stamp_and_validate_model_providers(self)
+
 
 def load_config(config_path: Optional[Union[str, Path]] = None) -> Config:
     """Load configuration from a YAML file or use defaults"""
@@ -656,14 +721,139 @@ def load_config(config_path: Optional[Union[str, Path]] = None) -> Config:
         config = Config()
 
         # Use environment variables if available
-        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-        # Only override api_base if OPENAI_API_BASE is explicitly set; otherwise
-        # leave it None so OpenAI Direct is detected correctly downstream.
-        api_base = os.environ.get("OPENAI_API_BASE")
+        api_key = (
+            os.environ.get("OPENROUTER_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("ANTHROPIC_API_KEY")
+        )
+        # Defaults follow the package's top-level provider, currently OpenRouter.
+        # OPENAI_API_BASE remains a custom OpenAI-compatible override.
+        api_base = os.environ.get("OPENAI_API_BASE") or OPENROUTER_API_BASE
 
         config.llm.update_model_params({"api_key": api_key, "api_base": api_base})
+        config.finalize()
 
     # Make the system message available to the individual models, in case it is not provided from the prompt sampler
     config.llm.update_model_params({"system_message": config.prompt.system_message})
 
     return config
+
+
+def _validate_provider_env_refs(config_dict: Dict[str, Any]) -> None:
+    provider = config_dict.get("provider", Config.provider)
+    llm = config_dict.get("llm") or {}
+    if not isinstance(llm, dict):
+        return
+
+    _validate_api_key_env_ref(provider, llm.get("api_key"), "llm.api_key")
+
+    for section in ("models", "evaluator_models"):
+        for idx, model in enumerate(llm.get(section) or []):
+            if not isinstance(model, dict):
+                continue
+            model_provider = model.get("provider") or provider
+            _validate_api_key_env_ref(
+                model_provider,
+                model.get("api_key") or llm.get("api_key"),
+                f"llm.{section}[{idx}].api_key",
+            )
+
+    reps = config_dict.get("reps") or {}
+    summarizer = reps.get("summarizer") if isinstance(reps, dict) else None
+    if isinstance(summarizer, dict):
+        _validate_api_key_env_ref(
+            summarizer.get("provider") or provider,
+            summarizer.get("api_key"),
+            "reps.summarizer.api_key",
+        )
+
+
+def _validate_api_key_env_ref(provider: str, value: Any, path: str) -> None:
+    if not isinstance(value, str):
+        return
+    match = _ENV_VAR_PATTERN.match(value)
+    if not match:
+        return
+    var_name = match.group(1)
+    expected = _PROVIDER_ENV_VARS.get(provider)
+    if expected and var_name in _KNOWN_PROVIDER_ENV_VARS and var_name != expected:
+        raise ValueError(f"{path}: provider {provider!r} requires ${{{expected}}}, got ${{{var_name}}}")
+
+
+def _validate_config_enums(config: Config) -> None:
+    if config.provider not in _VALID_PROVIDERS:
+        raise ValueError(f"provider must be one of {sorted(_VALID_PROVIDERS)}, got {config.provider!r}")
+    if config.harness not in _VALID_HARNESSES:
+        raise ValueError(f"harness must be one of {sorted(_VALID_HARNESSES)}, got {config.harness!r}")
+    if config.reasoning not in _VALID_REASONING:
+        raise ValueError(f"reasoning must be one of {sorted(v for v in _VALID_REASONING if v is not None)}, got {config.reasoning!r}")
+    if config.database.selection_strategy not in _VALID_SELECTION_STRATEGIES:
+        raise ValueError(
+            "database.selection_strategy must be one of "
+            f"{sorted(_VALID_SELECTION_STRATEGIES)}, got {config.database.selection_strategy!r}"
+        )
+    if config.database.diversity_metric not in _VALID_DIVERSITY_METRICS:
+        raise ValueError(
+            "database.diversity_metric must be one of "
+            f"{sorted(_VALID_DIVERSITY_METRICS)}, got {config.database.diversity_metric!r}"
+        )
+    if config.reps.revisitation.decay not in _VALID_REVISITATION_DECAYS:
+        raise ValueError(
+            "reps.revisitation.decay must be one of "
+            f"{sorted(_VALID_REVISITATION_DECAYS)}, got {config.reps.revisitation.decay!r}"
+        )
+    for worker in config.reps.workers.types:
+        if worker.impl not in _VALID_WORKER_IMPLS:
+            raise ValueError(f"worker impl must be one of {sorted(_VALID_WORKER_IMPLS)}, got {worker.impl!r}")
+        if worker.role not in _VALID_WORKER_ROLES:
+            raise ValueError(f"worker role must be one of {sorted(_VALID_WORKER_ROLES)}, got {worker.role!r}")
+        if worker.generation_mode not in _VALID_GENERATION_MODES:
+            raise ValueError(
+                "worker generation_mode must be one of "
+                f"{sorted(_VALID_GENERATION_MODES)}, got {worker.generation_mode!r}"
+            )
+
+
+def _finalize_provider_config(config: Config) -> None:
+    if config.provider == "openrouter" and config.llm.api_base is None:
+        config.llm.api_base = OPENROUTER_API_BASE
+    if config.llm.api_key is None:
+        env_var = _PROVIDER_ENV_VARS.get(config.provider)
+        if env_var:
+            config.llm.api_key = os.environ.get(env_var)
+
+    _validate_provider_base(config.provider, config.llm.api_base, "llm.api_base")
+
+    summarizer = config.reps.summarizer
+    if summarizer.provider is None:
+        summarizer.provider = config.provider
+    if summarizer.api_base is None:
+        summarizer.api_base = config.llm.api_base
+    if summarizer.api_key is None:
+        summarizer.api_key = config.llm.api_key
+    _validate_provider_base(summarizer.provider, summarizer.api_base, "reps.summarizer.api_base")
+
+
+def _stamp_and_validate_model_providers(config: Config) -> None:
+    for model in config.llm.models + config.llm.evaluator_models:
+        if model.provider is None:
+            model.provider = config.provider
+        if model.provider not in _VALID_MODEL_PROVIDERS:
+            raise ValueError(
+                f"llm model provider must be one of {sorted(_VALID_MODEL_PROVIDERS)}, got {model.provider!r}"
+            )
+        if model.provider != "local":
+            _validate_provider_base(model.provider, model.api_base, f"llm.models[{model.name}].api_base")
+
+
+def _validate_provider_base(provider: Optional[str], api_base: Optional[str], path: str) -> None:
+    if api_base is None:
+        return
+
+    base = api_base.lower()
+    if provider == "openrouter" and "openrouter.ai" not in base:
+        raise ValueError(f"{path} must use an openrouter.ai api_base when provider is 'openrouter'")
+    if provider == "anthropic" and ("openrouter.ai" in base or "api.openai.com" in base):
+        raise ValueError(f"{path} is inconsistent with provider 'anthropic'")
+    if provider == "openai" and ("openrouter.ai" in base or "anthropic.com" in base):
+        raise ValueError(f"{path} is inconsistent with provider 'openai'")

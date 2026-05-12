@@ -37,7 +37,7 @@ Total target: ~150 README lines (today's is 124; net add ≈ 25-30 lines after d
 | Title + badges (L1-8) | KEEP | No change. |
 | Tagline para (L10) | REWRITE | Split: one sentence stays as the tagline; the OpenEvolve fork credit moves to §12 (Acknowledgements). |
 | Result: Circle Packing (L12-24) | KEEP verbatim | Headline. Do not touch. |
-| Install (L26-45) | KEEP, append one line | Add: "PyPI publish is in flight; this README will be updated to `pip install reps` (or equivalent) once the package is on PyPI. Until then, install from source as below." |
+| Install (L26-45) | UPDATE | Prefer the PyPI install path: `pip install reps-py`. Keep source install instructions for local development. |
 | Run (L47-64) | MOVE to §9.1 (Power-user: CLI / YAML) | Demoted under a new H2. Body unchanged. |
 | Add a Benchmark (L66-108) | MOVE to §9.2 | Body unchanged. |
 | Configs (L110-118) | MOVE to §9.3 | Body unchanged. |
@@ -195,7 +195,7 @@ Explicit non-goals for the implementation subagent:
 
 1. **Do not remove or move the Circle Packing n=26 result section.** It stays at §2, immediately after the badges. It is the project's strongest signal.
 2. **Do not delete the CLI sections.** `reps-run`, "Add a benchmark", and "Configs" all stay — they move under §9 ("Power-user: CLI / YAML") but every existing line of content survives.
-3. **Do not change the install command** to `pip install reps` or similar. PyPI publish is a separate spec; the README must continue to say `uv pip install -e .` until that ships. Add the one-line "PyPI publish pending" note and stop there.
+3. **Do not change the import name.** The PyPI distribution is `reps-py`, but the Python module remains `import reps`. Keep both facts clear in install examples and API examples.
 4. **Do not invent kwargs.** Every constructor kwarg shown in the §7 table or the §4 quick-start must exist today in `reps/api/optimizer.py:52` (the `Optimizer.__init__` signature). If a kwarg is in `docs/python_api_spec.md` but marked deferred to v1.5, do not put it in the README.
 5. **Do not show `from_config()` in the quick-start.** It belongs in §11 / `docs/python_api_spec.md` as an escape hatch. The README's primary flow is the simple constructor.
 6. **Do not add a "Roadmap" or "Coming soon" section.** Deferred features live in `docs/python_api_spec.md` ("Deferred to v1.5+"). The README is for what works today.

@@ -9,13 +9,16 @@ Validates that:
 """
 
 import json
+import asyncio
+import time
 from pathlib import Path
 
 import pytest
 
+from reps.config import EvaluatorConfig
 from reps.database import Program
 from reps.evaluation_result import EvaluationResult
-from reps.evaluator import EvaluationOutcome
+from reps.evaluator import EvaluationOutcome, Evaluator
 
 
 class TestEvaluationResultFields:
@@ -274,3 +277,145 @@ class TestCascadeAsiPreservation:
         )
         assert outcome.per_instance_scores == {"task_a": 0.7, "task_b": 0.5}
         assert outcome.feedback == "task_b regressed"
+
+
+class TestEvaluatorFailureContract:
+    def test_seed_evaluation_failure_raises_instead_of_returning_error_metrics(
+        self, tmp_path: Path
+    ):
+        bench = tmp_path / "bench_seed_failure.py"
+        bench.write_text(
+            "def evaluate(program_path, **kw):\n"
+            "    raise RuntimeError('seed dependency missing')\n"
+        )
+
+        cfg = EvaluatorConfig(timeout=10, max_retries=0, cascade_evaluation=False)
+        evaluator = Evaluator(cfg, str(bench))
+
+        with pytest.raises(RuntimeError, match="seed dependency missing"):
+            asyncio.run(evaluator.evaluate_isolated("print('seed')\n", program_id="initial"))
+
+    def test_candidate_evaluation_failure_keeps_sentinel_metrics(self, tmp_path: Path):
+        bench = tmp_path / "bench_candidate_failure.py"
+        bench.write_text(
+            "def evaluate(program_path, **kw):\n"
+            "    raise RuntimeError('candidate runtime failed')\n"
+        )
+
+        cfg = EvaluatorConfig(timeout=10, max_retries=0, cascade_evaluation=False)
+        evaluator = Evaluator(cfg, str(bench))
+
+        outcome = asyncio.run(
+            evaluator.evaluate_isolated("print('candidate')\n", program_id="child-1")
+        )
+
+        assert outcome.metrics == {"error": 0.0}
+        assert outcome.artifacts["stderr"] == "candidate runtime failed"
+        assert "traceback" in outcome.artifacts
+
+    def test_seed_timeout_raises_instead_of_returning_timeout_metrics(
+        self, tmp_path: Path
+    ):
+        bench = tmp_path / "bench_seed_timeout.py"
+        bench.write_text(
+            "import time\n"
+            "def evaluate(program_path, **kw):\n"
+            "    time.sleep(0.2)\n"
+            "    return {'combined_score': 1.0}\n"
+        )
+
+        cfg = EvaluatorConfig(timeout=0.01, max_retries=0, cascade_evaluation=False)
+        evaluator = Evaluator(cfg, str(bench))
+
+        with pytest.raises(TimeoutError, match="timed out"):
+            asyncio.run(evaluator.evaluate_isolated("print('seed')\n", program_id="initial"))
+
+    def test_seed_cascade_failure_metrics_raise_in_fail_fast_mode(self, tmp_path: Path):
+        bench = tmp_path / "bench_seed_cascade_failure.py"
+        bench.write_text(
+            "def evaluate(program_path, **kw):\n"
+            "    return {'combined_score': 1.0}\n"
+            "def evaluate_stage1(program_path, **kw):\n"
+            "    raise RuntimeError('cascade dependency missing')\n"
+        )
+
+        cfg = EvaluatorConfig(timeout=10, max_retries=0, cascade_evaluation=True)
+        evaluator = Evaluator(cfg, str(bench))
+
+        with pytest.raises(RuntimeError, match="cascade dependency missing"):
+            asyncio.run(evaluator.evaluate_isolated("print('seed')\n", program_id="initial"))
+
+
+class TestEvaluatorTimeoutContract:
+    @pytest.mark.asyncio
+    async def test_candidate_timeout_documents_thread_continues_after_timeout(
+        self, tmp_path: Path
+    ):
+        marker = tmp_path / "thread_continued.txt"
+        bench = tmp_path / "bench_timeout.py"
+        bench.write_text(
+            "import time\n"
+            f"MARKER = {str(marker)!r}\n"
+            "def evaluate(program_path, **kw):\n"
+            "    time.sleep(0.35)\n"
+            "    open(MARKER, 'w').write('finished')\n"
+            "    return {'combined_score': 1.0}\n"
+        )
+
+        cfg = EvaluatorConfig(timeout=0.05, max_retries=0, cascade_evaluation=False)
+        evaluator = Evaluator(cfg, str(bench))
+
+        started = time.monotonic()
+        outcome = await evaluator.evaluate_isolated(
+            "print('candidate')\n", program_id="child-timeout"
+        )
+
+        assert time.monotonic() - started < 0.3
+        assert outcome.metrics == {"error": 0.0, "timeout": True}
+        assert outcome.artifacts["timeout_hard_kill"] is False
+        assert (
+            outcome.artifacts["timeout_semantics"]
+            == "async wait timed out; executor thread may continue running"
+        )
+
+        deadline = time.monotonic() + 1.0
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert marker.read_text() == "finished"
+
+
+class TestEvaluatorRuntimeContext:
+    def test_current_program_id_reaches_direct_evaluator_thread(self, tmp_path: Path):
+        bench = tmp_path / "bench_context.py"
+        bench.write_text(
+            "from reps.runtime import current_program_id\n"
+            "def evaluate(program_path, **kw):\n"
+            "    return {'combined_score': 1.0 if current_program_id() == 'ctx-123' else 0.0}\n"
+        )
+
+        cfg = EvaluatorConfig(timeout=10, max_retries=0, cascade_evaluation=False)
+        evaluator = Evaluator(cfg, str(bench))
+
+        outcome = asyncio.run(
+            evaluator.evaluate_isolated("print('candidate')\n", program_id="ctx-123")
+        )
+
+        assert outcome.metrics["combined_score"] == 1.0
+
+    def test_env_forwarding_still_works_with_executor_context(self, tmp_path: Path):
+        bench = tmp_path / "bench_env_context.py"
+        bench.write_text(
+            "from reps.runtime import current_program_id\n"
+            "def evaluate(program_path, *, env=None, **kw):\n"
+            "    ok = current_program_id() == 'env-ctx-1' and env['REPS_PROGRAM_ID'] == 'env-ctx-1'\n"
+            "    return {'combined_score': 1.0 if ok else 0.0}\n"
+        )
+
+        cfg = EvaluatorConfig(timeout=10, max_retries=0, cascade_evaluation=False)
+        evaluator = Evaluator(cfg, str(bench))
+
+        outcome = asyncio.run(
+            evaluator.evaluate_isolated("print('candidate')\n", program_id="env-ctx-1")
+        )
+
+        assert outcome.metrics["combined_score"] == 1.0

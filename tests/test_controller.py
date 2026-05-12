@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 # Set dummy API key for testing
 os.environ["OPENAI_API_KEY"] = "test"
 
-from reps.config import Config
+from reps.config import Config, LLMModelConfig
 from reps.database import Program, ProgramDatabase
 from reps.controller import ProcessParallelController, SerializableResult
 from reps.workers.base import WorkerConfig
@@ -272,6 +272,7 @@ class TestNoCombinedScoreWarning(unittest.TestCase):
         self.config.max_iterations = 1
         self.config.evaluator.parallel_evaluations = 1
         self.config.evaluator.timeout = 10
+        self.config.evaluator.cascade_evaluation = False
         self.config.database.num_islands = 1
         self.config.database.in_memory = True
         self.config.checkpoint_interval = 5
@@ -382,6 +383,211 @@ class TestNoCombinedScoreWarning(unittest.TestCase):
             "no-combined_score WARNING should fire for operator misconfiguration",
         )
         self.assertTrue(controller._warned_about_combined_score)
+
+
+class TestControllerHardFailures(unittest.TestCase):
+    """Harness/persistence failures must not be treated as candidate failures."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+
+        self.config = Config()
+        self.config.max_iterations = 1
+        self.config.evaluator.parallel_evaluations = 1
+        self.config.evaluator.timeout = 10
+        self.config.evaluator.cascade_evaluation = False
+        self.config.database.num_islands = 1
+        self.config.database.in_memory = True
+        self.config.checkpoint_interval = 5
+
+        self.eval_file = os.path.join(self.test_dir, "evaluator.py")
+        with open(self.eval_file, "w") as f:
+            f.write("def evaluate(p):\n    return {'combined_score': 0.5}\n")
+
+        self.database = ProgramDatabase(self.config.database)
+        self.database.add(
+            Program(
+                id="seed",
+                code="def f(): pass",
+                language="python",
+                metrics={"combined_score": 0.5},
+                iteration_found=0,
+            )
+        )
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def _child_result(self, metrics=None):
+        return SerializableResult(
+            child_program_dict={
+                "id": "child_hard_failure",
+                "code": "def evolved(): pass",
+                "language": "python",
+                "parent_id": "seed",
+                "generation": 1,
+                "metrics": metrics or {"combined_score": 0.6},
+                "iteration_found": 1,
+                "metadata": {"changes": "test", "island": 0},
+            },
+            parent_id="seed",
+            iteration_time=0.1,
+            iteration=1,
+        )
+
+    def test_invalid_feature_dimension_raises_from_result_processing(self):
+        """MAP-Elites feature config errors are harness errors, not LLM noise."""
+
+        async def run_test():
+            controller = ProcessParallelController(
+                self.config, self.eval_file, self.database
+            )
+            controller.start()
+            self.config.database.feature_dimensions = ["missing_metric"]
+
+            with patch.object(
+                controller,
+                "_run_iteration",
+                new=AsyncMock(return_value=self._child_result()),
+            ):
+                await controller.run_evolution(
+                    start_iteration=1, max_iterations=1, target_score=None
+                )
+
+        with self.assertRaisesRegex(ValueError, "Feature dimension 'missing_metric'"):
+            asyncio.run(run_test())
+
+    def test_per_iteration_save_failure_raises(self):
+        """A failed child JSON/trace save must stop the run loudly."""
+
+        async def run_test():
+            controller = ProcessParallelController(
+                self.config,
+                self.eval_file,
+                self.database,
+                output_dir=self.test_dir,
+            )
+            controller.start()
+
+            with patch.object(
+                controller,
+                "_run_iteration",
+                new=AsyncMock(return_value=self._child_result()),
+            ), patch.object(
+                self.database,
+                "_save_program",
+                side_effect=RuntimeError("disk full"),
+            ):
+                await controller.run_evolution(
+                    start_iteration=1, max_iterations=1, target_score=None
+                )
+
+        with self.assertRaisesRegex(RuntimeError, "disk full"):
+            asyncio.run(run_test())
+
+    def test_failed_seed_metrics_raise_before_spawning_iterations(self):
+        """Seed evaluator failure sentinels should stop before any LLM work."""
+        self.database.programs["seed"].metrics = {"error": 0.0, "timeout": True}
+
+        async def run_test():
+            controller = ProcessParallelController(
+                self.config, self.eval_file, self.database
+            )
+            controller.start()
+            run_iteration = AsyncMock(return_value=self._child_result())
+            with patch.object(controller, "_run_iteration", new=run_iteration):
+                with self.assertRaisesRegex(RuntimeError, "seed.*failed evaluation"):
+                    await controller.run_evolution(
+                        start_iteration=1, max_iterations=1, target_score=None
+                    )
+            self.assertEqual(run_iteration.await_count, 0)
+
+        asyncio.run(run_test())
+
+    def test_candidate_error_result_remains_soft(self):
+        """Explicit candidate/worker failure results still count as soft failures."""
+
+        async def run_test():
+            controller = ProcessParallelController(
+                self.config, self.eval_file, self.database
+            )
+            controller.start()
+
+            with patch.object(
+                controller,
+                "_run_iteration",
+                new=AsyncMock(
+                    return_value=SerializableResult(error="candidate failed", iteration=1)
+                ),
+            ):
+                best = await controller.run_evolution(
+                    start_iteration=1, max_iterations=1, target_score=None
+                )
+            self.assertEqual(best.id, "seed")
+            self.assertNotIn("child_hard_failure", self.database.programs)
+
+        asyncio.run(run_test())
+
+    def test_database_rejection_skips_artifacts_and_persistence(self):
+        """Rejected children must not be persisted after ProgramDatabase.add."""
+
+        async def run_test():
+            controller = ProcessParallelController(
+                self.config,
+                self.eval_file,
+                self.database,
+                output_dir=self.test_dir,
+            )
+            controller.start()
+
+            with patch.object(
+                controller,
+                "_run_iteration",
+                new=AsyncMock(
+                    return_value=self._child_result({"combined_score": 0.6})
+                ),
+            ), patch.object(
+                self.database,
+                "add",
+                return_value=False,
+            ) as add, patch.object(
+                self.database,
+                "store_artifacts",
+            ) as store_artifacts, patch.object(
+                self.database,
+                "_save_program",
+            ) as save_program:
+                best = await controller.run_evolution(
+                    start_iteration=1, max_iterations=1, target_score=None
+                )
+
+            add.assert_called_once()
+            store_artifacts.assert_not_called()
+            save_program.assert_not_called()
+            self.assertEqual(best.id, "seed")
+
+        asyncio.run(run_test())
+
+
+class TestControllerWorkerPoolWiring(unittest.TestCase):
+    def test_reps_worker_pool_receives_config_random_seed(self):
+        config = Config()
+        config.random_seed = 123
+        config.reps.enabled = True
+        config.llm.models = [LLMModelConfig(name="local-model", provider="local")]
+        config.llm.evaluator_models = list(config.llm.models)
+        config.reps.workers.types = [
+            WorkerConfig(name="exploit", impl="single_call", role="exploiter"),
+        ]
+        database = ProgramDatabase(config.database)
+
+        with patch("reps.worker_pool.WorkerPool") as worker_pool_cls:
+            ProcessParallelController(config, __file__, database)
+
+        worker_pool_cls.assert_called_once()
+        self.assertEqual(worker_pool_cls.call_args.kwargs["random_seed"], 123)
 
 
 if __name__ == "__main__":
