@@ -30,7 +30,11 @@ jobs:
         run: uv pip install --system -e ".[dev]"
 
       - name: Run pytest
-        run: uv run python -m pytest tests/ -v
+        # The previous step installs reps + [dev] into the system Python via
+        # `uv pip install --system`. `uv run python -m pytest` would silently
+        # create a fresh project venv without dev extras and fail with
+        # "No module named pytest" — so invoke the system Python directly.
+        run: python -m pytest tests/ -v
         env:
           # The previous 2 env-key-requiring failures are eliminated
           # by the test_skip spec's lazy summarizer construction in
