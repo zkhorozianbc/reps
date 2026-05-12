@@ -431,7 +431,7 @@ mypy probe.py
 
 ```bash
 cd /home/user/reps && uv run python -m pytest tests/
-# Expect: 111 tests pass (no regressions from the dependency trim or import-pattern changes).
+# Expect: the full test suite passes (no regressions from the dependency trim or import-pattern changes).
 ```
 
 If any test that asserts on `dspy_react` registration fails, the executor needs to either (a) install the `dspy` extra in the test environment, or (b) mark the test as requiring the extra (`@pytest.mark.skipif(...)`).

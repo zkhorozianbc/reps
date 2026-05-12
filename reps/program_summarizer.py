@@ -28,6 +28,73 @@ logger = logging.getLogger(__name__)
 _MAX_REASONING_CHARS = 12000  # truncate very long traces before sending
 
 
+def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
+    """Best-effort JSON object extractor.
+
+    Tries, in order:
+      1. Parse the raw text.
+      2. Strip a leading/trailing ```json … ``` fence.
+      3. Find the first balanced {…} block and parse that.
+
+    Returns the parsed dict, or None if nothing recognizable was found.
+    Production-grade summarizer parsing: models occasionally prepend
+    chatter ("Here's the JSON: …") or wrap output in fences even when
+    told not to. Don't let that cost an iteration's annotation.
+    """
+    if not text:
+        return None
+    s = text.strip()
+
+    try:
+        obj = json.loads(s)
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        pass
+
+    if s.startswith("```"):
+        s2 = s.strip("`")
+        if s2.lower().startswith("json"):
+            s2 = s2[4:].lstrip()
+        if s2.endswith("```"):
+            s2 = s2[:-3]
+        s2 = s2.strip()
+        try:
+            obj = json.loads(s2)
+            return obj if isinstance(obj, dict) else None
+        except Exception:
+            pass
+
+    start = s.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_str = False
+    escape = False
+    for i in range(start, len(s)):
+        c = s[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif c == "\\":
+                escape = True
+            elif c == '"':
+                in_str = False
+        else:
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        obj = json.loads(s[start : i + 1])
+                        return obj if isinstance(obj, dict) else None
+                    except Exception:
+                        return None
+    return None
+
+
 def build_summarizer_llm(cfg) -> "SummarizerLLM":
     """Build a dedicated LLM client for the per-program summarizer.
 
@@ -46,14 +113,14 @@ def build_summarizer_llm(cfg) -> "SummarizerLLM":
     provider = cfg.provider or provider_of_model(model_id)
 
     # Resolve api_key with a provider-appropriate env-var default.
-    api_key = cfg.api_key
+    _PROVIDER_ENV = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+    }
+    env_var = _PROVIDER_ENV.get(provider, "ANTHROPIC_API_KEY")
+    api_key = cfg.api_key or os.environ.get(env_var)
     if not api_key:
-        if provider == "anthropic":
-            api_key = os.environ.get("ANTHROPIC_API_KEY")
-        elif provider == "openai":
-            api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        env_var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
         raise ValueError(
             f"summarizer: provider={provider!r} but no api_key set "
             f"(neither reps.summarizer.api_key nor {env_var} in env)"
@@ -135,11 +202,27 @@ class SummarizerLLM:
             # needed; `_openai_responses_call` constructs AsyncOpenAI per
             # call. We still validate the key is present here.
             return None
+        if self.provider == "openrouter":
+            from reps.config import LLMModelConfig
+            from reps.llm.openai_compatible import OpenAICompatibleLLM
+
+            cfg = LLMModelConfig(
+                name=self.model_id,
+                api_key=self.api_key,
+                api_base=self.api_base or "https://openrouter.ai/api/v1",
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                timeout=self.timeout,
+                retries=self.retries,
+                retry_delay=self.retry_delay,
+                provider="openrouter",
+            )
+            return OpenAICompatibleLLM(cfg)
         raise ValueError(f"summarizer: unknown provider {self.provider!r}")
 
     async def call(self, *, system_prompt: str, user_text: str) -> str:
         """Invoke the summarizer. Returns the raw response text."""
-        if self.provider == "anthropic":
+        if self.provider in ("anthropic", "openrouter"):
             return await self._client.generate_with_context(
                 system_message=system_prompt,
                 messages=[{"role": "user", "content": user_text}],
@@ -202,10 +285,15 @@ def _build_user_message(
     code: str,
     reasoning: str,
 ) -> str:
+    # The user message ends with an explicit final directive ("output the JSON
+    # now") so the model has a clean instruction-shaped boundary to respond
+    # to — not the trailing line of a code block, which some chat-tuned models
+    # (especially Sonnet routed via OpenRouter) will happily continue instead
+    # of summarizing. The trace and code are wrapped in <child_code> and
+    # <trace> sentinels so the model can't confuse them with their own
+    # response surface.
     parts: list[str] = []
     if task_instructions:
-        # Task-specific guardrails appear BEFORE the data so the model reads
-        # them first when constructing its summary.
         parts.append("## Benchmark-specific guidance")
         parts.append(task_instructions.strip())
         parts.append("")
@@ -214,13 +302,19 @@ def _build_user_message(
     parts.append(f"Child score (combined_score): {child_score:.6f}")
     parts.append(f"Improved: {improved}")
     parts.append("")
-    parts.append("Child code (first 3000 chars):")
-    parts.append("```python")
+    parts.append("<child_code>")
     parts.append(code[:3000])
-    parts.append("```")
+    parts.append("</child_code>")
     parts.append("")
-    parts.append("Agent's reasoning + tool trace:")
+    parts.append("<trace>")
     parts.append(reasoning)
+    parts.append("</trace>")
+    parts.append("")
+    parts.append(
+        "Now output the JSON summary described in the system prompt — "
+        "a single JSON object with keys `approach`, `pitfalls`, "
+        "`key_insight`. No prose before or after the JSON. No markdown."
+    )
     return "\n".join(parts)
 
 
@@ -282,19 +376,16 @@ async def summarize_program(
         logger.warning(f"program summarizer call failed for {program_id[:8]}: {e}")
         return None
 
-    # Strip common wrapper patterns (```json ... ```)
-    s = (resp_text or "").strip()
-    if s.startswith("```"):
-        s = s.strip("`")
-        if s.lower().startswith("json"):
-            s = s[4:].lstrip()
-        if s.endswith("```"):
-            s = s[:-3]
-        s = s.strip()
-    try:
-        data = json.loads(s)
-    except Exception as e:
-        logger.warning(f"program summarizer JSON parse failed for {program_id[:8]}: {e}")
+    data = _extract_json_object(resp_text or "")
+    if data is None:
+        # Log the first ~200 chars of what we got so failures are diagnosable
+        # without re-running. INFO, not WARNING: this is a recoverable
+        # best-effort annotation that the run continues without.
+        preview = (resp_text or "")[:200].replace("\n", " ")
+        logger.info(
+            f"program summarizer produced no parseable JSON for "
+            f"{program_id[:8]}; first 200 chars: {preview!r}"
+        )
         return None
 
     out = {

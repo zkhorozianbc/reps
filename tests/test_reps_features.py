@@ -194,6 +194,56 @@ class TestClassifyEdit:
         assert result.startswith("large_")
 
 
+class _FakeDatabase:
+    """Minimal database stand-in for ConvergenceMonitor tests.
+
+    Exposes the surface the monitor reads: `island_feature_maps` (list of
+    dicts) plus a `config.feature_dimensions` / `feature_bins` so capacity
+    can be computed.
+    """
+
+    class _Cfg:
+        def __init__(self, dims, bins):
+            self.feature_dimensions = dims
+            self.feature_bins = bins
+
+    class _Program:
+        def __init__(self, score):
+            self.metrics = {"combined_score": score} if score is not None else {}
+
+    def __init__(
+        self,
+        *,
+        niche_sequence,
+        score_sequence=None,
+        num_islands=1,
+        dims=("a", "b"),
+        bins=10,
+    ):
+        self._niche_seq = list(niche_sequence)
+        self._score_seq = list(score_sequence) if score_sequence is not None else None
+        self._step = 0
+        self._num_islands = num_islands
+        self.config = self._Cfg(list(dims), bins)
+        self.feature_bins = bins
+        self.island_feature_maps = [{} for _ in range(num_islands)]
+        self._best_program = None
+
+    def advance(self):
+        total = self._niche_seq[min(self._step, len(self._niche_seq) - 1)]
+        self.island_feature_maps = [{} for _ in range(self._num_islands)]
+        for i in range(total):
+            self.island_feature_maps[i % self._num_islands][f"k{i}"] = f"p{i}"
+
+        if self._score_seq is not None:
+            idx = min(self._step, len(self._score_seq) - 1)
+            self._best_program = self._Program(self._score_seq[idx])
+        self._step += 1
+
+    def get_best_program(self):
+        return self._best_program
+
+
 class TestConvergenceMonitor:
     """Tests for the ConvergenceMonitor (F4)."""
 
@@ -205,65 +255,162 @@ class TestConvergenceMonitor:
             error=None,
         )
 
+    def _drive(self, monitor, db, results_per_batch, n_batches):
+        """Run n batches, returning the action from the final one."""
+        last = ConvergenceAction.NONE
+        for _ in range(n_batches):
+            db.advance()
+            last = monitor.update(results_per_batch, database=db)
+        return last
+
     def test_returns_none_when_insufficient_data(self):
-        monitor = ConvergenceMonitor({"enabled": True})
-        # Fewer than 10 results
+        monitor = ConvergenceMonitor({"enabled": True, "window_size": 8})
+        db = _FakeDatabase(niche_sequence=[1, 2, 3])
         results = [self._make_result(diff=f"x = {i}") for i in range(3)]
-        action = monitor.update(results)
+        # Need window_size+1 batches before any action fires.
+        action = self._drive(monitor, db, results, n_batches=3)
         assert action == ConvergenceAction.NONE
 
     def test_returns_none_when_disabled(self):
         monitor = ConvergenceMonitor({"enabled": False})
+        db = _FakeDatabase(niche_sequence=[1] * 20)
         results = [self._make_result(diff=f"x = {i}") for i in range(20)]
-        action = monitor.update(results)
+        action = self._drive(monitor, db, results, n_batches=20)
         assert action == ConvergenceAction.NONE
 
-    def test_high_entropy_returns_none(self):
-        """Diverse edits should produce high entropy and NONE action."""
+    def test_returns_none_without_database(self):
+        """Without a database the action driver has no signal to read."""
+        monitor = ConvergenceMonitor({"enabled": True, "window_size": 4})
+        results = [self._make_result(diff="x = 1") for _ in range(3)]
+        for _ in range(10):
+            assert monitor.update(results) == ConvergenceAction.NONE
+
+    def test_healthy_growth_returns_none(self):
+        """Niche map filling steadily means search is exploring; no action."""
         monitor = ConvergenceMonitor({
-            "enabled": True,
-            "entropy_threshold_mild": 0.5,
+            "enabled": True, "window_size": 4,
+            "niche_growth_threshold_mild": 0.2,
         })
-        # Feed diverse edits across multiple types
-        diverse_diffs = [
-            "def foo(): pass",          # function
-            "class Bar: pass",          # class
-            "import os",                # import
-            "for i in range(10): pass", # loop
-            "if x > 0: y = 1",         # conditional
-            "return x + y",            # return
-            "x += 1",                  # arithmetic
-            "def baz(): return 0",     # function
-            "class Qux: pass",         # class
-            "while True: break",       # loop
-            "from sys import exit",    # import
-            "x = y + z * 2",          # arithmetic
-        ]
-        results = [
-            self._make_result(diff=d, worker_type=wt)
-            for d, wt in zip(diverse_diffs, ["exploiter", "explorer"] * 6)
-        ]
-        action = monitor.update(results)
+        # 3 children per batch, 3 new niches per batch -> normalized growth 1.0
+        db = _FakeDatabase(niche_sequence=[3, 6, 9, 12, 15, 18])
+        results = [self._make_result(diff=f"x = {i}") for i in range(3)]
+        action = self._drive(monitor, db, results, n_batches=6)
         assert action == ConvergenceAction.NONE
 
-    def test_low_entropy_triggers_escalation(self):
-        """Identical edits should produce low entropy and trigger escalation."""
+    def test_stalled_growth_triggers_severe(self):
+        """Niche map stops growing -> normalized growth 0 -> severe action."""
         monitor = ConvergenceMonitor({
-            "enabled": True,
-            "entropy_threshold_mild": 0.999,  # Very high threshold to guarantee trigger
-            "entropy_threshold_moderate": 0.998,
-            "entropy_threshold_severe": 0.997,
+            "enabled": True, "window_size": 4,
+            "niche_growth_threshold_mild": 0.5,
+            "niche_growth_threshold_moderate": 0.3,
+            "niche_growth_threshold_severe": 0.15,
         })
-        # All identical edits => minimal entropy
-        results = [self._make_result(diff="x = 1", worker_type="exploiter") for _ in range(15)]
-        action = monitor.update(results)
-        # With all identical edits, entropy should be 0 (one category => normalized to 0)
-        # which is below severe threshold
-        assert action in (
-            ConvergenceAction.MILD_BOOST,
-            ConvergenceAction.MODERATE_DIVERSIFY,
-            ConvergenceAction.SEVERE_RESTART,
+        # Niche map sits at 20 for the whole window -> growth = 0
+        db = _FakeDatabase(niche_sequence=[20] * 8)
+        results = [self._make_result(diff="x = 1") for _ in range(3)]
+        action = self._drive(monitor, db, results, n_batches=6)
+        assert action == ConvergenceAction.SEVERE_RESTART
+
+    def test_partial_growth_triggers_mild(self):
+        """Growth above severe but below mild -> mild action."""
+        monitor = ConvergenceMonitor({
+            "enabled": True, "window_size": 4,
+            "niche_growth_threshold_mild": 0.5,
+            "niche_growth_threshold_moderate": 0.3,
+            "niche_growth_threshold_severe": 0.15,
+        })
+        # 3 children/batch, gain 1 niche/batch -> normalized 0.33
+        # That lands in [moderate=0.3, mild=0.5) -> MILD_BOOST
+        db = _FakeDatabase(niche_sequence=[10, 11, 12, 13, 14, 15])
+        results = [self._make_result(diff=f"x = {i}") for i in range(3)]
+        action = self._drive(monitor, db, results, n_batches=6)
+        assert action == ConvergenceAction.MILD_BOOST
+
+    def test_saturated_map_returns_none(self):
+        """A nearly-full map is success, not collapse; skip escalation."""
+        monitor = ConvergenceMonitor({
+            "enabled": True, "window_size": 4,
+            "niche_growth_threshold_severe": 0.99,  # would otherwise always fire
+            "saturation_threshold": 0.5,
+        })
+        # 1 island * 10**2 bins = 100-cell capacity. Hold at 80 (saturation
+        # 0.80 >= threshold 0.5) -> no escalation despite zero growth.
+        db = _FakeDatabase(niche_sequence=[80] * 8, num_islands=1, dims=("a", "b"), bins=10)
+        results = [self._make_result(diff="x = 1") for _ in range(3)]
+        action = self._drive(monitor, db, results, n_batches=6)
+        assert action == ConvergenceAction.NONE
+
+    def test_legacy_entropy_threshold_keys_still_accepted(self):
+        """Existing YAMLs use `entropy_threshold_*` — keep them working."""
+        monitor = ConvergenceMonitor({
+            "enabled": True, "window_size": 4,
+            "entropy_threshold_severe": 0.5,
+            "entropy_threshold_moderate": 0.4,
+            "entropy_threshold_mild": 0.3,
+        })
+        assert monitor.thresholds == {"mild": 0.3, "moderate": 0.4, "severe": 0.5}
+
+    def test_score_plateau_triggers_action(self):
+        """Niches growing healthily but best-score flat -> escalate on plateau.
+
+        Replicates the Sonnet/circle_packing failure mode: search keeps
+        filling new MAP-Elites cells, but with same-fitness programs, so
+        niche-growth says "healthy" while score is stuck.
+        """
+        monitor = ConvergenceMonitor({
+            "enabled": True, "window_size": 4,
+            "niche_growth_threshold_severe": 0.0,  # don't fire on niche
+            "niche_growth_threshold_moderate": 0.0,
+            "niche_growth_threshold_mild": 0.0,
+            "score_plateau_threshold_severe": 0.0,
+            "score_plateau_threshold_moderate": 0.001,
+            "score_plateau_threshold_mild": 0.01,
+        })
+        # Niches grow steadily (1/batch * 3 children = 1.0 normalized) but
+        # best_score sits at 0.93 the whole window.
+        db = _FakeDatabase(
+            niche_sequence=[3, 6, 9, 12, 15, 18],
+            score_sequence=[0.93, 0.93, 0.93, 0.93, 0.93, 0.93],
         )
+        results = [self._make_result(diff=f"x = {i}") for i in range(3)]
+        action = self._drive(monitor, db, results, n_batches=6)
+        assert action == ConvergenceAction.SEVERE_RESTART
+
+    def test_score_improving_returns_none(self):
+        """Score climbing across the window -> no plateau action."""
+        monitor = ConvergenceMonitor({
+            "enabled": True, "window_size": 4,
+            "niche_growth_threshold_mild": 0.0,  # never fires
+            "score_plateau_threshold_mild": 0.01,
+        })
+        db = _FakeDatabase(
+            niche_sequence=[3, 6, 9, 12, 15, 18],
+            score_sequence=[0.5, 0.6, 0.7, 0.8, 0.9, 0.95],
+        )
+        results = [self._make_result(diff=f"x = {i}") for i in range(3)]
+        action = self._drive(monitor, db, results, n_batches=6)
+        assert action == ConvergenceAction.NONE
+
+    def test_most_severe_action_wins(self):
+        """When both signals fire, the higher-severity action is returned."""
+        monitor = ConvergenceMonitor({
+            "enabled": True, "window_size": 4,
+            # Niche fires MILD (low growth)
+            "niche_growth_threshold_mild": 0.5,
+            "niche_growth_threshold_moderate": 0.3,
+            "niche_growth_threshold_severe": 0.15,
+            # Score fires SEVERE (zero improvement)
+            "score_plateau_threshold_severe": 0.0,
+            "score_plateau_threshold_moderate": 0.001,
+            "score_plateau_threshold_mild": 0.01,
+        })
+        db = _FakeDatabase(
+            niche_sequence=[10, 11, 12, 13, 14, 15],  # mild growth
+            score_sequence=[0.5] * 6,                  # severe plateau
+        )
+        results = [self._make_result(diff=f"x = {i}") for i in range(3)]
+        action = self._drive(monitor, db, results, n_batches=6)
+        assert action == ConvergenceAction.SEVERE_RESTART
 
 
 # ---------------------------------------------------------------------------
@@ -632,3 +779,137 @@ class TestMetricsLogger:
                 entry = json.loads(f.readline())
             assert entry["batch"] == 1
             assert entry["reflection"]["working_patterns"] == ["test pattern"]
+
+
+# ---------------------------------------------------------------------------
+# Run-health tracker (annotation success + convergence-action recovery)
+# ---------------------------------------------------------------------------
+
+
+class TestRunHealthTracking:
+    """Tests for MetricsLogger.write_health + per-run health counters.
+
+    Covers Gap 1 (annotation success rate) and Gap 2 (action recovery)
+    described in the task. Counters are exercised directly the same way the
+    controller would call them; we don't spin up the full controller.
+    """
+
+    def test_annotation_counters_persisted_to_health_json(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            ml.record_annotation_attempt(success=True)
+            ml.record_annotation_attempt(success=True)
+            ml.record_annotation_attempt(success=False)
+            health = ml.write_health()
+            assert health["annotations"]["attempts"] == 3
+            assert health["annotations"]["successes"] == 2
+            assert abs(health["annotations"]["success_rate"] - 2 / 3) < 1e-9
+            health_path = os.path.join(tmpdir, "metrics", "health.json")
+            assert os.path.exists(health_path)
+            with open(health_path) as f:
+                on_disk = json.load(f)
+            assert on_disk["annotations"]["attempts"] == 3
+
+    def test_low_annotation_rate_emits_warning(self, caplog):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            for _ in range(10):
+                ml.record_annotation_attempt(success=False)
+            ml.record_annotation_attempt(success=True)
+            with caplog.at_level("WARNING", logger="reps.metrics_logger"):
+                ml.write_health()
+            assert any(
+                "summarizer success rate" in r.message and r.levelname == "WARNING"
+                for r in caplog.records
+            ), caplog.text
+
+    def test_healthy_annotation_rate_does_not_warn(self, caplog):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            for _ in range(10):
+                ml.record_annotation_attempt(success=True)
+            with caplog.at_level("WARNING", logger="reps.metrics_logger"):
+                ml.write_health()
+            assert not any(
+                "summarizer success rate" in r.message for r in caplog.records
+            )
+
+    def test_action_recovery_via_score_improvement(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            # Fire SEVERE_RESTART at batch 5 with best=0.5, niche=10
+            ml.record_action_fired("SEVERE_RESTART", 5, best_score=0.5, niche_occupancy=10)
+            # Next batch: best score climbed → recovered.
+            ml.observe_post_action(6, best_score=0.6, niche_occupancy=10)
+            health = ml.write_health()
+            assert health["convergence_actions"]["fired_per_level"] == {"SEVERE_RESTART": 1}
+            assert health["convergence_actions"]["recovered_per_level"] == {"SEVERE_RESTART": 1}
+            assert health["convergence_actions"]["recovery_rate"] == 1.0
+
+    def test_action_recovery_via_niche_growth(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            ml.record_action_fired("MILD_BOOST", 5, best_score=0.5, niche_occupancy=10)
+            # Score flat, niche jumps from 10 -> 13 (30% growth, > 20% threshold).
+            ml.observe_post_action(6, best_score=0.5, niche_occupancy=13)
+            health = ml.write_health()
+            assert health["convergence_actions"]["recovered_per_level"] == {"MILD_BOOST": 1}
+
+    def test_action_no_recovery_after_lookahead(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            ml.record_action_fired("SEVERE_RESTART", 5, best_score=0.5, niche_occupancy=10)
+            # Two flat batches → exceeds lookahead, never recovers.
+            ml.observe_post_action(6, best_score=0.5, niche_occupancy=10)
+            ml.observe_post_action(7, best_score=0.5, niche_occupancy=10)
+            health = ml.write_health()
+            assert health["convergence_actions"]["recovered_per_level"] == {}
+            assert health["convergence_actions"]["recovery_rate"] == 0.0
+
+    def test_repeated_unrecovered_actions_emit_warning(self, caplog):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            # Fire 3 actions, none recover (flat score + flat niches).
+            for batch in range(1, 4):
+                ml.record_action_fired(
+                    "SEVERE_RESTART", batch, best_score=0.5, niche_occupancy=10,
+                )
+                ml.observe_post_action(batch + 1, best_score=0.5, niche_occupancy=10)
+                ml.observe_post_action(batch + 2, best_score=0.5, niche_occupancy=10)
+            with caplog.at_level("WARNING", logger="reps.metrics_logger"):
+                ml.write_health()
+            assert any(
+                "adaptive escalation appears ineffective" in r.message
+                and r.levelname == "WARNING"
+                for r in caplog.records
+            ), caplog.text
+
+    def test_healthy_actions_do_not_warn(self, caplog):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            # Fire 3 actions, all recover via score improvement.
+            for batch in range(1, 4):
+                ml.record_action_fired(
+                    "MILD_BOOST", batch, best_score=0.5 + batch * 0.01, niche_occupancy=10,
+                )
+                ml.observe_post_action(batch + 1, best_score=0.5 + batch * 0.01 + 0.05, niche_occupancy=10)
+            with caplog.at_level("WARNING", logger="reps.metrics_logger"):
+                ml.write_health()
+            assert not any(
+                "adaptive escalation appears ineffective" in r.message
+                for r in caplog.records
+            )
+
+    def test_no_warnings_on_quiet_run(self, caplog):
+        """Empty run (no annotations attempted, no actions fired) — silent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ml = MetricsLogger(tmpdir)
+            with caplog.at_level("WARNING", logger="reps.metrics_logger"):
+                health = ml.write_health()
+            assert health["annotations"]["success_rate"] is None
+            assert health["convergence_actions"]["recovery_rate"] is None
+            assert not any(
+                "summarizer success rate" in r.message
+                or "adaptive escalation" in r.message
+                for r in caplog.records
+            )

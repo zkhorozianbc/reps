@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from reps.config import Config
 from reps.database import Program, ProgramDatabase
-from reps.utils import safe_numeric_average
+from reps.utils import is_failed_evaluation_metrics, safe_numeric_average
 
 if TYPE_CHECKING:
     from reps.iteration_config import IterationConfig
@@ -688,6 +688,7 @@ class ProcessParallelController:
                 )
                 summarizer_llm = None
             if summarizer_llm is not None:
+                summary = None
                 try:
                     from reps.program_summarizer import summarize_program
 
@@ -714,6 +715,10 @@ class ProcessParallelController:
                         final_child_id[:8],
                         e,
                     )
+                # Health tracking — record attempt + whether we got a usable
+                # summary (None counts as failure, same as an exception).
+                if self._reps_metrics is not None:
+                    self._reps_metrics.record_annotation_attempt(success=bool(summary))
 
         child = Program(
             id=final_child_id,
@@ -1184,6 +1189,8 @@ class ProcessParallelController:
                         )
                     elif result.child_program_dict:
                         child_program = Program(**result.child_program_dict)
+                        if result.reps_meta:
+                            child_program.metadata["reps_meta"] = result.reps_meta
 
                         self.database.add(
                             child_program,
@@ -1268,6 +1275,9 @@ class ProcessParallelController:
                                 child_program.metrics
                                 and "combined_score" not in child_program.metrics
                                 and not self._warned_about_combined_score
+                                and not is_failed_evaluation_metrics(
+                                    child_program.metrics
+                                )
                             ):
                                 avg_score = safe_numeric_average(
                                     child_program.metrics
@@ -1796,7 +1806,25 @@ class ProcessParallelController:
 
         # F4: Convergence Monitor
         from reps.convergence_monitor import ConvergenceAction
-        action = self._reps_convergence.update(reps_results)
+        action = self._reps_convergence.update(reps_results, database=self.database)
+
+        # Health tracking: record action fires + settle prior fires' recovery
+        # outcomes. Compute best/niche snapshots once and pass to both calls so
+        # the "fired" baseline matches the "observed" reading.
+        if self._reps_metrics is not None:
+            best_prog = self.database.get_best_program()
+            cur_best = (
+                best_prog.metrics.get("combined_score", safe_numeric_average(best_prog.metrics))
+                if best_prog and best_prog.metrics else None
+            )
+            cur_niche = self._reps_metrics._compute_niche_occupancy(self.database)
+            self._reps_metrics.observe_post_action(
+                self._reps_batch_count, cur_best, cur_niche,
+            )
+            if action != ConvergenceAction.NONE:
+                self._reps_metrics.record_action_fired(
+                    action.name, self._reps_batch_count, cur_best, cur_niche,
+                )
 
         if action == ConvergenceAction.MILD_BOOST:
             self._reps_worker_pool.boost_explorer(0.2)
@@ -1884,5 +1912,4 @@ class ProcessParallelController:
 
         # Per-program summaries moved to per-iteration path (see
         # _summarize_child_inline). Batch annotation only adds tags now.
-
 

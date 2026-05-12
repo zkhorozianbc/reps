@@ -662,7 +662,7 @@ same way against PyPI.
 
 Before merging `test.yml`, run it against an open PR to confirm:
 
-- pytest collects all 111 tests.
+- pytest collects and runs the full test suite.
 - The 2 env-key-requiring tests are skipped (cross-reference the
   test_skip spec). If they're not skipped, this PR blocks on that spec
   shipping first.

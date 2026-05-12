@@ -73,122 +73,159 @@ async def run_reps(config: Config, initial_program: str, evaluator: str, output_
     )
     root = logging.getLogger()
     root.addHandler(file_handler)
-    # Line-buffer so `tail -f` picks up output immediately.
-    file_handler.stream.reconfigure(line_buffering=True)
-
-    logger = logging.getLogger(__name__)
-    logger.info(f"Log file: {log_path}")
-
-    # Task-specific system prompt lives with the benchmark, not the config:
-    # auto-load <evaluator_dir>/system_prompt.md when the config hasn't set
-    # prompt.system_message to something custom. An explicit override in the
-    # config still wins.
-    task_prompt_path = Path(evaluator).parent / "system_prompt.md"
-    if (
-        config.prompt.system_message in ("system_message", None, "")
-        and task_prompt_path.exists()
-    ):
-        config.prompt.system_message = task_prompt_path.read_text()
-        logger.info(f"Loaded task system prompt from {task_prompt_path}")
-
-    if config.provider == "anthropic":
-        for model in (*config.llm.models, *config.llm.evaluator_models):
-            if getattr(model, "provider", None) is None:
-                model.provider = "anthropic"
-
-    # Top-level `reasoning:` propagates to every model unless that model
-    # explicitly set its own `reasoning_effort`. This lets configs say
-    # `reasoning: high` once instead of repeating the effort on each model.
-    # Accepted levels track Anthropic's effort scale (low|medium|high|xhigh|max).
-    # `xhigh` and `max` are Claude-Opus-4.7-only; other providers/models may
-    # reject them — the non-retryable classifier surfaces such 400s cleanly.
-    if config.reasoning:
-        effort = None if config.reasoning == "off" else config.reasoning
-        allowed = {None, "low", "medium", "high", "xhigh", "max"}
-        if effort not in allowed:
-            raise ValueError(
-                f"reasoning must be one of: low, medium, high, xhigh, max, off — got {config.reasoning!r}"
-            )
-        for model in (*config.llm.models, *config.llm.evaluator_models):
-            if model.reasoning_effort is None:
-                model.reasoning_effort = effort
-
-    # Initialize database
-    db = ProgramDatabase(config.database)
-
-    # Load, evaluate, and add initial program
-    initial_code = Path(initial_program).read_text()
-
-    # Evaluate the seed program so it enters the database with real metrics.
-    # Use evaluate_isolated so per_instance_scores and feedback (if the
-    # benchmark emits them) reach the seed Program, not just evolved children.
-    from reps.evaluator import Evaluator
-    seed_evaluator = Evaluator(config.evaluator, evaluator)
-    seed_outcome = await seed_evaluator.evaluate_isolated(initial_code, program_id="initial")
-    seed_metrics = seed_outcome.metrics
-    if seed_outcome.artifacts:
-        seed_evaluator._pending_artifacts.setdefault("initial", {}).update(seed_outcome.artifacts)
-    logger.info(f"Seed program metrics: {seed_metrics}")
-    if not seed_metrics or seed_metrics.get("combined_score", 0) == 0:
-        logger.warning("Seed program scored 0 — check that it runs correctly with the evaluator")
-
-    initial_prog = Program(
-        id="initial",
-        code=initial_code,
-        language=config.language or "python",
-        metrics=seed_metrics or {},
-        per_instance_scores=seed_outcome.per_instance_scores,
-        feedback=seed_outcome.feedback,
-        iteration_found=0,
-    )
-    db.add(initial_prog)
-
-    # Initialize controller
-    controller = ProcessParallelController(
-        config=config,
-        evaluation_file=evaluator,
-        database=db,
-        output_dir=output_dir,
-    )
-
-    # Initialize reflection engine with LLM ensemble
-    if config.reps.enabled:
-        llm_ensemble = LLMEnsemble(config.llm.models)
-        controller._reps_init_reflection_engine(llm_ensemble)
-
-    # Run evolution
-    controller.start()
     try:
-        best = await controller.run_evolution(
-            start_iteration=1,
-            max_iterations=config.max_iterations,
+        # Line-buffer so `tail -f` picks up output immediately.
+        file_handler.stream.reconfigure(line_buffering=True)
+
+        logger = logging.getLogger(__name__)
+        logger.info(f"Log file: {log_path}")
+
+        # Task-specific system prompt lives with the benchmark, not the config:
+        # auto-load <evaluator_dir>/system_prompt.md when the config hasn't set
+        # prompt.system_message to something custom. An explicit override in the
+        # config still wins.
+        task_prompt_path = Path(evaluator).parent / "system_prompt.md"
+        if (
+            config.prompt.system_message in ("system_message", None, "")
+            and task_prompt_path.exists()
+        ):
+            config.prompt.system_message = task_prompt_path.read_text()
+            logger.info(f"Loaded task system prompt from {task_prompt_path}")
+
+        if config.provider == "anthropic":
+            for model in (*config.llm.models, *config.llm.evaluator_models):
+                if getattr(model, "provider", None) is None:
+                    model.provider = "anthropic"
+
+        # The per-iteration summarizer has its own dedicated client
+        # (independent of the worker ensemble), so inherit unset provider
+        # fields from the run config.
+        summarizer_cfg = getattr(config.reps, "summarizer", None)
+        if summarizer_cfg is not None and config.provider:
+            if summarizer_cfg.provider is None:
+                summarizer_cfg.provider = config.provider
+            if summarizer_cfg.api_base is None:
+                summarizer_cfg.api_base = config.llm.api_base
+            if summarizer_cfg.api_key is None:
+                summarizer_cfg.api_key = config.llm.api_key
+            if (
+                config.provider == "openrouter"
+                and summarizer_cfg.model_id == "claude-opus-4-7"
+                and config.llm.primary_model
+            ):
+                summarizer_cfg.model_id = config.llm.primary_model
+
+        # Top-level `reasoning:` propagates to every model unless that model
+        # explicitly set its own `reasoning_effort`. This lets configs say
+        # `reasoning: high` once instead of repeating the effort on each model.
+        # Accepted levels track Anthropic's effort scale (low|medium|high|xhigh|max).
+        # `xhigh` and `max` are Claude-Opus-4.7-only; other providers/models may
+        # reject them — the non-retryable classifier surfaces such 400s cleanly.
+        if config.reasoning:
+            effort = None if config.reasoning == "off" else config.reasoning
+            allowed = {None, "low", "medium", "high", "xhigh", "max"}
+            if effort not in allowed:
+                raise ValueError(
+                    f"reasoning must be one of: low, medium, high, xhigh, max, off — got {config.reasoning!r}"
+                )
+            for model in (*config.llm.models, *config.llm.evaluator_models):
+                if model.reasoning_effort is None:
+                    model.reasoning_effort = effort
+
+        # Initialize database
+        db = ProgramDatabase(config.database)
+
+        # Load, evaluate, and add initial program
+        initial_code = Path(initial_program).read_text()
+
+        # Evaluate the seed program so it enters the database with real metrics.
+        # Use evaluate_isolated so per_instance_scores and feedback (if the
+        # benchmark emits them) reach the seed Program, not just evolved children.
+        from reps.evaluator import Evaluator
+        seed_evaluator = Evaluator(config.evaluator, evaluator)
+        seed_outcome = await seed_evaluator.evaluate_isolated(initial_code, program_id="initial")
+        seed_metrics = seed_outcome.metrics
+        if seed_outcome.artifacts:
+            seed_evaluator._pending_artifacts.setdefault("initial", {}).update(seed_outcome.artifacts)
+        logger.info(f"Seed program metrics: {seed_metrics}")
+        if not seed_metrics or seed_metrics.get("combined_score", 0) == 0:
+            logger.warning("Seed program scored 0 — check that it runs correctly with the evaluator")
+
+        initial_prog = Program(
+            id="initial",
+            code=initial_code,
+            language=config.language or "python",
+            metrics=seed_metrics or {},
+            per_instance_scores=seed_outcome.per_instance_scores,
+            feedback=seed_outcome.feedback,
+            iteration_found=0,
         )
-        if best:
-            logger.info(f"Best program: {best.id}, metrics: {best.metrics}")
+        db.add(initial_prog)
+
+        # Initialize controller
+        controller = ProcessParallelController(
+            config=config,
+            evaluation_file=evaluator,
+            database=db,
+            output_dir=output_dir,
+        )
+
+        # Initialize reflection engine with LLM ensemble
+        if config.reps.enabled:
+            llm_ensemble = LLMEnsemble(config.llm.models)
+            controller._reps_init_reflection_engine(llm_ensemble)
+
+        # Run evolution
+        best = None
+        controller.start()
+        try:
+            best = await controller.run_evolution(
+                start_iteration=1,
+                max_iterations=config.max_iterations,
+            )
+            if best:
+                logger.info(f"Best program: {best.id}, metrics: {best.metrics}")
+        finally:
+            controller.stop()
+            # Save all programs, prompts, and responses to disk
+            db.save(output_dir)
+            logger.info(f"Database saved to {output_dir}")
+
+            # Write per-run health snapshot (annotation success rate +
+            # convergence-action recovery). Emits WARNINGs at run end if either
+            # signal is degraded — see MetricsLogger thresholds.
+            if getattr(controller, "_reps_metrics", None) is not None:
+                try:
+                    controller._reps_metrics.write_health()
+                except Exception as e:
+                    logger.warning(f"Failed to write health.json: {e}")
+
+            # Save best program code and visualization
+            if best and best.code:
+                best_code_path = Path(output_dir) / "best_program.py"
+                best_code_path.write_text(best.code)
+                logger.info(f"Best program saved to {best_code_path}")
+
+                # Try to visualize via the benchmark's optional visualize.py
+                try:
+                    import importlib.util
+                    viz_module_path = Path(evaluator).parent / "visualize.py"
+                    if viz_module_path.exists():
+                        spec = importlib.util.spec_from_file_location("viz", str(viz_module_path))
+                        viz = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(viz)
+                        viz.visualize_from_program(str(best_code_path),
+                                                   save_path=str(Path(output_dir) / "packing.png"))
+                except ImportError as e:
+                    logger.info(
+                        f"Skipping visualization ({e.name} not installed; "
+                        f"`uv pip install matplotlib` to enable)."
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not generate visualization: {e}")
     finally:
-        controller.stop()
-        # Save all programs, prompts, and responses to disk
-        db.save(output_dir)
-        logger.info(f"Database saved to {output_dir}")
-
-        # Save best program code and visualization
-        if best and best.code:
-            best_code_path = Path(output_dir) / "best_program.py"
-            best_code_path.write_text(best.code)
-            logger.info(f"Best program saved to {best_code_path}")
-
-            # Try to visualize via the benchmark's optional visualize.py
-            try:
-                import importlib.util
-                viz_module_path = Path(evaluator).parent / "visualize.py"
-                if viz_module_path.exists():
-                    spec = importlib.util.spec_from_file_location("viz", str(viz_module_path))
-                    viz = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(viz)
-                    viz.visualize_from_program(str(best_code_path),
-                                               save_path=str(Path(output_dir) / "packing.png"))
-            except Exception as e:
-                logger.warning(f"Could not generate visualization: {e}")
+        root.removeHandler(file_handler)
+        file_handler.close()
 
 
 def run_openevolve(config_path: str, initial_program: str, evaluator: str, output_dir: str, iterations: int):

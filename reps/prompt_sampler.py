@@ -730,9 +730,20 @@ class PromptSampler:
         for metric_name, value in metrics.items():
             if isinstance(value, (int, float)):
                 if value >= 0.9:
-                    features.append(f"{self.template_manager.get_fragment('inspiration_metrics_excellent').format(metric_name=metric_name, value=value)}")
+                    features.append(
+                        self.template_manager.get_fragment(
+                            "inspiration_metrics_excellent",
+                            metric_name=metric_name,
+                            value=value,
+                        )
+                    )
                 elif value <= 0.3:
-                    features.append(f"{self.template_manager.get_fragment('inspiration_metrics_alternative').format(metric_name=metric_name)}")
+                    features.append(
+                        self.template_manager.get_fragment(
+                            "inspiration_metrics_alternative",
+                            metric_name=metric_name,
+                        )
+                    )
 
         # Code-based features (simple heuristics)
         code = program.get("code", "")

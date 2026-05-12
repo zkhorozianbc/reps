@@ -40,4 +40,4 @@ Before launching an experiment run:
 - `reps/` — self-contained harness (config, controller, LLM providers, evaluator, database, REPS features)
 - `experiment/benchmarks/` — benchmark problems (evaluator.py + initial_program.py per benchmark)
 - `experiment/configs/` — YAML experiment configs
-- `tests/` — pytest suite (111 tests)
+- `tests/` — pytest suite
