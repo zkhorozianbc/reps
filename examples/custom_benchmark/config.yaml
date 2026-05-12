@@ -1,0 +1,84 @@
+harness: reps
+provider: anthropic
+task: .
+output: ../../runs/custom_benchmark_example
+
+max_iterations: 8
+checkpoint_interval: 4
+log_level: INFO
+random_seed: 42
+language: python
+file_suffix: .py
+
+llm:
+  api_key: "${ANTHROPIC_API_KEY}"
+  temperature: 0.7
+  max_tokens: 4096
+  timeout: 120
+  retries: 2
+  retry_delay: 5
+  models:
+    - name: claude-sonnet-4-6
+      provider: anthropic
+      weight: 1.0
+
+prompt:
+  num_top_programs: 2
+  num_diverse_programs: 1
+
+database:
+  population_size: 20
+  archive_size: 10
+  num_islands: 2
+  selection_strategy: mixed
+  pareto_fraction: 0.4
+
+evaluator:
+  timeout: 30
+  parallel_evaluations: 1
+  cascade_evaluation: false
+
+diff_based_evolution: false
+
+reps:
+  enabled: true
+  batch_size: 2
+  workers:
+    types:
+      - name: sc_exploiter
+        impl: single_call
+        role: exploiter
+        model_id: claude-sonnet-4-6
+        temperature: 0.3
+        generation_mode: full
+        weight: 0.7
+      - name: sc_explorer
+        impl: single_call
+        role: explorer
+        model_id: claude-sonnet-4-6
+        temperature: 1.0
+        generation_mode: full
+        weight: 0.3
+  reflection:
+    enabled: true
+    top_k: 2
+    bottom_k: 1
+  trace_reflection:
+    enabled: true
+    lineage_depth: 2
+  revisitation:
+    enabled: true
+    epsilon_start: 0.1
+    epsilon_end: 0.02
+  convergence:
+    enabled: true
+    window_size: 4
+  contracts:
+    enabled: false
+  sota:
+    enabled: true
+    target_score: 0.99
+    target_metric: combined_score
+  annotations:
+    enabled: true
+    dead_end_awareness: true
