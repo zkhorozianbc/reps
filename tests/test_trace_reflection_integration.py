@@ -138,6 +138,7 @@ class TestSingleCallWorkerPropagatesTraceDirective:
         assert '"trace_directive"' in src
 
     def test_trace_directive_in_dspy_react_keys(self):
+        pytest.importorskip("dspy")
         import inspect
         from reps.workers import dspy_react
         src = inspect.getsource(dspy_react._fmt_extras)
