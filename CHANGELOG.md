@@ -22,6 +22,36 @@ may include breaking changes; only patch bumps are safe to consume blindly.
 
 ### Security
 
+## [0.2.0] - 2026-05-12
+
+### Added
+- OpenRouter end-to-end compatibility across the harness, including a
+  Sonnet-over-OpenRouter smoke config and battletest results.
+- Per-run health tracking and structured observability warnings;
+  score-plateau convergence detector alongside niche-occupancy growth.
+- New tests: `test_database_persistence`, `test_tool_runners`,
+  `test_worker_pool`; broader coverage in controller/config/runner/API.
+- `db.metric_call_count` surfaced through `OptimizationResult`.
+- Default worker preset auto-applied when `reps.enabled=True` but no
+  workers are configured, so REPS knobs work without internal YAML.
+
+### Changed
+- Stricter config validation: providers, harnesses, worker impls/roles,
+  reasoning levels, and selection/diversity strategies are now enum-
+  checked with clearer error messages.
+- `Optimizer.optimize` writes the per-run dispatch shim with the
+  evaluator registry id baked in, removing the previous
+  `REPS_USER_EVALUATOR_ID` env-var hand-off.
+- Anthropic/OpenAI tool runners and ensemble LLM hardened against
+  partial provider responses.
+
+### Fixed
+- Suppress the misleading no-`combined_score` warning when evaluators
+  legitimately omit it.
+- Eliminate spurious warnings during normal runs (carried in from
+  `f934b2c`).
+- `dspy-react` test is skipped when `dspy` is not installed.
+
 ## [0.1.0] - 2026-05-05
 
 First public release. Ships the v1 Python API
