@@ -227,3 +227,98 @@ class Objective:
             aggregate_fn=agg,
             failure_score=failure_score,
         )
+
+    # --- evaluation ---------------------------------------------------------
+
+    def evaluate(self, code: str) -> EvaluationResult:
+        """Run candidate `code` against the train set; return an
+        `EvaluationResult` in higher-is-better `combined_score` space.
+
+        Note: `code` is exec'd in-process (same trust model as a hand-written
+        `evaluate=` callable). Sandbox untrusted candidates upstream.
+        """
+        entry = self._load_entrypoint(code)
+        if entry is None:
+            raw = [
+                (self._example_key(ex, i), self.failure_score)
+                for i, ex in enumerate(self.train_set)
+            ]
+            return self._build_result(
+                raw=raw,
+                failures=[
+                    f"entrypoint {self.entrypoint!r} could not be loaded from "
+                    f"the candidate program"
+                ],
+            )
+
+        raw: list[tuple[str, float]] = []
+        failures: list[str] = []
+        for i, ex in enumerate(self.train_set):
+            key = self._example_key(ex, i)
+            try:
+                prediction = as_prediction(entry(**ex.inputs().to_dict()))
+                value = float(self._per_example_fn(ex, prediction, None))
+            except Exception as exc:  # candidate code is untrusted
+                value = self.failure_score
+                failures.append(f"{key}: {type(exc).__name__}: {exc}")
+            raw.append((key, value))
+        return self._build_result(raw=raw, failures=failures)
+
+    def _load_entrypoint(self, code: str):
+        namespace: dict[str, Any] = {}
+        try:
+            exec(code, namespace)  # candidate code, same trust model as evaluate=
+        except Exception:
+            return None
+        entry = namespace.get(self.entrypoint)
+        return entry if callable(entry) else None
+
+    def _example_key(self, example: Example, index: int) -> str:
+        if "id" in example:
+            return str(example["id"])
+        return f"train/{index}"
+
+    def _build_result(
+        self,
+        *,
+        raw: list,
+        failures: list,
+        rationales: "list | None" = None,
+    ) -> EvaluationResult:
+        values = [v for _, v in raw]
+        total = len(values)
+        validity = (total - len(failures)) / total if total else 0.0
+        aggregate = self._aggregate_fn(values)
+
+        if self.direction == "maximize":
+            combined = aggregate
+            per_instance = {k: v for k, v in raw}
+        else:
+            combined = -aggregate
+            per_instance = {k: -v for k, v in raw}
+
+        metrics = {
+            "combined_score": combined,
+            self.metric_name: aggregate,
+            "validity": validity,
+        }
+        return EvaluationResult(
+            metrics=metrics,
+            per_instance_scores=per_instance,
+            feedback=self._build_feedback(raw, failures, rationales),
+        )
+
+    def _build_feedback(
+        self, raw: list, failures: list, rationales: "list | None" = None
+    ) -> "str | None":
+        parts: list[str] = []
+        if self.direction == "minimize":
+            parts.append(
+                f"raw {self.metric_name} per example: "
+                + ", ".join(f"{k}={v:g}" for k, v in raw)
+            )
+        if rationales:
+            parts.append("judge rationales:\n" + "\n".join(rationales))
+        if failures:
+            parts.append("failures: " + "; ".join(failures))
+        return "\n".join(parts) if parts else None

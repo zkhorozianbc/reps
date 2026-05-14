@@ -172,3 +172,131 @@ def test_objective_custom_metric_callable():
 def test_objective_direction_mismatch_raises_via_classmethod():
     with pytest.raises(ValueError, match="minimize metric"):
         Objective.maximize(entrypoint="predict", train_set=_train_set(), metric="mae")
+
+
+# --- Objective.evaluate -----------------------------------------------------
+
+_QUADRATIC = "def predict(x):\n    return x * x - 3 * x + 2\n"
+_IDENTITY = "def predict(x):\n    return x\n"
+
+
+def test_evaluate_minimize_perfect_program():
+    obj = Objective.minimize(
+        entrypoint="predict",
+        train_set=[
+            Example(x=-4, answer=30).with_inputs("x"),
+            Example(x=0, answer=2).with_inputs("x"),
+        ],
+        metric="mae",
+    )
+    result = obj.evaluate(_QUADRATIC)
+    assert isinstance(result, reps.EvaluationResult)
+    assert result.metrics["mae"] == 0.0
+    assert result.metrics["combined_score"] == 0.0
+    assert result.metrics["validity"] == 1.0
+    assert result.per_instance_scores == {"train/0": 0.0, "train/1": 0.0}
+
+
+def test_evaluate_minimize_imperfect_program_negates_loss():
+    obj = Objective.minimize(
+        entrypoint="predict",
+        train_set=[
+            Example(x=0, answer=2).with_inputs("x"),
+            Example(x=3, answer=2).with_inputs("x"),
+        ],
+        metric="mae",
+    )
+    # predict(x)=x -> errors |0-2|=2, |3-2|=1 -> mae=1.5
+    result = obj.evaluate(_IDENTITY)
+    assert result.metrics["mae"] == 1.5
+    assert result.metrics["combined_score"] == -1.5
+    # per-instance is higher-is-better: -raw error
+    assert result.per_instance_scores == {"train/0": -2.0, "train/1": -1.0}
+    assert "raw mae" in result.feedback
+
+
+def test_evaluate_maximize_accuracy():
+    obj = Objective.maximize(
+        entrypoint="classify",
+        train_set=[
+            Example(text="a", answer="pos").with_inputs("text"),
+            Example(text="b", answer="neg").with_inputs("text"),
+        ],
+        metric="accuracy",
+    )
+    code = "def classify(text):\n    return 'pos'\n"  # right on 1 of 2
+    result = obj.evaluate(code)
+    assert result.metrics["accuracy"] == 0.5
+    assert result.metrics["combined_score"] == 0.5
+    assert result.per_instance_scores == {"train/0": 1.0, "train/1": 0.0}
+
+
+def test_evaluate_uses_example_id_for_per_instance_keys():
+    obj = Objective.minimize(
+        entrypoint="predict",
+        train_set=[
+            Example(id="easy", x=0, answer=0).with_inputs("x"),
+            Example(id="hard", x=5, answer=0).with_inputs("x"),
+        ],
+        metric="mae",
+    )
+    result = obj.evaluate(_IDENTITY)
+    assert set(result.per_instance_scores) == {"easy", "hard"}
+
+
+def test_evaluate_program_fails_to_load():
+    obj = Objective.maximize(
+        entrypoint="predict",
+        train_set=[Example(x=1, answer=1).with_inputs("x")],
+        metric="accuracy",
+    )
+    result = obj.evaluate("this is not valid python !!!")
+    assert result.metrics["combined_score"] == 0.0  # failure_score
+    assert result.metrics["validity"] == 0.0
+    assert "could not be loaded" in result.feedback
+
+
+def test_evaluate_entrypoint_missing():
+    obj = Objective.maximize(
+        entrypoint="predict",
+        train_set=[Example(x=1, answer=1).with_inputs("x")],
+        metric="accuracy",
+    )
+    result = obj.evaluate("def something_else():\n    return 1\n")
+    assert result.metrics["validity"] == 0.0
+    assert "could not be loaded" in result.feedback
+
+
+def test_evaluate_per_example_failure_uses_failure_score():
+    obj = Objective.maximize(
+        entrypoint="predict",
+        train_set=[
+            Example(x=1, answer=1).with_inputs("x"),
+            Example(x=0, answer=1).with_inputs("x"),
+        ],
+        metric="accuracy",
+        failure_score=0.0,
+    )
+    # predict raises on x==0 (ZeroDivisionError); scores 1.0 on x==1.
+    code = "def predict(x):\n    return 1 // x\n"
+    result = obj.evaluate(code)
+    assert result.metrics["accuracy"] == 0.5  # (1.0 + 0.0) / 2
+    assert result.metrics["validity"] == 0.5  # 1 of 2 examples ran
+    assert "failures:" in result.feedback
+
+
+def test_evaluate_custom_metric_callable():
+    def close_enough(example, pred, trace=None):
+        return abs(float(pred.answer) - float(example.answer)) <= 0.5
+
+    obj = Objective.maximize(
+        entrypoint="predict",
+        train_set=[
+            Example(x=2, answer=2.0).with_inputs("x"),
+            Example(x=9, answer=2.0).with_inputs("x"),
+        ],
+        metric=close_enough,
+    )
+    result = obj.evaluate(_IDENTITY)  # predict(x)=x -> close on x=2, far on x=9
+    assert result.metrics["close_enough"] == 0.5
+    assert result.metrics["combined_score"] == 0.5
