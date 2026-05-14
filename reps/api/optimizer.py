@@ -19,12 +19,15 @@ import asyncio
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 try:
     from typing import Unpack  # Python 3.11+
 except ImportError:  # pragma: no cover - we require 3.12+, but be defensive
     from typing_extensions import Unpack  # type: ignore[assignment]
+
+if TYPE_CHECKING:
+    from reps.api.objective import Objective
 
 from reps.api.evaluate_dispatch import (
     register_user_evaluate,
@@ -159,18 +162,26 @@ class Optimizer:
     def optimize(
         self,
         initial: str,
-        evaluate: Callable[..., Any],
+        evaluate: Optional[Callable[..., Any]] = None,
         *,
+        objective: Optional["Objective"] = None,
         seed: Optional[int] = None,
     ) -> OptimizationResult:
         """Run the evolutionary search and return the best artifact found.
 
         Args:
             initial: seed program text (NOT a file path).
-            evaluate: a `(code: str) -> float | dict | EvaluationResult`
-                callable. Optional `env` and `instances` keywords are
-                forwarded automatically when present in the signature.
+            evaluate: a raw `(code: str) -> float | dict | EvaluationResult`
+                callable — the power-user escape hatch. Optional `env` and
+                `instances` keywords are forwarded automatically when present
+                in the signature. Mutually exclusive with `objective`.
+            objective: a `reps.Objective` (or `reps.LLMJudge`) — the
+                recommended entry point for new users. Builds the evaluator
+                from a seed entrypoint + train set + metric. Mutually
+                exclusive with `evaluate`.
             seed: optional deterministic seed.
+
+        Exactly one of `evaluate` or `objective` must be supplied.
         """
         if not isinstance(initial, str):
             raise TypeError(
@@ -178,6 +189,32 @@ class Optimizer:
                 f"(str), got {type(initial).__name__}. To load from a "
                 f"file, pass `open(path).read()`."
             )
+
+        if evaluate is None and objective is None:
+            raise ValueError(
+                "reps.Optimizer.optimize: supply either `objective=` "
+                "(recommended for new users — build one with "
+                "reps.Objective.minimize/maximize or reps.LLMJudge) or "
+                "`evaluate=` (a raw Callable[[str], float | dict | "
+                "EvaluationResult] for power users). Got neither."
+            )
+        if evaluate is not None and objective is not None:
+            raise ValueError(
+                "reps.Optimizer.optimize: pass exactly one of `objective=` or "
+                "`evaluate=`, not both."
+            )
+
+        if objective is not None:
+            from reps.api.objective import Objective
+
+            if not isinstance(objective, Objective):
+                raise TypeError(
+                    f"reps.Optimizer.optimize: `objective` must be a "
+                    f"reps.Objective (or reps.LLMJudge), got "
+                    f"{type(objective).__name__}."
+                )
+            evaluate = objective.evaluate
+
         if not callable(evaluate):
             raise TypeError(
                 f"reps.Optimizer.optimize: `evaluate` must be callable, got "

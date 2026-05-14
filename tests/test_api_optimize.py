@@ -1477,3 +1477,70 @@ def test_reps_internal_symbols_match_top_level_for_back_compat():
         assert getattr(top_level, name) is getattr(internal, name), (
             f"{name} re-export drifted between reps and reps.internal"
         )
+
+
+# ---------------------------------------------------------------------------
+# `optimize(objective=...)` — objective routing
+# ---------------------------------------------------------------------------
+
+
+def test_optimize_requires_exactly_one_of_evaluate_or_objective(monkeypatch):
+    lm = _make_lm(monkeypatch)
+    opt = Optimizer(model=lm)
+    with pytest.raises(ValueError, match="either .objective.* or .evaluate."):
+        opt.optimize("seed")  # neither
+
+
+def test_optimize_rejects_both_evaluate_and_objective(monkeypatch):
+    lm = _make_lm(monkeypatch)
+    opt = Optimizer(model=lm)
+    objective = reps.Objective.minimize(
+        entrypoint="predict",
+        train_set=[reps.Example(x=1, answer=1).with_inputs("x")],
+        metric="mae",
+    )
+    with pytest.raises(ValueError, match="exactly one"):
+        opt.optimize("seed", lambda c: 1.0, objective=objective)
+
+
+def test_optimize_rejects_non_objective(monkeypatch):
+    lm = _make_lm(monkeypatch)
+    opt = Optimizer(model=lm)
+    with pytest.raises(TypeError, match="reps.Objective"):
+        opt.optimize("seed", objective="not an objective")  # type: ignore[arg-type]
+
+
+def test_optimize_routes_objective_through_shim(monkeypatch, tmp_path):
+    """`objective=` registers `objective.evaluate` through the same dispatch
+    shim used for `evaluate=` callables."""
+    lm = _make_lm(monkeypatch)
+    output_dir = tmp_path / "run"
+    opt = Optimizer(model=lm, max_iterations=1, output_dir=str(output_dir))
+
+    objective = reps.Objective.minimize(
+        entrypoint="predict",
+        train_set=[
+            reps.Example(x=0, answer=2).with_inputs("x"),
+            reps.Example(x=3, answer=2).with_inputs("x"),
+        ],
+        metric="mae",
+    )
+    captured = {}
+
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("_reps_user_evaluator", evaluator)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        # Drive the generated shim with the seed program text.
+        captured["result"] = module.evaluate(initial_program)
+        _seed_database(output_dir, num_islands=config.database.num_islands)
+
+    with patch("reps.runner.run_reps", new=fake_run_reps):
+        opt.optimize("def predict(x):\n    return x\n", objective=objective)
+
+    # The objective scored the seed: predict(x)=x -> mae over [(0,2),(3,2)] = 1.5.
+    result = captured["result"]
+    assert result.metrics["mae"] == 1.5
+    assert result.metrics["combined_score"] == -1.5
