@@ -8,7 +8,7 @@ import pytest
 
 import reps
 from reps.api.example import Example, Prediction
-from reps.api.objective import Objective, _BUILTIN_METRICS, _resolve_metric
+from reps.api.objective import LLMJudge, Objective, _BUILTIN_METRICS, _resolve_metric
 
 
 # --- built-in metric registry ----------------------------------------------
@@ -300,3 +300,140 @@ def test_evaluate_custom_metric_callable():
     result = obj.evaluate(_IDENTITY)  # predict(x)=x -> close on x=2, far on x=9
     assert result.metrics["close_enough"] == 0.5
     assert result.metrics["combined_score"] == 0.5
+
+
+# --- LLMJudge ---------------------------------------------------------------
+
+
+def _judge_train_set():
+    return [
+        Example(question="What is REPS?", answer="A program search harness.")
+        .with_inputs("question")
+    ]
+
+
+def test_llm_judge_is_objective_subclass():
+    judge = LLMJudge(
+        entrypoint="answer",
+        train_set=_judge_train_set(),
+        rubric="score correctness",
+        model=lambda prompt: '{"score": 1.0, "rationale": "ok"}',
+    )
+    assert isinstance(judge, Objective)
+    assert judge.direction == "maximize"
+    assert judge.metric_name == "judge_score"
+
+
+def test_llm_judge_rejects_blank_rubric():
+    with pytest.raises(ValueError, match="rubric"):
+        LLMJudge(
+            entrypoint="answer",
+            train_set=_judge_train_set(),
+            rubric="",
+            model=lambda p: "{}",
+        )
+
+
+def test_llm_judge_rejects_bad_scale():
+    with pytest.raises(ValueError, match="scale"):
+        LLMJudge(
+            entrypoint="answer",
+            train_set=_judge_train_set(),
+            rubric="r",
+            model=lambda p: "{}",
+            scale=(1.0, 0.0),
+        )
+
+
+def test_llm_judge_scores_with_fake_callable():
+    calls = []
+
+    def fake_judge(prompt: str) -> str:
+        calls.append(prompt)
+        return '{"score": 0.8, "rationale": "good and concise"}'
+
+    judge = LLMJudge(
+        entrypoint="answer",
+        train_set=_judge_train_set(),
+        rubric="Score factual correctness and concision.",
+        model=fake_judge,
+    )
+    result = judge.evaluate("def answer(question):\n    return 'REPS'\n")
+    assert result.metrics["combined_score"] == 0.8
+    assert result.metrics["judge_score"] == 0.8
+    assert result.metrics["validity"] == 1.0
+    assert result.per_instance_scores == {"train/0": 0.8}
+    assert "good and concise" in result.feedback
+    assert len(calls) == 1
+    # Prompt construction includes the rubric and the candidate output.
+    assert "Score factual correctness and concision." in calls[0]
+    assert "REPS" in calls[0]
+
+
+def test_llm_judge_caches_repeated_evaluations():
+    calls = []
+
+    def fake_judge(prompt: str) -> str:
+        calls.append(prompt)
+        return '{"score": 1.0, "rationale": "ok"}'
+
+    judge = LLMJudge(
+        entrypoint="answer",
+        train_set=_judge_train_set(),
+        rubric="r",
+        model=fake_judge,
+    )
+    code = "def answer(question):\n    return 'x'\n"
+    judge.evaluate(code)
+    judge.evaluate(code)  # identical code+example+rubric+model -> cache hit
+    assert len(calls) == 1
+
+
+def test_llm_judge_parses_bare_number_response():
+    judge = LLMJudge(
+        entrypoint="answer",
+        train_set=_judge_train_set(),
+        rubric="r",
+        model=lambda prompt: "I'd give this a 0.6 overall.",
+    )
+    result = judge.evaluate("def answer(question):\n    return 'x'\n")
+    assert result.metrics["judge_score"] == 0.6
+
+
+def test_llm_judge_clamps_to_scale():
+    judge = LLMJudge(
+        entrypoint="answer",
+        train_set=_judge_train_set(),
+        rubric="r",
+        model=lambda prompt: '{"score": 9.0, "rationale": "over"}',
+        scale=(0.0, 1.0),
+    )
+    result = judge.evaluate("def answer(question):\n    return 'x'\n")
+    assert result.metrics["judge_score"] == 1.0
+
+
+def test_llm_judge_entrypoint_failure_uses_failure_score():
+    judge = LLMJudge(
+        entrypoint="answer",
+        train_set=_judge_train_set(),
+        rubric="r",
+        model=lambda prompt: '{"score": 1.0, "rationale": "ok"}',
+    )
+    result = judge.evaluate("def answer(question):\n    raise RuntimeError('boom')\n")
+    assert result.metrics["combined_score"] == 0.0  # failure_score
+    assert result.metrics["validity"] == 0.0
+    assert "failures:" in result.feedback
+
+
+def test_llm_judge_string_model_builds_reps_model_lazily(monkeypatch):
+    # Constructing LLMJudge with a model string must NOT require an API key —
+    # the reps.Model is built lazily on first evaluate().
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    judge = LLMJudge(
+        entrypoint="answer",
+        train_set=_judge_train_set(),
+        rubric="r",
+        model="openai/gpt-5.1-mini",
+    )
+    # Lazy: no Model built yet, so no key needed at construction time.
+    assert judge._judge_callable is None

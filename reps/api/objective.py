@@ -322,3 +322,183 @@ class Objective:
         if failures:
             parts.append("failures: " + "; ".join(failures))
         return "\n".join(parts) if parts else None
+
+
+class LLMJudge(Objective):
+    """An `Objective` that scores candidates with an LLM judge.
+
+    For long-form or subjective outputs where deterministic metrics aren't
+    enough. Prefer a deterministic `reps.Objective` when you can — an LLM
+    judge is a useful but imperfect metric.
+
+        judge = reps.LLMJudge(
+            entrypoint="answer",
+            train_set=[reps.Example(question="...", answer="...").with_inputs("question")],
+            rubric="Score factual correctness, completeness, and concision.",
+            model="openai/gpt-5.1-mini",
+            scale=(0.0, 1.0),
+        )
+
+    `model` may be a model-name string (a `reps.Model` is built lazily on
+    first use with `temperature=0`) or any `(prompt: str) -> str` callable
+    (e.g. a `reps.Model` instance, or a fake for tests). Judge calls are
+    cached by `(code_hash, example_key, rubric_hash, model_key)`.
+    """
+
+    def __init__(
+        self,
+        *,
+        entrypoint: str,
+        train_set: "Sequence[Example | Mapping[str, Any]]",
+        rubric: str,
+        model: "str | Callable[[str], str]",
+        scale: "tuple[float, float]" = (0.0, 1.0),
+        failure_score: float = 0.0,
+    ) -> None:
+        if not rubric or not isinstance(rubric, str):
+            raise ValueError("reps.LLMJudge: `rubric` must be a non-empty string.")
+        low, high = scale
+        if not low < high:
+            raise ValueError(
+                f"reps.LLMJudge: `scale` must be (low, high) with low < high, "
+                f"got {scale!r}"
+            )
+        self.rubric = rubric
+        self.scale = (float(low), float(high))
+        self._model_spec = model
+        self._judge_callable: "Callable[[str], str] | None" = None
+        self._cache: dict[tuple, tuple[float, str]] = {}
+        super().__init__(
+            entrypoint=entrypoint,
+            train_set=train_set,
+            direction="maximize",
+            metric_name="judge_score",
+            per_example_fn=None,  # LLMJudge fully overrides evaluate()
+            aggregate_fn=_mean,
+            failure_score=failure_score,
+        )
+
+    def evaluate(self, code: str) -> EvaluationResult:
+        """Score `code` by running its entrypoint and grading each output
+        with the judge model. Fully overrides `Objective.evaluate` so all
+        per-call state stays local — the objective instance is shared across
+        parallel evaluations."""
+        entry = self._load_entrypoint(code)
+        if entry is None:
+            raw = [
+                (self._example_key(ex, i), self.failure_score)
+                for i, ex in enumerate(self.train_set)
+            ]
+            return self._build_result(
+                raw=raw,
+                failures=[
+                    f"entrypoint {self.entrypoint!r} could not be loaded from "
+                    f"the candidate program"
+                ],
+                rationales=[],
+            )
+
+        code_hash = _hash_text(code)
+        rubric_hash = _hash_text(self.rubric)
+        model_key = self._model_key()
+        judge = self._get_judge()
+
+        raw: list[tuple[str, float]] = []
+        failures: list[str] = []
+        rationales: list[str] = []
+        for i, ex in enumerate(self.train_set):
+            key = self._example_key(ex, i)
+            try:
+                prediction = as_prediction(entry(**ex.inputs().to_dict()))
+            except Exception as exc:
+                raw.append((key, self.failure_score))
+                failures.append(
+                    f"{key}: entrypoint raised {type(exc).__name__}: {exc}"
+                )
+                continue
+
+            cache_key = (code_hash, key, rubric_hash, model_key)
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                score, rationale = cached
+            else:
+                try:
+                    response = judge(self._build_judge_prompt(ex, prediction))
+                    score, rationale = self._parse_judge_score(response)
+                except Exception as exc:
+                    raw.append((key, self.failure_score))
+                    failures.append(
+                        f"{key}: judge call failed: {type(exc).__name__}: {exc}"
+                    )
+                    continue
+                self._cache[cache_key] = (score, rationale)
+
+            raw.append((key, score))
+            rationales.append(f"{key}: {rationale}")
+        return self._build_result(raw=raw, failures=failures, rationales=rationales)
+
+    # --- judge plumbing -----------------------------------------------------
+
+    def _model_key(self) -> str:
+        spec = self._model_spec
+        return spec if isinstance(spec, str) else repr(spec)
+
+    def _get_judge(self) -> "Callable[[str], str]":
+        """Resolve the judge into a `(prompt: str) -> str` callable, lazily.
+
+        A callable (including a `reps.Model`) is used directly; a model-name
+        string builds a `reps.Model(..., temperature=0)`. Lazy so
+        `LLMJudge(model="openai/...")` can be constructed without the
+        provider API key (e.g. in tests).
+        """
+        if self._judge_callable is not None:
+            return self._judge_callable
+        spec = self._model_spec
+        if callable(spec):
+            self._judge_callable = spec
+        elif isinstance(spec, str):
+            from reps.api.model import Model
+
+            self._judge_callable = Model(spec, temperature=0)
+        else:
+            raise TypeError(
+                f"reps.LLMJudge: `model` must be a model-name string or a "
+                f"`(prompt: str) -> str` callable, got {type(spec).__name__}"
+            )
+        return self._judge_callable
+
+    def _build_judge_prompt(self, example: Example, pred: Prediction) -> str:
+        inputs = example.inputs().to_dict()
+        labels = example.labels().to_dict()
+        low, high = self.scale
+        return (
+            "You are grading the output of a candidate program.\n\n"
+            f"Rubric:\n{self.rubric}\n\n"
+            f"Program inputs:\n{json.dumps(inputs, default=str, indent=2)}\n\n"
+            "Expected / reference fields:\n"
+            f"{json.dumps(labels, default=str, indent=2)}\n\n"
+            "Candidate output:\n"
+            f"{json.dumps(pred.to_dict(), default=str, indent=2)}\n\n"
+            f"Score the candidate output from {low} to {high} according to the "
+            "rubric. Respond with a single JSON object: "
+            '{"score": <number>, "rationale": "<one or two sentences>"}'
+        )
+
+    def _parse_judge_score(self, response: str) -> "tuple[float, str]":
+        low, high = self.scale
+        match = re.search(r"\{.*\}", response, re.DOTALL)
+        if match:
+            try:
+                obj = json.loads(match.group(0))
+                score = float(obj["score"])
+                rationale = str(obj.get("rationale", "")).strip()
+                return _clamp(score, low, high), rationale
+            except (ValueError, KeyError, TypeError):
+                pass
+        number = re.search(r"-?\d+(?:\.\d+)?", response)
+        if number:
+            return _clamp(float(number.group(0)), low, high), response.strip()[:200]
+        raise ValueError(
+            f"reps.LLMJudge: could not parse a numeric score from judge "
+            f"response: {response[:200]!r}"
+        )
