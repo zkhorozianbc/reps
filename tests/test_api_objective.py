@@ -8,7 +8,7 @@ import pytest
 
 import reps
 from reps.api.example import Example, Prediction
-from reps.api.objective import _BUILTIN_METRICS, _resolve_metric
+from reps.api.objective import Objective, _BUILTIN_METRICS, _resolve_metric
 
 
 # --- built-in metric registry ----------------------------------------------
@@ -86,3 +86,89 @@ def test_resolve_custom_callable():
 def test_resolve_rejects_non_str_non_callable():
     with pytest.raises(TypeError, match="must be a built-in metric name"):
         _resolve_metric(123, "maximize")  # type: ignore[arg-type]
+
+
+# --- Objective construction -------------------------------------------------
+
+
+def _train_set():
+    return [
+        Example(x=-4, answer=30).with_inputs("x"),
+        Example(x=0, answer=2).with_inputs("x"),
+    ]
+
+
+def test_minimize_classmethod_builds_objective():
+    obj = Objective.minimize(entrypoint="predict", train_set=_train_set(), metric="mae")
+    assert obj.direction == "minimize"
+    assert obj.entrypoint == "predict"
+    assert obj.metric_name == "mae"
+    assert len(obj.train_set) == 2
+    assert obj.failure_score == 0.0
+
+
+def test_maximize_classmethod_builds_objective():
+    obj = Objective.maximize(
+        entrypoint="classify",
+        train_set=[Example(text="hi", answer="pos").with_inputs("text")],
+        metric="accuracy",
+    )
+    assert obj.direction == "maximize"
+    assert obj.metric_name == "accuracy"
+
+
+def test_objective_coerces_mapping_rows_to_examples():
+    # A plain mapping row is accepted, but still needs explicit input keys.
+    obj = Objective.minimize(
+        entrypoint="predict",
+        train_set=[Example({"x": 1, "answer": 2}).with_inputs("x")],
+        metric="mae",
+    )
+    assert isinstance(obj.train_set[0], Example)
+
+
+def test_objective_rejects_row_without_input_keys():
+    with pytest.raises(ValueError, match="no input keys"):
+        Objective.minimize(
+            entrypoint="predict",
+            train_set=[{"x": 1, "answer": 2}],  # bare mapping, no .with_inputs
+            metric="mae",
+        )
+
+
+def test_objective_rejects_empty_train_set():
+    with pytest.raises(ValueError, match="non-empty"):
+        Objective.minimize(entrypoint="predict", train_set=[], metric="mae")
+
+
+def test_objective_rejects_blank_entrypoint():
+    with pytest.raises(ValueError, match="entrypoint"):
+        Objective.minimize(entrypoint="", train_set=_train_set(), metric="mae")
+
+
+def test_objective_rejects_duplicate_ids():
+    with pytest.raises(ValueError, match="duplicate `id`"):
+        Objective.minimize(
+            entrypoint="predict",
+            train_set=[
+                Example(id="dup", x=1, answer=2).with_inputs("x"),
+                Example(id="dup", x=2, answer=3).with_inputs("x"),
+            ],
+            metric="mae",
+        )
+
+
+def test_objective_custom_metric_callable():
+    def close_enough(example, pred, trace=None):
+        return abs(float(pred.answer) - float(example.answer)) <= 0.1
+
+    obj = Objective.maximize(
+        entrypoint="predict", train_set=_train_set(), metric=close_enough
+    )
+    assert obj.metric_name == "close_enough"
+    assert obj.direction == "maximize"
+
+
+def test_objective_direction_mismatch_raises_via_classmethod():
+    with pytest.raises(ValueError, match="minimize metric"):
+        Objective.maximize(entrypoint="predict", train_set=_train_set(), metric="mae")

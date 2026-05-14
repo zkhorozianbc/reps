@@ -117,3 +117,113 @@ def _resolve_metric(
         f"reps.Objective: `metric` must be a built-in metric name (str) or a "
         f"callable, got {type(metric).__name__}"
     )
+
+
+class Objective:
+    """Deterministic objective layer for `reps.Optimizer.optimize(objective=...)`.
+
+    Build one with `Objective.minimize(...)` or `Objective.maximize(...)`:
+
+        objective = reps.Objective.minimize(
+            entrypoint="predict",
+            train_set=[reps.Example(x=-4, answer=30).with_inputs("x")],
+            metric="mae",
+        )
+
+    `failure_score` is the per-example metric value (in the metric's natural
+    space) assigned when an example's entrypoint call, prediction wrap, or
+    metric call raises — and to every example when the candidate program
+    fails to load. The `0.0` default suits maximize objectives; minimize
+    objectives should pass a large positive value so crashing candidates are
+    penalized rather than rewarded.
+    """
+
+    def __init__(
+        self,
+        *,
+        entrypoint: str,
+        train_set: "Sequence[Example | Mapping[str, Any]]",
+        direction: str,
+        metric_name: str,
+        per_example_fn: "MetricCallable | None",
+        aggregate_fn: Callable[[Sequence[float]], float],
+        failure_score: float = 0.0,
+    ) -> None:
+        if direction not in _DIRECTIONS:
+            raise ValueError(
+                f"reps.Objective: direction must be one of {_DIRECTIONS}, got "
+                f"{direction!r}"
+            )
+        if not entrypoint or not isinstance(entrypoint, str):
+            raise ValueError(
+                f"reps.Objective: `entrypoint` must be a non-empty function "
+                f"name, got {entrypoint!r}"
+            )
+        if not train_set:
+            raise ValueError("reps.Objective: `train_set` must be non-empty.")
+
+        coerced: list[Example] = []
+        for i, row in enumerate(train_set):
+            ex = row if isinstance(row, Example) else Example(row)
+            if not ex.input_keys:
+                raise ValueError(
+                    f"reps.Objective: train_set[{i}] has no input keys. Call "
+                    f"`.with_inputs(...)` on each reps.Example — REPS does not "
+                    f"infer input fields."
+                )
+            coerced.append(ex)
+
+        ids = [str(ex["id"]) for ex in coerced if "id" in ex]
+        if len(ids) != len(set(ids)):
+            raise ValueError(
+                "reps.Objective: train_set has duplicate `id` fields; "
+                "per-instance score keys must be unique."
+            )
+
+        self.entrypoint = entrypoint
+        self.direction = direction
+        self.failure_score = float(failure_score)
+        self.train_set: list[Example] = coerced
+        self.metric_name = metric_name
+        self._per_example_fn = per_example_fn
+        self._aggregate_fn = aggregate_fn
+
+    @classmethod
+    def maximize(
+        cls,
+        *,
+        entrypoint: str,
+        train_set: "Sequence[Example | Mapping[str, Any]]",
+        metric: "str | MetricCallable",
+        failure_score: float = 0.0,
+    ) -> "Objective":
+        name, per_ex, agg = _resolve_metric(metric, "maximize")
+        return cls(
+            entrypoint=entrypoint,
+            train_set=train_set,
+            direction="maximize",
+            metric_name=name,
+            per_example_fn=per_ex,
+            aggregate_fn=agg,
+            failure_score=failure_score,
+        )
+
+    @classmethod
+    def minimize(
+        cls,
+        *,
+        entrypoint: str,
+        train_set: "Sequence[Example | Mapping[str, Any]]",
+        metric: "str | MetricCallable",
+        failure_score: float = 0.0,
+    ) -> "Objective":
+        name, per_ex, agg = _resolve_metric(metric, "minimize")
+        return cls(
+            entrypoint=entrypoint,
+            train_set=train_set,
+            direction="minimize",
+            metric_name=name,
+            per_example_fn=per_ex,
+            aggregate_fn=agg,
+            failure_score=failure_score,
+        )
