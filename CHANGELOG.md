@@ -11,8 +11,20 @@ may include breaking changes; only patch bumps are safe to consume blindly.
 ## [Unreleased]
 
 ### Added
+- `reps.Example` and `reps.Prediction` — DSPy-inspired data primitives with
+  explicit input keys, dot/item access, and `.with_inputs()` / `.inputs()` /
+  `.labels()`.
+- `reps.Objective` — compiles a seed `entrypoint` + `train_set` + `metric`
+  into the evaluator contract; `Objective.maximize` / `Objective.minimize`
+  classmethods with built-in metrics (`accuracy`, `exact_match`, `mae`,
+  `mse`, `rmse`) and custom metric callables.
+- `reps.LLMJudge` — an `Objective` that scores subjective outputs with an
+  LLM judge, with a configurable rubric, scale, and judge model.
 
 ### Changed
+- `Optimizer.optimize` accepts `objective=` (a `reps.Objective` / `LLMJudge`)
+  as the recommended alternative to a raw `evaluate=` callable; exactly one
+  of the two must be supplied. Existing `evaluate=` callers are unaffected.
 
 ### Deprecated
 

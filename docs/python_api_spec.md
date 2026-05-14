@@ -57,6 +57,10 @@ v1.5 (see end of doc).
 |---|---|---|
 | `reps.Model` | LLM wrapper, similar shape to `dspy.LM` | [`reps/api/model.py:75`](../reps/api/model.py#L75) |
 | `reps.ModelKwargs` | TypedDict of optional Model construction kwargs (used inline on `Optimizer`) | [`reps/api/model.py:33`](../reps/api/model.py#L33) |
+| `reps.Example` | DSPy-style data record with explicit input keys | [`reps/api/example.py`](../reps/api/example.py) |
+| `reps.Prediction` | Dict-like wrapper for an entrypoint's output | [`reps/api/example.py`](../reps/api/example.py) |
+| `reps.Objective` | Compiles `(entrypoint, train_set, metric)` into the evaluator contract | [`reps/api/objective.py`](../reps/api/objective.py) |
+| `reps.LLMJudge` | `Objective` that scores with an LLM judge | [`reps/api/objective.py`](../reps/api/objective.py) |
 | `reps.Optimizer` | The optimizer | [`reps/api/optimizer.py:42`](../reps/api/optimizer.py#L42) |
 | `reps.Optimizer.optimize(initial, evaluate)` | The single entry point | [`reps/api/optimizer.py:159`](../reps/api/optimizer.py#L159) |
 | `reps.Optimizer.from_config(cfg)` | Power-user escape hatch | [`reps/api/optimizer.py:123`](../reps/api/optimizer.py#L123) |
@@ -237,11 +241,17 @@ override them keep using YAML or a `Config` object directly (see
 ```python
 result: reps.OptimizationResult = optimizer.optimize(
     initial: str,
-    evaluate: Callable[[str], float | dict | reps.EvaluationResult],
+    evaluate: Callable[[str], float | dict | reps.EvaluationResult] | None = None,
     *,
+    objective: reps.Objective | None = None,
     seed: Optional[int] = None,
 )
 ```
+
+Exactly one of `evaluate` or `objective` must be supplied. `objective=` is
+the recommended entry point — it registers `objective.evaluate` through the
+same dispatch shim. `evaluate=` is the power-user escape hatch described
+next.
 
 `evaluate` is the **single inner abstraction**. It's called with the
 artifact text. Three accepted return shapes, in order of richness, all
@@ -262,6 +272,27 @@ coerced to `EvaluationResult` in
 
 That's the whole user contract: one callable in, one `OptimizationResult`
 out.
+
+### The objective layer
+
+`reps.Objective` removes the need to hand-write `evaluate(code)`. You give it
+a seed `entrypoint`, a `train_set` of `reps.Example` rows (each marked with
+`.with_inputs(...)`), and a `metric`; it `exec`s each candidate, runs the
+entrypoint per example, wraps the return as a `reps.Prediction`, scores it,
+and returns an `EvaluationResult` in higher-is-better `combined_score` space.
+
+- `reps.Objective.maximize(...)` / `reps.Objective.minimize(...)` — the
+  classmethod picks the direction. Built-in metrics: `accuracy`,
+  `exact_match` (maximize); `mae`, `mse`, `rmse` (minimize). A built-in used
+  with the wrong classmethod raises `ValueError`.
+- Custom metrics are callables `metric(example, pred, trace=None) -> bool |
+  int | float`.
+- `reps.LLMJudge(entrypoint=, train_set=, rubric=, model=, scale=)` — an
+  `Objective` subclass that scores subjective outputs with an LLM judge,
+  configurable independently of the mutation model. Judge calls are cached.
+
+The full contract is specified in
+[`docs/objective_api_spec.md`](objective_api_spec.md).
 
 ### Escape hatches (power users)
 
@@ -547,3 +578,4 @@ Evaluator contract:
 | 2026-05-04 | A+B    | `df77b02`  | Review-flagged fixes: `provider_kwargs` actually forwarded to the underlying SDK client; `EvaluationResult.from_dict` peels top-level `per_instance_scores` and `feedback` into the dataclass fields |
 | 2026-05-04 | rename | `642ab15`  | `reps.REPS` → `reps.Optimizer` (the package and class shared a name) |
 | 2026-05-04 | rename | `ab2517f`  | `reps.LM` → `reps.Model` + new `reps.ModelKwargs` TypedDict + `Optimizer(model: Model \| str, api_key=, **ModelKwargs)` signature so the common case ("just give me a model name and an api key") avoids building a Model first |
+| 2026-05-14 | C      | (this PR)  | Objective layer: `reps.Example`, `reps.Prediction`, `reps.Objective` (maximize/minimize + built-in metric registry), `reps.LLMJudge`; `optimize()` gains `objective=` (mutually exclusive with `evaluate=`). See `docs/objective_api_spec.md`. |

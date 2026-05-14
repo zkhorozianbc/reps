@@ -14,7 +14,7 @@ keeps a diverse population, and steers compute toward better programs.
 ## How It Works
 
 - **Start with code**: a seed Python program, either as a string or an `initial_program.py` file.
-- **Score candidates**: write an evaluator that returns a higher-is-better score, metrics dict, or `reps.EvaluationResult`.
+- **Define an objective**: give REPS a seed entrypoint, a `train_set` of `reps.Example` rows, and a metric (`"mae"`, `"accuracy"`, a custom callable, or a `reps.LLMJudge`). Or drop down to a raw `evaluate=` callable.
 - **Search iteratively**: REPS asks LLM workers to mutate, refine, and merge programs while islands preserve different approaches.
 - **Feed back evidence**: reflection, per-instance scores, evaluator feedback, convergence signals, and SOTA targets steer later edits.
 - **Run it your way**: call `reps.Optimizer(...).optimize(...)` from Python, or use `reps-run --config ...` for YAML experiments.
@@ -27,53 +27,40 @@ Requires Python 3.12+.
 pip install reps-py
 ```
 
-For local development:
-
-```bash
-git clone https://github.com/zkhorozianbc/reps.git
-cd reps
-uv venv .venv --python 3.12
-uv pip install -e ".[dev,benchmarks]"
-```
-
-Set the API key for the provider you use:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-export OPENROUTER_API_KEY=sk-or-...
-export OPENAI_API_KEY=sk-...
-```
-
-A sibling `.env` file is auto-loaded by the CLI.
-
 ## Quick Start
 
 ```python
 import reps
 
 seed = """
-def solve():
-    return 1
+def predict(x):
+    return x
 """
-
-TARGET = 42
-
-def evaluate(code: str) -> float:
-    namespace = {}
-    try:
-        exec(code, namespace)  # For demos only; sandbox untrusted code in real runs.
-        return -abs(TARGET - float(namespace["solve"]()))
-    except Exception:
-        return -1_000_000.0
 
 result = reps.Optimizer(
     model="anthropic/claude-sonnet-4-6",
     max_iterations=10,
-).optimize(initial=seed, evaluate=evaluate)
+).optimize(
+    initial=seed,
+    objective=reps.Objective.minimize(
+        entrypoint="predict",
+        train_set=[
+            reps.Example(x=-4, answer=30).with_inputs("x"),
+            reps.Example(x=0, answer=2).with_inputs("x"),
+            reps.Example(x=3, answer=2).with_inputs("x"),
+        ],
+        metric="mae",
+    ),
+)
 
 print(result.best_score)
 print(result.best_code)
 ```
+
+An `reps.Objective` runs each candidate's entrypoint against your train set
+and scores it — no hand-written evaluator needed. Power users who want full
+control can still pass a raw `evaluate=` callable instead (see Evaluators
+below).
 
 See [`examples/basic_optimizer.py`](examples/basic_optimizer.py) for the same
 shape as a runnable script.
@@ -103,9 +90,35 @@ Verified with the [DeepMind validator](https://colab.research.google.com/github/
 - **Workers**: exploiters refine good parents, explorers try larger pivots, and crossover workers merge ideas.
 - **Reflection**: REPS summarizes wins, failures, and lineage context so later candidates are not blind retries.
 
-## Evaluators
+## Objectives and Evaluators
 
-For the Python API, an evaluator is any callable that accepts candidate code:
+The recommended entry point is `reps.Objective`. It compiles a seed
+entrypoint + train set + metric into a scorer for you:
+
+```python
+objective = reps.Objective.maximize(
+    entrypoint="classify",
+    train_set=[
+        reps.Example(text="I loved it", answer="positive").with_inputs("text"),
+        reps.Example(text="Never again", answer="negative").with_inputs("text"),
+    ],
+    metric="accuracy",            # or "mae"/"mse"/"rmse"/"exact_match", or a callable
+)
+```
+
+Built-in metrics: `accuracy`, `exact_match` (maximize); `mae`, `mse`, `rmse`
+(minimize). Custom metrics are callables
+`metric(example, pred, trace=None) -> bool | int | float`. For long-form or
+subjective outputs, use `reps.LLMJudge(entrypoint=..., train_set=...,
+rubric=..., model=...)` — a useful but imperfect metric; prefer a
+deterministic objective when you can.
+
+Scores reaching the REPS engine are always higher-is-better:
+`Objective.minimize` stores the raw loss in `best_metrics` and uses
+`combined_score = -loss` internally.
+
+For full control, pass a raw `evaluate=` callable instead of `objective=` —
+the power-user escape hatch. It accepts candidate code and returns a score:
 
 ```python
 def eval_float(code: str) -> float:
@@ -129,7 +142,7 @@ def eval_full(code: str) -> reps.EvaluationResult:
 Use `per_instance_scores` with `selection_strategy="pareto"` or `"mixed"` when
 you want REPS to preserve candidates that solve different parts of the task.
 Use `feedback` with `trace_reflection=True` when evaluator diagnostics should
-guide the next mutation.
+guide the next mutation. (`reps.Objective` populates both automatically.)
 
 ## Main Knobs
 
@@ -151,8 +164,9 @@ The full public surface is documented in
 
 | Path | Shows |
 |---|---|
-| [`examples/basic_optimizer.py`](examples/basic_optimizer.py) | Minimal Python API run with a scalar score |
-| [`examples/rich_evaluator.py`](examples/rich_evaluator.py) | `EvaluationResult`, per-instance scores, feedback, Pareto/mixed selection |
+| [`examples/basic_optimizer.py`](examples/basic_optimizer.py) | First-run path: a `reps.Objective` scores a `predict` entrypoint with `mae` |
+| [`examples/llm_judge.py`](examples/llm_judge.py) | `reps.LLMJudge` scoring subjective outputs with a separate judge model |
+| [`examples/rich_evaluator.py`](examples/rich_evaluator.py) | The `evaluate=` escape hatch: a raw callable returning `EvaluationResult` |
 | [`examples/reuse_model.py`](examples/reuse_model.py) | Sharing one `reps.Model` across optimizer runs |
 | [`examples/custom_benchmark/`](examples/custom_benchmark/) | A CLI benchmark directory with `initial_program.py`, `evaluator.py`, `system_prompt.md`, and `config.yaml` |
 
@@ -217,6 +231,25 @@ uv run python -m pytest tests/
 - [`docs/gepa_implementation_plan.md`](docs/gepa_implementation_plan.md) - Pareto selection, trace reflection, merge, and lineage rollout.
 - [`docs/optimizer_engine_separation_spec.md`](docs/optimizer_engine_separation_spec.md) - public facade and runtime engine split.
 - [`docs/release_runbook.md`](docs/release_runbook.md) - release checklist.
+
+## Local Development
+
+```bash
+git clone https://github.com/zkhorozianbc/reps.git
+cd reps
+uv venv .venv --python 3.12
+uv pip install -e ".[dev,benchmarks]"
+```
+
+Set the API key for the provider you use:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENROUTER_API_KEY=sk-or-...
+export OPENAI_API_KEY=sk-...
+```
+
+A sibling `.env` file is auto-loaded by the CLI.
 
 ## Acknowledgements
 
