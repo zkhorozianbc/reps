@@ -1,8 +1,9 @@
-"""Evaluator feedback, per-instance scores, and mixed selection.
+"""The `evaluate=` escape hatch: a raw callable returning `EvaluationResult`.
 
-This example asks REPS to evolve a small `predict(x)` function. The evaluator
-returns both a headline metric and per-test-case scores so Pareto/mixed
-selection can preserve candidates with different strengths.
+Most users should reach for `reps.Objective` (see `basic_optimizer.py`). This
+example shows the power-user path: a hand-written `evaluate(code)` callable
+that emits a headline metric plus per-test-case scores and feedback, so
+Pareto/mixed selection can preserve candidates with different strengths.
 """
 
 from __future__ import annotations

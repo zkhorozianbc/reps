@@ -5,8 +5,9 @@ evaluators, and configs without requiring the bundled research benchmarks.
 
 ## Python API
 
-- [`basic_optimizer.py`](basic_optimizer.py) starts from a tiny `solve()` seed and scores by distance from a target number.
-- [`rich_evaluator.py`](rich_evaluator.py) returns `reps.EvaluationResult` with per-instance scores and feedback for trace reflection.
+- [`basic_optimizer.py`](basic_optimizer.py) is the first-run path: a `reps.Objective` scores a `predict(x)` entrypoint against a train set with the `mae` metric — no hand-written evaluator.
+- [`llm_judge.py`](llm_judge.py) uses `reps.LLMJudge` to score subjective `answer(question)` outputs with a separate judge model.
+- [`rich_evaluator.py`](rich_evaluator.py) shows the `evaluate=` escape hatch: a raw callable returning `reps.EvaluationResult` with per-instance scores and feedback.
 - [`reuse_model.py`](reuse_model.py) builds one `reps.Model` and shares it across optimizer instances.
 
 Run one with:
