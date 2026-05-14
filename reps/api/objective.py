@@ -294,8 +294,9 @@ class Objective:
             combined = aggregate
             per_instance = {k: v for k, v in raw}
         else:
-            combined = -aggregate
-            per_instance = {k: -v for k, v in raw}
+            # `0.0 - x` rather than `-x` so a perfect run yields +0.0, not -0.0.
+            combined = 0.0 - aggregate
+            per_instance = {k: 0.0 - v for k, v in raw}
 
         metrics = {
             "combined_score": combined,
