@@ -437,3 +437,32 @@ def test_llm_judge_string_model_builds_reps_model_lazily(monkeypatch):
     )
     # Lazy: no Model built yet, so no key needed at construction time.
     assert judge._judge_callable is None
+
+
+# --- re-exports -------------------------------------------------------------
+
+
+def test_top_level_reexports():
+    from reps.api.example import Example as _Example
+    from reps.api.example import Prediction as _Prediction
+    from reps.api.objective import LLMJudge as _LLMJudge
+    from reps.api.objective import Objective as _Objective
+
+    assert reps.Example is _Example
+    assert reps.Prediction is _Prediction
+    assert reps.Objective is _Objective
+    assert reps.LLMJudge is _LLMJudge
+
+
+def test_api_package_reexports():
+    import reps.api as api
+
+    assert api.Example is reps.Example
+    assert api.Prediction is reps.Prediction
+    assert api.Objective is reps.Objective
+    assert api.LLMJudge is reps.LLMJudge
+
+
+def test_new_symbols_in_dunder_all():
+    for name in ("Example", "Prediction", "Objective", "LLMJudge"):
+        assert name in reps.__all__

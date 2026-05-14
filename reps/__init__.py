@@ -25,7 +25,9 @@ from reps.metrics_logger import MetricsLogger
 # modules. Power users who relied on the previous flat namespace
 # (`reps.ReflectionEngine`, etc.) keep working both via this top-level
 # re-export and via `reps.internal.*`.
+from reps.api.example import Example, Prediction
 from reps.api.model import Model, ModelKwargs
+from reps.api.objective import LLMJudge, Objective
 from reps.api.optimizer import Optimizer
 from reps.api.result import OptimizationResult
 from reps.evaluation_result import EvaluationResult
@@ -47,4 +49,8 @@ __all__ = [
     "Optimizer",
     "OptimizationResult",
     "EvaluationResult",
+    "Example",
+    "Prediction",
+    "Objective",
+    "LLMJudge",
 ]
