@@ -116,7 +116,8 @@ def test_objective_round_trips_through_real_evaluator(monkeypatch, tmp_path):
     assert seen["metrics"]["mae"] == 1.5
     assert seen["metrics"]["combined_score"] == -1.5
     assert seen["per_instance_scores"] == {"train/0": -2.0, "train/1": -1.0}
-    assert "raw mae" in seen["feedback"]
+    assert "per-example results:" in seen["feedback"]
+    assert "predict(x=0) -> 0" in seen["feedback"]
     # And the OptimizationResult comes back from the seeded DB.
     assert isinstance(result, reps.OptimizationResult)
     assert result.best_metrics["mae"] == 0.0

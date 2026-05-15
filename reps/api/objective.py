@@ -45,6 +45,11 @@ def _hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
+def _format_kwargs(kwargs: Mapping[str, Any]) -> str:
+    """Render an inputs mapping as a call-arg string: `x=-4, hint='h'`."""
+    return ", ".join(f"{key}={value!r}" for key, value in kwargs.items())
+
+
 # --- built-in per-example metrics -------------------------------------------
 
 
@@ -253,16 +258,28 @@ class Objective:
 
         raw: list[tuple[str, float]] = []
         failures: list[str] = []
+        detail: list[str] = []
         for i, ex in enumerate(self.train_set):
             key = self._example_key(ex, i)
+            inputs = ex.inputs().to_dict()
+            call = f"{self.entrypoint}({_format_kwargs(inputs)})"
+            expected = ex.get("answer")
             try:
-                prediction = as_prediction(entry(**ex.inputs().to_dict()))
+                prediction = as_prediction(entry(**inputs))
                 value = float(self._per_example_fn(ex, prediction, None))
+                detail.append(
+                    f"{key}: {call} -> {prediction.get('answer')!r} | "
+                    f"expected {expected!r} | {self.metric_name} {value:g}"
+                )
             except Exception as exc:  # candidate code is untrusted
                 value = self.failure_score
                 failures.append(f"{key}: {type(exc).__name__}: {exc}")
+                detail.append(
+                    f"{key}: {call} raised {type(exc).__name__}: {exc} | "
+                    f"expected {expected!r}"
+                )
             raw.append((key, value))
-        return self._build_result(raw=raw, failures=failures)
+        return self._build_result(raw=raw, failures=failures, detail=detail)
 
     def _load_entrypoint(self, code: str):
         namespace: dict[str, Any] = {}
@@ -283,6 +300,7 @@ class Objective:
         *,
         raw: list,
         failures: list,
+        detail: "list | None" = None,
         rationales: "list | None" = None,
     ) -> EvaluationResult:
         values = [v for _, v in raw]
@@ -306,18 +324,22 @@ class Objective:
         return EvaluationResult(
             metrics=metrics,
             per_instance_scores=per_instance,
-            feedback=self._build_feedback(raw, failures, rationales),
+            feedback=self._build_feedback(failures, detail, rationales),
         )
 
     def _build_feedback(
-        self, raw: list, failures: list, rationales: "list | None" = None
+        self,
+        failures: list,
+        detail: "list | None" = None,
+        rationales: "list | None" = None,
     ) -> "str | None":
+        # The per-example detail is the load-bearing signal for the mutation
+        # LLM: it shows input -> predicted vs expected -> metric per row, so
+        # the model can see the actual pattern instead of guessing from an
+        # aggregate score.
         parts: list[str] = []
-        if self.direction == "minimize":
-            parts.append(
-                f"raw {self.metric_name} per example: "
-                + ", ".join(f"{k}={v:g}" for k, v in raw)
-            )
+        if detail:
+            parts.append("per-example results:\n" + "\n".join(detail))
         if rationales:
             parts.append("judge rationales:\n" + "\n".join(rationales))
         if failures:

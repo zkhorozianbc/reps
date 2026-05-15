@@ -212,7 +212,45 @@ def test_evaluate_minimize_imperfect_program_negates_loss():
     assert result.metrics["combined_score"] == -1.5
     # per-instance is higher-is-better: -raw error
     assert result.per_instance_scores == {"train/0": -2.0, "train/1": -1.0}
-    assert "raw mae" in result.feedback
+    assert "per-example results:" in result.feedback
+
+
+def test_evaluate_feedback_includes_per_example_detail():
+    """Feedback must show the LLM the input -> predicted vs expected -> metric
+    breakdown for every example, not just aggregate losses — otherwise the
+    mutation model is flying blind."""
+    obj = Objective.minimize(
+        entrypoint="predict",
+        train_set=[
+            Example(x=-4, answer=30).with_inputs("x"),
+            Example(x=0, answer=2).with_inputs("x"),
+        ],
+        metric="mae",
+    )
+    fb = obj.evaluate(_IDENTITY).feedback
+    # The call, the prediction, the expected label, and the metric per example.
+    assert "predict(x=-4) -> -4" in fb
+    assert "expected 30" in fb
+    assert "predict(x=0) -> 0" in fb
+    assert "expected 2" in fb
+    assert "mae" in fb
+
+
+def test_evaluate_maximize_feedback_also_has_per_example_detail():
+    """Per-example detail is built for maximize objectives too — a
+    classifier should see which rows it got wrong."""
+    obj = Objective.maximize(
+        entrypoint="classify",
+        train_set=[
+            Example(text="a", answer="pos").with_inputs("text"),
+            Example(text="b", answer="neg").with_inputs("text"),
+        ],
+        metric="accuracy",
+    )
+    fb = obj.evaluate("def classify(text):\n    return 'pos'\n").feedback
+    assert "classify(text='a') -> 'pos'" in fb
+    assert "classify(text='b') -> 'pos'" in fb
+    assert "expected 'neg'" in fb
 
 
 def test_evaluate_maximize_accuracy():
