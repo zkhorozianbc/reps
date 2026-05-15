@@ -16,21 +16,29 @@ from typing import Any, Iterator, Mapping
 class Example:
     """A dict-like data record with named fields and explicit input keys.
 
-    Construct from keyword fields or a mapping; mark which fields are inputs
-    with `.with_inputs(...)`. Supports both dot access (`ex.question`) and
-    item access (`ex["question"]`). Field names that collide with a method
+    Construct from keyword fields, a mapping, or any dict-like object (one
+    exposing `keys()` + `__getitem__` — `dspy.Example` qualifies, so a DSPy
+    dataset row drops straight in). Mark which fields are inputs with
+    `.with_inputs(...)`. Supports both dot access (`ex.question`) and item
+    access (`ex["question"]`). Field names that collide with a method
     (`inputs`, `labels`, `keys`, ...) are still reachable via `ex["inputs"]`.
     """
 
     def __init__(self, base: Mapping[str, Any] | None = None, **fields: Any) -> None:
         store: dict[str, Any] = {}
         if base is not None:
-            if not isinstance(base, Mapping):
+            if isinstance(base, Mapping):
+                store.update(base)
+            elif callable(getattr(base, "keys", None)) and hasattr(base, "__getitem__"):
+                # Any dict-like object — covers dspy.Example, which exposes
+                # keys() + __getitem__ but is not a collections.abc.Mapping.
+                store.update({key: base[key] for key in base.keys()})
+            else:
                 raise TypeError(
-                    f"reps.Example: `base` must be a mapping, got "
+                    f"reps.Example: `base` must be a mapping or a dict-like "
+                    f"object (with keys() + __getitem__), got "
                     f"{type(base).__name__}"
                 )
-            store.update(base)
         store.update(fields)
         object.__setattr__(self, "_store", store)
         object.__setattr__(self, "_input_keys", frozenset())

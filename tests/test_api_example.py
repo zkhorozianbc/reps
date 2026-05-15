@@ -32,6 +32,36 @@ def test_construct_rejects_non_mapping_base():
         Example([("x", 1)])  # type: ignore[arg-type]
 
 
+def test_construct_from_dict_like_object():
+    """Accept any dict-like object exposing keys() + __getitem__ (e.g.
+    dspy.Example, which is not a collections.abc.Mapping)."""
+
+    class DictLike:
+        def __init__(self, data):
+            self._data = data
+
+        def keys(self):
+            return self._data.keys()
+
+        def __getitem__(self, key):
+            return self._data[key]
+
+    ex = Example(DictLike({"x": 3, "answer": 2}))
+    assert ex.to_dict() == {"x": 3, "answer": 2}
+
+
+def test_construct_from_dict_like_object_plus_kwargs():
+    class DictLike:
+        def keys(self):
+            return ["x"]
+
+        def __getitem__(self, key):
+            return {"x": 1}[key]
+
+    ex = Example(DictLike(), answer=2)
+    assert ex.to_dict() == {"x": 1, "answer": 2}
+
+
 # --- access -----------------------------------------------------------------
 
 
