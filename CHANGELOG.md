@@ -25,6 +25,10 @@ may include breaking changes; only patch bumps are safe to consume blindly.
 - `Optimizer.optimize` accepts `objective=` (a `reps.Objective` / `LLMJudge`)
   as the recommended alternative to a raw `evaluate=` callable; exactly one
   of the two must be supplied. Existing `evaluate=` callers are unaffected.
+- `Optimizer`'s `trace_reflection` now defaults to `None` ("auto"): a
+  `objective=` run enables it (the objective always emits per-example
+  feedback the reflection path consumes), an `evaluate=` run leaves it off.
+  An explicit `trace_reflection=True/False` still wins.
 
 ### Deprecated
 

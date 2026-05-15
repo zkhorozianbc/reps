@@ -285,6 +285,10 @@ Rules:
 - Passing `evaluate` keeps current behavior.
 - Passing `objective` registers `objective.evaluate` through the existing
   `evaluate_dispatch` shim.
+- Passing `objective` defaults `trace_reflection` on (the objective always
+  emits per-example feedback + per-instance scores the reflection path
+  consumes — without it that signal is computed and dropped). An explicit
+  `trace_reflection=True/False` on the `Optimizer` still wins.
 - Error messages should steer new users toward `objective=` and power users
   toward `evaluate=`.
 

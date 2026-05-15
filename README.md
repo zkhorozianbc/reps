@@ -152,7 +152,7 @@ guide the next mutation. (`reps.Objective` populates both automatically.)
 | `num_islands` | Independent population islands | `5` |
 | `selection_strategy` | `"map_elites"`, `"pareto"`, or `"mixed"` | `"map_elites"` |
 | `pareto_fraction` | Blend ratio for `"mixed"` selection | `0.0` |
-| `trace_reflection` | Reflect on per-instance scores and feedback | `False` |
+| `trace_reflection` | Reflect on per-instance scores and feedback | `None` (auto: on for `objective=`, off for `evaluate=`) |
 | `lineage_depth` | Ancestors included in trace reflection | `3` |
 | `merge` | Complementarity-aware crossover parent selection | `False` |
 | `output_dir` | Persist run artifacts; `None` uses a temp directory | `None` |

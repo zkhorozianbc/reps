@@ -1544,3 +1544,67 @@ def test_optimize_routes_objective_through_shim(monkeypatch, tmp_path):
     result = captured["result"]
     assert result.metrics["mae"] == 1.5
     assert result.metrics["combined_score"] == -1.5
+
+
+def _objective():
+    return reps.Objective.minimize(
+        entrypoint="predict",
+        train_set=[reps.Example(x=1, answer=1).with_inputs("x")],
+        metric="mae",
+    )
+
+
+def test_optimize_objective_auto_enables_trace_reflection(monkeypatch, tmp_path):
+    """An objective always emits per-example feedback the reflection path
+    consumes, so `objective=` flips trace_reflection on by default."""
+    lm = _make_lm(monkeypatch)
+    opt = Optimizer(model=lm, max_iterations=1, output_dir=str(tmp_path / "run"))
+    captured = {}
+
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+        captured["config"] = config
+        _seed_database(output_dir, num_islands=config.database.num_islands)
+
+    with patch("reps.runner.run_reps", new=fake_run_reps):
+        opt.optimize("def predict(x):\n    return x\n", objective=_objective())
+
+    assert captured["config"].reps.trace_reflection.enabled is True
+    assert captured["config"].reps.enabled is True  # master switch follows
+
+
+def test_optimize_objective_respects_explicit_trace_reflection_false(monkeypatch, tmp_path):
+    """An explicit `trace_reflection=False` wins over the objective= default."""
+    lm = _make_lm(monkeypatch)
+    opt = Optimizer(
+        model=lm,
+        max_iterations=1,
+        trace_reflection=False,
+        output_dir=str(tmp_path / "run"),
+    )
+    captured = {}
+
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+        captured["config"] = config
+        _seed_database(output_dir, num_islands=config.database.num_islands)
+
+    with patch("reps.runner.run_reps", new=fake_run_reps):
+        opt.optimize("def predict(x):\n    return x\n", objective=_objective())
+
+    assert captured["config"].reps.trace_reflection.enabled is False
+
+
+def test_optimize_evaluate_does_not_auto_enable_trace_reflection(monkeypatch, tmp_path):
+    """A raw `evaluate=` callable may emit no feedback at all — leave
+    trace_reflection off by default for that path."""
+    lm = _make_lm(monkeypatch)
+    opt = Optimizer(model=lm, max_iterations=1, output_dir=str(tmp_path / "run"))
+    captured = {}
+
+    async def fake_run_reps(*, config, initial_program, evaluator, output_dir):
+        captured["config"] = config
+        _seed_database(output_dir, num_islands=config.database.num_islands)
+
+    with patch("reps.runner.run_reps", new=fake_run_reps):
+        opt.optimize("seed", lambda c: 0.5)
+
+    assert captured["config"].reps.trace_reflection.enabled is False

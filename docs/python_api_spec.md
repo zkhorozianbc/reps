@@ -183,7 +183,7 @@ reps.Optimizer(
     # GEPA-style features (Phases 1-5)
     selection_strategy: str = "map_elites",     # "map_elites" | "pareto" | "mixed"
     pareto_fraction: float = 0.0,               # for "mixed"
-    trace_reflection: bool = False,             # Phase 3
+    trace_reflection: bool | None = None,       # Phase 3; None auto-enables for objective=
     lineage_depth: int = 3,                     # Phase 5
     merge: bool = False,                        # Phase 4
 
@@ -290,6 +290,11 @@ and returns an `EvaluationResult` in higher-is-better `combined_score` space.
 - `reps.LLMJudge(entrypoint=, train_set=, rubric=, model=, scale=)` — an
   `Objective` subclass that scores subjective outputs with an LLM judge,
   configurable independently of the mutation model. Judge calls are cached.
+
+Passing `objective=` defaults `trace_reflection` on (an objective always
+emits per-example feedback the reflection path consumes; an explicit
+`trace_reflection=True/False` still wins). A raw `evaluate=` callable leaves
+it off — it may emit no feedback at all.
 
 The full contract is specified in
 [`docs/objective_api_spec.md`](objective_api_spec.md).

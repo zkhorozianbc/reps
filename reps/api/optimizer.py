@@ -66,7 +66,11 @@ class Optimizer:
         # GEPA-style features (Phases 1-5)
         selection_strategy: str = "map_elites",
         pareto_fraction: float = 0.0,
-        trace_reflection: bool = False,
+        # `None` (default) means "auto": resolved at optimize() time — on for
+        # objective= runs (they always emit per-example feedback the
+        # reflection path consumes), off for evaluate= runs. An explicit
+        # True/False always wins.
+        trace_reflection: Optional[bool] = None,
         lineage_depth: int = 3,
         merge: bool = False,
         minibatch_size: Optional[int] = None,
@@ -109,7 +113,12 @@ class Optimizer:
         self.max_iterations = max_iterations
         self.selection_strategy = selection_strategy
         self.pareto_fraction = pareto_fraction
-        self.trace_reflection_enabled = trace_reflection
+        # `trace_reflection_enabled` holds the constructor-resolved value
+        # (False unless explicitly True); `_trace_reflection_explicit`
+        # records whether the user pinned it, so optimize() knows when it
+        # may auto-enable it for an objective= run.
+        self._trace_reflection_explicit = trace_reflection is not None
+        self.trace_reflection_enabled = bool(trace_reflection)
         self.lineage_depth = lineage_depth
         self.merge_enabled = merge
         self.minibatch_size = minibatch_size
@@ -147,6 +156,8 @@ class Optimizer:
         instance.selection_strategy = cfg.database.selection_strategy
         instance.pareto_fraction = cfg.database.pareto_fraction
         instance.trace_reflection_enabled = cfg.reps.trace_reflection.enabled
+        # from_config users have fully specified the Config — never auto-override.
+        instance._trace_reflection_explicit = True
         instance.lineage_depth = cfg.reps.trace_reflection.lineage_depth
         instance.merge_enabled = cfg.reps.merge.enabled
         instance.minibatch_size = getattr(cfg.evaluator, "minibatch_size", None)
@@ -204,6 +215,12 @@ class Optimizer:
                 "`evaluate=`, not both."
             )
 
+        # `trace_reflection=None` resolves here: an objective always emits
+        # per-example feedback + per-instance scores that the reflection
+        # path consumes, so default it on for objective= runs. A raw
+        # evaluate= callable may emit nothing, so it stays off.
+        trace_reflection = self.trace_reflection_enabled
+
         if objective is not None:
             from reps.api.objective import Objective
 
@@ -213,6 +230,8 @@ class Optimizer:
                     f"reps.Objective (or reps.LLMJudge), got "
                     f"{type(objective).__name__}."
                 )
+            if not self._trace_reflection_explicit:
+                trace_reflection = True
             evaluate = objective.evaluate
 
         if not callable(evaluate):
@@ -224,7 +243,11 @@ class Optimizer:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self._aoptimize_internal(initial, evaluate, seed=seed))
+            return asyncio.run(
+                self._aoptimize_internal(
+                    initial, evaluate, seed=seed, trace_reflection=trace_reflection
+                )
+            )
         raise RuntimeError(
             "reps.Optimizer.optimize() cannot be called from an async context. "
             "Use aoptimize() (v1.5) or asyncio.run() yourself on a new loop."
@@ -240,6 +263,7 @@ class Optimizer:
         evaluate: Callable[..., Any],
         *,
         seed: Optional[int] = None,
+        trace_reflection: Optional[bool] = None,
     ) -> OptimizationResult:
         # Late import to avoid circular dep at module-import time
         # (runner imports controller imports config imports api.model).
@@ -264,7 +288,7 @@ class Optimizer:
 
         registry_id = register_user_evaluate(evaluate)
         evaluator_path = write_shim(run_dir, registry_id=registry_id)
-        cfg = self._build_config(seed=seed)
+        cfg = self._build_config(seed=seed, trace_reflection=trace_reflection)
 
         try:
             await run_reps(
@@ -285,12 +309,18 @@ class Optimizer:
     # Config construction
     # ---------------------------------------------------------------- #
 
-    def _build_config(self, *, seed: Optional[int]) -> Config:
+    def _build_config(
+        self, *, seed: Optional[int], trace_reflection: Optional[bool] = None
+    ) -> Config:
         """Build a `Config` from the constructor kwargs.
 
         When `from_config` was used, a ready-made `Config` is already
         stored on `self._config` — we honor it and only stamp on the
         deterministic seed.
+
+        `trace_reflection` is the optimize()-resolved value (objective= runs
+        default it on); `None` falls back to the constructor-resolved
+        `self.trace_reflection_enabled`.
         """
         if self._config is not None:
             cfg = self._config
@@ -299,18 +329,24 @@ class Optimizer:
                 cfg.database.random_seed = seed
             return cfg
 
+        effective_trace_reflection = (
+            self.trace_reflection_enabled
+            if trace_reflection is None
+            else trace_reflection
+        )
+
         cfg = Config()
         cfg.max_iterations = self.max_iterations
         cfg.database.selection_strategy = self.selection_strategy
         cfg.database.pareto_fraction = self.pareto_fraction
         cfg.database.num_islands = self.num_islands
-        cfg.reps.trace_reflection.enabled = self.trace_reflection_enabled
+        cfg.reps.trace_reflection.enabled = effective_trace_reflection
         cfg.reps.trace_reflection.lineage_depth = self.lineage_depth
         cfg.reps.merge.enabled = self.merge_enabled
         cfg.evaluator.minibatch_size = self.minibatch_size
 
         # Master switch — Phase 3/4 features won't fire without it.
-        if self.trace_reflection_enabled or self.merge_enabled:
+        if effective_trace_reflection or self.merge_enabled:
             cfg.reps.enabled = True
 
         # LLM: drop the LM into models[0]. Provider routing matches the LM.
