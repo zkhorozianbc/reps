@@ -161,17 +161,19 @@ print()
 
 
 # --------------------------------------------------------------------------- #
-# REPS side — general design: REPS evolves arbitrary Python; the evolved
-# `solve(question)` calls `reps.runtime.llm(...)` at inference time. The
-# harness owns the client + credentials; the candidate owns *what to ask*.
-# Mutation workers (single_call SEARCH/REPLACE, anthropic_tool_runner,
-# openai_tool_runner, …) edit the Python freely — including the prompts
-# embedded as string literals, parsing logic, retries, few-shot demos.
+# REPS side — general design: REPS evolves a PROMPT TEMPLATE directly.
+# The seed is a natural-language string with a `{question}` placeholder;
+# REPS' mutation worker (single_call SEARCH/REPLACE on the artifact text)
+# improves the prompt. At evaluation each train example's `question`
+# fills the placeholder, the LLM is called, and the metric scores the
+# response. No `exec`, no `reps.runtime.llm` — `reps.PromptObjective`
+# owns inference. This validates that the artifact-agnostic mutation
+# templates produce a PROMPT (not Python) when handed a prompt seed.
 # --------------------------------------------------------------------------- #
 
 
 print("=" * 60)
-print(f"REPS: Objective.maximize(...) + reps.runtime.llm, defaults, "
+print(f"REPS: PromptObjective.maximize(...), defaults, "
       f"{REPS_ITERATIONS} iterations")
 print("=" * 60)
 
@@ -183,28 +185,21 @@ def reps_per_example_metric(example, pred, trace=None) -> float:
 # dspy.Example -> reps.Example via the dict-like protocol REPS accepts.
 reps_train = [reps.Example(ex).with_inputs("question") for ex in train_examples]
 
-reps_objective = reps.Objective.maximize(
-    entrypoint="solve",
+reps_objective = reps.PromptObjective.maximize(
     train_set=reps_train,
     metric=reps_per_example_metric,
+    model=MODEL_ID,
+    parse=lambda out: str(parse_integer_answer(out, only_first_line=False)),
 )
 
-# Seed: pure Python. REPS evolves the *Python* — the embedded prompt
-# string, the call shape, any post-processing — using its native edit
-# machinery. `reps.runtime.llm` is configured by the Optimizer for this run.
-SEED = """\
-from reps.runtime import llm
-
-
-def solve(question):
-    prompt = (
-        "Solve the grade-school math problem below. Show your reasoning, "
-        "then output the final numerical answer on the last line.\\n\\n"
-        f"Question: {question}\\n"
-        "Answer:"
-    )
-    return llm(prompt)
-"""
+# Seed: a PROMPT TEMPLATE with a `{question}` placeholder — not Python.
+# REPS evolves the prompt string itself (instructions, format, demos).
+SEED = (
+    "Solve the grade-school math problem below. Show your reasoning step by "
+    "step, then output the final numerical answer on the last line.\n\n"
+    "Question: {question}\n"
+    "Answer:"
+)
 
 t0 = time.time()
 reps_run = reps.Optimizer(
@@ -218,29 +213,19 @@ print(f"  REPS best_score (train): {reps_run.best_score}")
 print(f"  REPS best_metrics (train): {reps_run.best_metrics}")
 print(f"  REPS total_tokens: {reps_run.total_tokens}")
 
-# Build a predict_fn from the evolved PYTHON.
-_ns: dict = {}
-exec(reps_run.best_code, _ns)  # noqa: S102
-
-# The evolved code calls reps.runtime.llm; configure it for inference.
-from reps.runtime import set_current_llm, reset_current_llm  # noqa: E402
-
+# Build a predict_fn from the evolved PROMPT TEMPLATE.
 _inference_lm = reps.Model(MODEL_ID, temperature=0.0)
-_inference_token = set_current_llm(_inference_lm)
 
 
 def reps_predict(question: str) -> str:
     try:
-        return str(_ns["solve"](question))
+        return _inference_lm(reps_run.best_code.format(question=question))
     except Exception as exc:  # noqa: BLE001
         return f"<exception: {type(exc).__name__}: {exc}>"
 
 
 t0 = time.time()
-try:
-    reps_result = evaluate_on_test(reps_predict, "REPS Objective + runtime.llm")
-finally:
-    reset_current_llm(_inference_token)
+reps_result = evaluate_on_test(reps_predict, "REPS PromptObjective")
 reps_eval_time = time.time() - t0
 print(
     f"  REPS test: {reps_result['correct']}/{reps_result['total']} = "
@@ -261,9 +246,20 @@ print("=" * 60)
 print(f"  DSPy CoT+BootstrapFewShot : {dspy_result['accuracy']:.1%}  "
       f"({dspy_result['correct']}/{dspy_result['total']}, "
       f"compile {dspy_compile_time:.1f}s + eval {dspy_eval_time:.1f}s)")
-print(f"  REPS Objective + runtime.llm : {reps_result['accuracy']:.1%}  "
+print(f"  REPS PromptObjective.maximize(...) : {reps_result['accuracy']:.1%}  "
       f"({reps_result['correct']}/{reps_result['total']}, "
       f"optimize {reps_compile_time:.1f}s + eval {reps_eval_time:.1f}s)")
 print()
+
+# Sanity assertions: the artifact-agnostic templates must produce a PROMPT, not Python.
+assert "{question}" in reps_run.best_code, (
+    "Expected the evolved artifact to be a prompt template (still containing "
+    f"{{question}}), got:\n{reps_run.best_code}"
+)
+assert "def " not in reps_run.best_code, (
+    "Expected a prompt template; got something that looks like Python code:\n"
+    f"{reps_run.best_code}"
+)
+
 print("--- REPS best_code ---")
 print(reps_run.best_code)
