@@ -31,6 +31,14 @@ may include breaking changes; only patch bumps are safe to consume blindly.
   the metric. REPS' mutation worker then evolves the prompt itself —
   putting REPS in the same optimization space as DSPy's
   prompt-tuning optimizers (BootstrapFewShot, MIPROv2, …).
+- `reps.runtime.llm(prompt, **kwargs) -> str` — the general LLM-in-evolved-code
+  primitive. The Optimizer configures it for the run (via a contextvar that
+  propagates to executor threads). Candidate Python imports it
+  (`from reps.runtime import llm`) and calls it however it wants — one-shot,
+  chained, with retries, with few-shot embedded — and REPS evolves the
+  Python freely using its native edit machinery (SEARCH/REPLACE,
+  anthropic/openai tool runners, full rewrites). Strictly more general
+  than `PromptObjective`'s single-template-with-`{field}` shape.
 
 ### Changed
 - `Optimizer.optimize` accepts `objective=` (a `reps.Objective` / `LLMJudge`)

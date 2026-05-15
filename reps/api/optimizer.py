@@ -290,6 +290,14 @@ class Optimizer:
         evaluator_path = write_shim(run_dir, registry_id=registry_id)
         cfg = self._build_config(seed=seed, trace_reflection=trace_reflection)
 
+        # Expose the Optimizer's LLM to candidate code via reps.runtime.llm().
+        # Evolved Python that wants to call an LLM at inference time
+        # (prompt-tuning-style tasks like GSM8K) imports `llm` from
+        # reps.runtime — the harness owns the client, the candidate owns what
+        # to ask. ContextVar propagates to executor threads via context.run.
+        from reps.runtime import set_current_llm, reset_current_llm
+
+        llm_token = set_current_llm(self.model)
         try:
             await run_reps(
                 config=cfg,
@@ -301,6 +309,7 @@ class Optimizer:
                 run_dir, cfg=cfg, persisted_output=persisted_output
             )
         finally:
+            reset_current_llm(llm_token)
             unregister_user_evaluate(registry_id)
             if cleanup_tempdir is not None:
                 cleanup_tempdir.cleanup()

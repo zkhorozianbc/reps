@@ -118,25 +118,38 @@ Scores reaching the REPS engine are always higher-is-better:
 `combined_score = -loss` internally.
 
 For tasks where you want the LLM to do the reasoning at inference time
-(GSM8K, multi-hop QA, classification with LLM priors), use
-`reps.PromptObjective` instead of `Objective`. The artifact REPS optimizes is
-a **prompt template string** (not Python code) — at evaluation the harness
-fills `{field}` placeholders with each example's inputs, calls a configured
-inference-time LLM, and scores the response with your metric. REPS' mutation
-worker evolves the prompt itself:
+(GSM8K, multi-hop QA, classification with LLM priors), have the evolved
+Python call an LLM directly. `reps.runtime.llm` is configured for the run by
+the Optimizer and is available to candidate code:
 
 ```python
+seed = """
+from reps.runtime import llm
+
+def solve(question):
+    return llm(
+        "Solve this math problem. Output only the final number.\\n\\n"
+        f"Question: {question}\\nAnswer:"
+    )
+"""
+
 result = reps.Optimizer(model="openrouter/anthropic/claude-sonnet-4.6").optimize(
-    initial="Solve this math problem. Output the final number.\n\nQuestion: {question}\nAnswer:",
-    objective=reps.PromptObjective.maximize(
+    initial=seed,
+    objective=reps.Objective.maximize(
+        entrypoint="solve",
         train_set=[reps.Example(row).with_inputs("question") for row in gsm.train[:20]],
         metric=my_metric,
-        model="openrouter/anthropic/claude-sonnet-4.6",  # the inference-time LLM
-        parse=lambda out: extract_number(out),           # optional output transform
     ),
 )
-# result.best_code is the optimized PROMPT STRING.
 ```
+
+REPS evolves the *Python* — the embedded prompt, the call shape, parsing,
+retries, few-shot demos — with its native edit machinery (SEARCH/REPLACE,
+the `anthropic_tool_runner`/`openai_tool_runner` tool-based workers, full
+rewrites). The harness owns credentials and token tracking; the candidate
+owns *what to ask*. For the simplest "just a prompt template" case, see
+`reps.PromptObjective` — a thin convenience around this pattern with a
+fixed `{field}`-substitution shape.
 
 DSPy interop is direct — `reps.Example` accepts any dict-like object, so a
 `dspy.Example` from a built-in dataset drops straight into a `train_set`:
