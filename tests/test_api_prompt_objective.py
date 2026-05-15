@@ -90,7 +90,9 @@ def test_evaluate_fills_placeholders_and_calls_llm():
     assert result.metrics["validity"] == 1.0
     assert result.per_instance_scores == {"train/0": 1.0, "train/1": 1.0}
     # Both prompts were the template with the example's inputs substituted.
-    assert seen == ["Q: 2+2?\nA:", "Q: 3+5?\nA:"]
+    # Per-example LLM calls run concurrently, so completion order is
+    # non-deterministic — assert the set of calls, not their sequence.
+    assert sorted(seen) == sorted(["Q: 2+2?\nA:", "Q: 3+5?\nA:"])
 
 
 def test_evaluate_runs_parse_before_scoring():

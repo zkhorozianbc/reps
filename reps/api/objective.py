@@ -573,6 +573,7 @@ class PromptObjective(Objective):
         model: "str | Callable[[str], str]",
         parse: "Callable[[str], Any] | None" = None,
         failure_score: float = 0.0,
+        parallel_calls: int = 20,
     ) -> None:
         # PromptObjective doesn't `exec` Python code, so there's no entrypoint
         # — pass a sentinel that satisfies Objective's validator. Never used.
@@ -585,10 +586,16 @@ class PromptObjective(Objective):
             aggregate_fn=aggregate_fn,
             failure_score=failure_score,
         )
+        if parallel_calls < 1:
+            raise ValueError(
+                f"reps.PromptObjective: parallel_calls must be >= 1, "
+                f"got {parallel_calls}"
+            )
         self._model_spec = model
         self._parse = parse
         self._llm_callable: "Callable[[str], str] | None" = None
         self._cache: dict[tuple, str] = {}
+        self._parallel_calls = parallel_calls
 
     @classmethod
     def maximize(
@@ -599,6 +606,7 @@ class PromptObjective(Objective):
         model: "str | Callable[[str], str]",
         parse: "Callable[[str], Any] | None" = None,
         failure_score: float = 0.0,
+        parallel_calls: int = 20,
     ) -> "PromptObjective":
         name, per_ex, agg = _resolve_metric(metric, "maximize")
         return cls(
@@ -610,6 +618,7 @@ class PromptObjective(Objective):
             model=model,
             parse=parse,
             failure_score=failure_score,
+            parallel_calls=parallel_calls,
         )
 
     @classmethod
@@ -621,6 +630,7 @@ class PromptObjective(Objective):
         model: "str | Callable[[str], str]",
         parse: "Callable[[str], Any] | None" = None,
         failure_score: float = 0.0,
+        parallel_calls: int = 20,
     ) -> "PromptObjective":
         name, per_ex, agg = _resolve_metric(metric, "minimize")
         return cls(
@@ -632,6 +642,7 @@ class PromptObjective(Objective):
             model=model,
             parse=parse,
             failure_score=failure_score,
+            parallel_calls=parallel_calls,
         )
 
     def evaluate(self, prompt_template: str) -> EvaluationResult:
@@ -640,51 +651,88 @@ class PromptObjective(Objective):
         Fully overrides `Objective.evaluate` — there's no Python `exec`, just
         an LLM call. All per-call state is local so the same `PromptObjective`
         instance is safe to use across concurrent evaluations.
+
+        Per-example LLM calls run **concurrently** via a `ThreadPoolExecutor`
+        (`parallel_calls` workers, default 20). Each call is independent —
+        same template filled with different inputs — and `reps.Model.generate`
+        is sync-and-thread-safe (each call uses its own asyncio.run on the
+        executor thread). The order of `raw` / `failures` / `detail` is
+        preserved (per-example, train-set order) so the mutator's feedback
+        stays sensible.
         """
+        from concurrent.futures import ThreadPoolExecutor
+
         template_hash = _hash_text(prompt_template)
         model_key = self._model_key()
         llm = self._get_llm()
 
+        # Pass 1: build per-example work items. Template formatting is cheap
+        # and serial; LLM calls (the expensive part) are concurrent below.
+        work: list[dict[str, Any]] = []
+        for i, ex in enumerate(self.train_set):
+            item: dict[str, Any] = {
+                "ex": ex,
+                "key": self._example_key(ex, i),
+                "expected": ex.get("answer"),
+            }
+            inputs = ex.inputs().to_dict()
+            try:
+                item["filled"] = prompt_template.format(**inputs)
+                item["format_error"] = None
+            except (KeyError, IndexError, ValueError) as exc:
+                item["filled"] = None
+                item["format_error"] = exc
+            work.append(item)
+
+        # Pass 2: issue LLM calls concurrently. Cache hits short-circuit to
+        # the cached output without an LLM call.
+        def call_one(it: dict[str, Any]):
+            if it["format_error"] is not None:
+                return it, None, None
+            cache_key = (template_hash, it["key"], model_key)
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                return it, cached, None
+            try:
+                output = llm(it["filled"])
+            except Exception as exc:  # noqa: BLE001 - LLM errors are expected
+                return it, None, exc
+            self._cache[cache_key] = output
+            return it, output, None
+
+        max_workers = max(1, min(self._parallel_calls, len(work)))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            outcomes = list(pool.map(call_one, work))
+
+        # Pass 3: score and accumulate, preserving per-example order.
         raw: list[tuple[str, float]] = []
         failures: list[str] = []
         detail: list[str] = []
-        for i, ex in enumerate(self.train_set):
-            key = self._example_key(ex, i)
-            inputs = ex.inputs().to_dict()
-            expected = ex.get("answer")
-            try:
-                filled = prompt_template.format(**inputs)
-            except (KeyError, IndexError, ValueError) as exc:
+        for item, output, llm_err in outcomes:
+            key = item["key"]
+            expected = item["expected"]
+            if item["format_error"] is not None:
                 raw.append((key, self.failure_score))
-                failures.append(f"{key}: template format failed: {exc}")
+                failures.append(f"{key}: template format failed: {item['format_error']}")
                 detail.append(
-                    f"{key}: template format failed: {exc} | expected {expected!r}"
+                    f"{key}: template format failed: {item['format_error']} | "
+                    f"expected {expected!r}"
                 )
                 continue
-
-            cache_key = (template_hash, key, model_key)
-            cached = self._cache.get(cache_key)
-            if cached is not None:
-                output = cached
-            else:
-                try:
-                    output = llm(filled)
-                except Exception as exc:  # noqa: BLE001 - LLM errors are expected
-                    raw.append((key, self.failure_score))
-                    failures.append(
-                        f"{key}: LLM call failed: {type(exc).__name__}: {exc}"
-                    )
-                    detail.append(
-                        f"{key}: LLM call failed: {type(exc).__name__}: {exc} | "
-                        f"expected {expected!r}"
-                    )
-                    continue
-                self._cache[cache_key] = output
-
+            if llm_err is not None:
+                raw.append((key, self.failure_score))
+                failures.append(
+                    f"{key}: LLM call failed: {type(llm_err).__name__}: {llm_err}"
+                )
+                detail.append(
+                    f"{key}: LLM call failed: {type(llm_err).__name__}: {llm_err} | "
+                    f"expected {expected!r}"
+                )
+                continue
             try:
                 parsed = self._parse(output) if self._parse else output
                 prediction = as_prediction(parsed)
-                value = float(self._per_example_fn(ex, prediction, None))
+                value = float(self._per_example_fn(item["ex"], prediction, None))
                 detail.append(
                     f"{key}: LLM -> {prediction.get('answer')!r} | "
                     f"expected {expected!r} | {self.metric_name} {value:g}"
