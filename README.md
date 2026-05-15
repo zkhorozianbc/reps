@@ -117,6 +117,19 @@ Scores reaching the REPS engine are always higher-is-better:
 `Objective.minimize` stores the raw loss in `best_metrics` and uses
 `combined_score = -loss` internally.
 
+DSPy interop is direct — `reps.Example` accepts any dict-like object, so a
+`dspy.Example` from a built-in dataset drops straight into a `train_set`:
+
+```python
+from dspy.datasets import HotPotQA
+ds = HotPotQA(train_seed=1, train_size=5, eval_seed=2023, dev_size=0, test_size=0)
+objective = reps.Objective.maximize(
+    entrypoint="answer",
+    train_set=[reps.Example(row).with_inputs("question") for row in ds.train],
+    metric="exact_match",
+)
+```
+
 For full control, pass a raw `evaluate=` callable instead of `objective=` —
 the power-user escape hatch. It accepts candidate code and returns a score:
 

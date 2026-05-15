@@ -13,11 +13,15 @@ may include breaking changes; only patch bumps are safe to consume blindly.
 ### Added
 - `reps.Example` and `reps.Prediction` — DSPy-inspired data primitives with
   explicit input keys, dot/item access, and `.with_inputs()` / `.inputs()` /
-  `.labels()`.
+  `.labels()`. `reps.Example` accepts any dict-like object (`keys()` +
+  `__getitem__`), so a `dspy.Example` from a DSPy built-in dataset
+  (`Colors`, `HotPotQA`, …) drops straight in.
 - `reps.Objective` — compiles a seed `entrypoint` + `train_set` + `metric`
   into the evaluator contract; `Objective.maximize` / `Objective.minimize`
   classmethods with built-in metrics (`accuracy`, `exact_match`, `mae`,
-  `mse`, `rmse`) and custom metric callables.
+  `mse`, `rmse`) and custom metric callables. `EvaluationResult.feedback`
+  now carries a per-example `input → predicted vs expected → metric`
+  breakdown (for both maximize and minimize), not just aggregate losses.
 - `reps.LLMJudge` — an `Objective` that scores subjective outputs with an
   LLM judge, with a configurable rubric, scale, and judge model.
 
@@ -35,6 +39,9 @@ may include breaking changes; only patch bumps are safe to consume blindly.
 ### Removed
 
 ### Fixed
+- `Optimizer.optimize` returns `combined_score=0.0` (not `-0.0`) for a
+  perfect minimize objective — IEEE 754 negative zero from unary negation
+  was a cosmetic wart in the public headline number.
 
 ### Security
 
