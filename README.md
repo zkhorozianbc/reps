@@ -117,6 +117,27 @@ Scores reaching the REPS engine are always higher-is-better:
 `Objective.minimize` stores the raw loss in `best_metrics` and uses
 `combined_score = -loss` internally.
 
+For tasks where you want the LLM to do the reasoning at inference time
+(GSM8K, multi-hop QA, classification with LLM priors), use
+`reps.PromptObjective` instead of `Objective`. The artifact REPS optimizes is
+a **prompt template string** (not Python code) — at evaluation the harness
+fills `{field}` placeholders with each example's inputs, calls a configured
+inference-time LLM, and scores the response with your metric. REPS' mutation
+worker evolves the prompt itself:
+
+```python
+result = reps.Optimizer(model="openrouter/anthropic/claude-sonnet-4.6").optimize(
+    initial="Solve this math problem. Output the final number.\n\nQuestion: {question}\nAnswer:",
+    objective=reps.PromptObjective.maximize(
+        train_set=[reps.Example(row).with_inputs("question") for row in gsm.train[:20]],
+        metric=my_metric,
+        model="openrouter/anthropic/claude-sonnet-4.6",  # the inference-time LLM
+        parse=lambda out: extract_number(out),           # optional output transform
+    ),
+)
+# result.best_code is the optimized PROMPT STRING.
+```
+
 DSPy interop is direct — `reps.Example` accepts any dict-like object, so a
 `dspy.Example` from a built-in dataset drops straight into a `train_set`:
 

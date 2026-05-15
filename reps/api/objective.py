@@ -525,3 +525,201 @@ class LLMJudge(Objective):
             f"reps.LLMJudge: could not parse a numeric score from judge "
             f"response: {response[:200]!r}"
         )
+
+
+class PromptObjective(Objective):
+    """An `Objective` whose artifact is a prompt template string.
+
+    The seed passed to `Optimizer.optimize(initial=...)` is a prompt template
+    with `{field}` placeholders (Python `str.format` style) — *not* Python
+    code. At evaluation:
+
+      1. The harness substitutes each example's `.inputs()` into the template.
+      2. Calls the configured LLM with the filled prompt.
+      3. Wraps the raw response as `Prediction(answer=output)` — or, if `parse=`
+         is provided, as `Prediction(answer=parse(output))`.
+      4. Scores with the metric callable / built-in.
+
+    REPS' mutation worker then evolves the *prompt itself* — instructions,
+    demonstrations, output format, etc. — putting REPS in the same
+    optimization space as DSPy's prompt-tuning optimizers.
+
+        seed = "Solve this problem. Output only the final number.\\n\\n" \\
+               "Question: {question}\\nAnswer:"
+        objective = reps.PromptObjective.maximize(
+            train_set=[reps.Example(row).with_inputs("question") for row in gsm.train[:20]],
+            metric=gsm8k_metric,                                 # any metric — "whatever"
+            model="openrouter/anthropic/claude-sonnet-4.6",      # inference-time LLM
+            parse=lambda out: str(parse_integer_answer(out)),    # raw output -> compared value
+        )
+        result = reps.Optimizer(model="openrouter/anthropic/claude-sonnet-4.6") \\
+                     .optimize(initial=seed, objective=objective)
+        # result.best_code is the optimized PROMPT STRING.
+
+    `model` accepts the same shape as `LLMJudge`'s: a model-name string (a
+    `reps.Model` is built lazily on first use) or any `(prompt: str) -> str`
+    callable (e.g. a `reps.Model` instance, or a fake for tests). LLM calls
+    are cached by `(template_hash, example_key, model_key)`.
+    """
+
+    def __init__(
+        self,
+        *,
+        train_set: "Sequence[Example | Mapping[str, Any]]",
+        direction: str,
+        metric_name: str,
+        per_example_fn: "MetricCallable | None",
+        aggregate_fn: Callable[[Sequence[float]], float],
+        model: "str | Callable[[str], str]",
+        parse: "Callable[[str], Any] | None" = None,
+        failure_score: float = 0.0,
+    ) -> None:
+        # PromptObjective doesn't `exec` Python code, so there's no entrypoint
+        # — pass a sentinel that satisfies Objective's validator. Never used.
+        super().__init__(
+            entrypoint="<prompt-template>",
+            train_set=train_set,
+            direction=direction,
+            metric_name=metric_name,
+            per_example_fn=per_example_fn,
+            aggregate_fn=aggregate_fn,
+            failure_score=failure_score,
+        )
+        self._model_spec = model
+        self._parse = parse
+        self._llm_callable: "Callable[[str], str] | None" = None
+        self._cache: dict[tuple, str] = {}
+
+    @classmethod
+    def maximize(
+        cls,
+        *,
+        train_set: "Sequence[Example | Mapping[str, Any]]",
+        metric: "str | MetricCallable",
+        model: "str | Callable[[str], str]",
+        parse: "Callable[[str], Any] | None" = None,
+        failure_score: float = 0.0,
+    ) -> "PromptObjective":
+        name, per_ex, agg = _resolve_metric(metric, "maximize")
+        return cls(
+            train_set=train_set,
+            direction="maximize",
+            metric_name=name,
+            per_example_fn=per_ex,
+            aggregate_fn=agg,
+            model=model,
+            parse=parse,
+            failure_score=failure_score,
+        )
+
+    @classmethod
+    def minimize(
+        cls,
+        *,
+        train_set: "Sequence[Example | Mapping[str, Any]]",
+        metric: "str | MetricCallable",
+        model: "str | Callable[[str], str]",
+        parse: "Callable[[str], Any] | None" = None,
+        failure_score: float = 0.0,
+    ) -> "PromptObjective":
+        name, per_ex, agg = _resolve_metric(metric, "minimize")
+        return cls(
+            train_set=train_set,
+            direction="minimize",
+            metric_name=name,
+            per_example_fn=per_ex,
+            aggregate_fn=agg,
+            model=model,
+            parse=parse,
+            failure_score=failure_score,
+        )
+
+    def evaluate(self, prompt_template: str) -> EvaluationResult:
+        """Fill the template per train example, call the LLM, score the output.
+
+        Fully overrides `Objective.evaluate` — there's no Python `exec`, just
+        an LLM call. All per-call state is local so the same `PromptObjective`
+        instance is safe to use across concurrent evaluations.
+        """
+        template_hash = _hash_text(prompt_template)
+        model_key = self._model_key()
+        llm = self._get_llm()
+
+        raw: list[tuple[str, float]] = []
+        failures: list[str] = []
+        detail: list[str] = []
+        for i, ex in enumerate(self.train_set):
+            key = self._example_key(ex, i)
+            inputs = ex.inputs().to_dict()
+            expected = ex.get("answer")
+            try:
+                filled = prompt_template.format(**inputs)
+            except (KeyError, IndexError, ValueError) as exc:
+                raw.append((key, self.failure_score))
+                failures.append(f"{key}: template format failed: {exc}")
+                detail.append(
+                    f"{key}: template format failed: {exc} | expected {expected!r}"
+                )
+                continue
+
+            cache_key = (template_hash, key, model_key)
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                output = cached
+            else:
+                try:
+                    output = llm(filled)
+                except Exception as exc:  # noqa: BLE001 - LLM errors are expected
+                    raw.append((key, self.failure_score))
+                    failures.append(
+                        f"{key}: LLM call failed: {type(exc).__name__}: {exc}"
+                    )
+                    detail.append(
+                        f"{key}: LLM call failed: {type(exc).__name__}: {exc} | "
+                        f"expected {expected!r}"
+                    )
+                    continue
+                self._cache[cache_key] = output
+
+            try:
+                parsed = self._parse(output) if self._parse else output
+                prediction = as_prediction(parsed)
+                value = float(self._per_example_fn(ex, prediction, None))
+                detail.append(
+                    f"{key}: LLM -> {prediction.get('answer')!r} | "
+                    f"expected {expected!r} | {self.metric_name} {value:g}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                value = self.failure_score
+                failures.append(f"{key}: scoring failed: {type(exc).__name__}: {exc}")
+                detail.append(
+                    f"{key}: scoring failed: {type(exc).__name__}: {exc} | "
+                    f"expected {expected!r}"
+                )
+            raw.append((key, value))
+
+        return self._build_result(raw=raw, failures=failures, detail=detail)
+
+    # --- LLM plumbing -------------------------------------------------------
+
+    def _model_key(self) -> str:
+        spec = self._model_spec
+        return spec if isinstance(spec, str) else repr(spec)
+
+    def _get_llm(self) -> "Callable[[str], str]":
+        """Resolve `model` into a `(prompt: str) -> str` callable, lazily."""
+        if self._llm_callable is not None:
+            return self._llm_callable
+        spec = self._model_spec
+        if callable(spec):
+            self._llm_callable = spec
+        elif isinstance(spec, str):
+            from reps.api.model import Model
+
+            self._llm_callable = Model(spec)
+        else:
+            raise TypeError(
+                f"reps.PromptObjective: `model` must be a model-name string or "
+                f"a `(prompt: str) -> str` callable, got {type(spec).__name__}"
+            )
+        return self._llm_callable

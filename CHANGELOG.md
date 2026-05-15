@@ -24,6 +24,13 @@ may include breaking changes; only patch bumps are safe to consume blindly.
   breakdown (for both maximize and minimize), not just aggregate losses.
 - `reps.LLMJudge` — an `Objective` that scores subjective outputs with an
   LLM judge, with a configurable rubric, scale, and judge model.
+- `reps.PromptObjective` — an `Objective` whose artifact is a *prompt
+  template string* (not Python code). At evaluation the harness fills
+  `{field}` placeholders with each example's inputs, calls a configured
+  inference-time LLM, optionally runs a `parse=` callable, and scores with
+  the metric. REPS' mutation worker then evolves the prompt itself —
+  putting REPS in the same optimization space as DSPy's
+  prompt-tuning optimizers (BootstrapFewShot, MIPROv2, …).
 
 ### Changed
 - `Optimizer.optimize` accepts `objective=` (a `reps.Objective` / `LLMJudge`)

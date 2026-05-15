@@ -61,6 +61,7 @@ v1.5 (see end of doc).
 | `reps.Prediction` | Dict-like wrapper for an entrypoint's output | [`reps/api/example.py`](../reps/api/example.py) |
 | `reps.Objective` | Compiles `(entrypoint, train_set, metric)` into the evaluator contract | [`reps/api/objective.py`](../reps/api/objective.py) |
 | `reps.LLMJudge` | `Objective` that scores with an LLM judge | [`reps/api/objective.py`](../reps/api/objective.py) |
+| `reps.PromptObjective` | `Objective` whose artifact is a *prompt template string*; REPS evolves the prompt | [`reps/api/objective.py`](../reps/api/objective.py) |
 | `reps.Optimizer` | The optimizer | [`reps/api/optimizer.py:42`](../reps/api/optimizer.py#L42) |
 | `reps.Optimizer.optimize(initial, evaluate)` | The single entry point | [`reps/api/optimizer.py:159`](../reps/api/optimizer.py#L159) |
 | `reps.Optimizer.from_config(cfg)` | Power-user escape hatch | [`reps/api/optimizer.py:123`](../reps/api/optimizer.py#L123) |
