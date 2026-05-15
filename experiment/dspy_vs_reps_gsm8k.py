@@ -161,14 +161,18 @@ print()
 
 
 # --------------------------------------------------------------------------- #
-# REPS side — PromptObjective: REPS evolves the PROMPT itself, the LLM does
-# the inference-time reasoning. Direct counterpart to DSPy's optimization
-# surface.
+# REPS side — general design: REPS evolves arbitrary Python; the evolved
+# `solve(question)` calls `reps.runtime.llm(...)` at inference time. The
+# harness owns the client + credentials; the candidate owns *what to ask*.
+# Mutation workers (single_call SEARCH/REPLACE, anthropic_tool_runner,
+# openai_tool_runner, …) edit the Python freely — including the prompts
+# embedded as string literals, parsing logic, retries, few-shot demos.
 # --------------------------------------------------------------------------- #
 
 
 print("=" * 60)
-print(f"REPS: PromptObjective.maximize(...), defaults, {REPS_ITERATIONS} iterations")
+print(f"REPS: Objective.maximize(...) + reps.runtime.llm, defaults, "
+      f"{REPS_ITERATIONS} iterations")
 print("=" * 60)
 
 
@@ -179,20 +183,28 @@ def reps_per_example_metric(example, pred, trace=None) -> float:
 # dspy.Example -> reps.Example via the dict-like protocol REPS accepts.
 reps_train = [reps.Example(ex).with_inputs("question") for ex in train_examples]
 
-reps_objective = reps.PromptObjective.maximize(
+reps_objective = reps.Objective.maximize(
+    entrypoint="solve",
     train_set=reps_train,
     metric=reps_per_example_metric,
-    model=MODEL_ID,  # the inference-time LLM (same as DSPy uses)
 )
 
-# Seed: a prompt TEMPLATE STRING (not Python). REPS' mutation worker evolves
-# the prompt itself; the harness fills {question}, calls the LLM at eval.
-SEED = (
-    "Solve the grade-school math problem below. Show your reasoning, "
-    "then output the final numerical answer on the last line.\n\n"
-    "Question: {question}\n"
-    "Answer:"
-)
+# Seed: pure Python. REPS evolves the *Python* — the embedded prompt
+# string, the call shape, any post-processing — using its native edit
+# machinery. `reps.runtime.llm` is configured by the Optimizer for this run.
+SEED = """\
+from reps.runtime import llm
+
+
+def solve(question):
+    prompt = (
+        "Solve the grade-school math problem below. Show your reasoning, "
+        "then output the final numerical answer on the last line.\\n\\n"
+        f"Question: {question}\\n"
+        "Answer:"
+    )
+    return llm(prompt)
+"""
 
 t0 = time.time()
 reps_run = reps.Optimizer(
@@ -206,17 +218,29 @@ print(f"  REPS best_score (train): {reps_run.best_score}")
 print(f"  REPS best_metrics (train): {reps_run.best_metrics}")
 print(f"  REPS total_tokens: {reps_run.total_tokens}")
 
-# Build a predict_fn from the evolved PROMPT.
+# Build a predict_fn from the evolved PYTHON.
+_ns: dict = {}
+exec(reps_run.best_code, _ns)  # noqa: S102
+
+# The evolved code calls reps.runtime.llm; configure it for inference.
+from reps.runtime import set_current_llm, reset_current_llm  # noqa: E402
+
 _inference_lm = reps.Model(MODEL_ID, temperature=0.0)
+_inference_token = set_current_llm(_inference_lm)
 
 
 def reps_predict(question: str) -> str:
-    prompt = reps_run.best_code.format(question=question)
-    return _inference_lm(prompt)
+    try:
+        return str(_ns["solve"](question))
+    except Exception as exc:  # noqa: BLE001
+        return f"<exception: {type(exc).__name__}: {exc}>"
 
 
 t0 = time.time()
-reps_result = evaluate_on_test(reps_predict, "REPS Objective.maximize")
+try:
+    reps_result = evaluate_on_test(reps_predict, "REPS Objective + runtime.llm")
+finally:
+    reset_current_llm(_inference_token)
 reps_eval_time = time.time() - t0
 print(
     f"  REPS test: {reps_result['correct']}/{reps_result['total']} = "
@@ -237,7 +261,7 @@ print("=" * 60)
 print(f"  DSPy CoT+BootstrapFewShot : {dspy_result['accuracy']:.1%}  "
       f"({dspy_result['correct']}/{dspy_result['total']}, "
       f"compile {dspy_compile_time:.1f}s + eval {dspy_eval_time:.1f}s)")
-print(f"  REPS Objective.maximize   : {reps_result['accuracy']:.1%}  "
+print(f"  REPS Objective + runtime.llm : {reps_result['accuracy']:.1%}  "
       f"({reps_result['correct']}/{reps_result['total']}, "
       f"optimize {reps_compile_time:.1f}s + eval {reps_eval_time:.1f}s)")
 print()
