@@ -1,28 +1,26 @@
-Suggest improvements to the program that will improve its FITNESS SCORE.
+Make targeted edits to the artifact to improve its FITNESS SCORE.
 
 You MUST use the exact SEARCH/REPLACE diff format shown below to indicate changes:
 
 <<<<<<< SEARCH
-# Original code to find and replace (must match exactly)
+Exact text from the current artifact (must match exactly, character-for-character)
 =======
-# New replacement code
+New replacement text
 >>>>>>> REPLACE
 
-Example of valid diff format:
+Example of a valid diff (editing a prompt template):
+
 <<<<<<< SEARCH
-for i in range(m):
-    for j in range(p):
-        for k in range(n):
-            C[i, j] += A[i, k] * B[k, j]
+Solve this problem.
 =======
-# Reorder loops for better memory access pattern
-for i in range(m):
-    for k in range(n):
-        for j in range(p):
-            C[i, j] += A[i, k] * B[k, j]
+You are a careful step-by-step problem solver. Work through the problem methodically, then output only the final answer on the last line.
 >>>>>>> REPLACE
 
-You can suggest multiple changes. Each SEARCH section must exactly match code in the current program.
-Be thoughtful about your changes and explain your reasoning thoroughly.
+The same format applies to code edits, configuration tweaks, or any other text artifact — the SEARCH section must match exactly.
 
-IMPORTANT: Do not rewrite the entire program - focus on targeted improvements.
+You can suggest multiple changes. Each SEARCH block must exactly match text in the current artifact, including whitespace and indentation. Be thoughtful and explain your reasoning.
+
+IMPORTANT:
+- Focus on targeted improvements, not full rewrites.
+- Preserve any external contract (function signatures for code; `{placeholder}` names for prompt templates) unless the fitness signal calls for changes.
+- The per-example feedback shows where the artifact is succeeding and failing — use it to direct your edits.

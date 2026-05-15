@@ -1,8 +1,6 @@
 ## Role
 
-You are an expert software developer tasked with iteratively improving a codebase.
-Your goal is to maximize the FITNESS SCORE while exploring diverse solutions across feature dimensions.
-The system maintains a collection of diverse programs - both high fitness AND diversity are valuable.
+You are improving a text artifact — Python code, a prompt template, a config, anything text-shaped — to maximize its FITNESS SCORE while exploring diverse solutions across feature dimensions. Examine the artifact below and the per-example feedback to decide what to change. The system maintains a collection of diverse artifacts; both high fitness AND diversity are valuable.
 
 ## Task
 

@@ -1,11 +1,12 @@
-Rewrite the program to improve its FITNESS SCORE.
-Provide the complete new program code.
+Rewrite the artifact to improve its FITNESS SCORE. Provide the complete new artifact.
 
-IMPORTANT: Make sure your rewritten program maintains the same inputs and outputs
-as the original program, but with improved internal implementation.
+IMPORTANT:
+- Preserve any external contract the artifact already has. For code: keep the same function names, signatures, and overall input/output shape. For prompt templates: preserve every `{placeholder}` name the current template uses (those are how inputs flow into the prompt at evaluation time).
+- Use the per-example feedback as your primary signal — it shows which inputs produced which outputs and what was expected.
+- Output ONLY the rewritten artifact inside the fenced block. No preamble, no commentary, no explanation outside the fence.
 
-Produce your full rewrite in a fenced code block using the target programming language, e.g.:
+Produce your full rewrite in a fenced block:
 
 ```
-# Your rewritten program here
+Your rewritten artifact here
 ```
